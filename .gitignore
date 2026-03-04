@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+frontend/dist/
+backend/dist/
+dist/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (except structure)
+**/data/*
+!**/data/.gitkeep
+!**/data/models/
+**/data/models/*
+!**/data/models/.gitkeep
+
+# External AI backends and dependencies
+external/*
+!external/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+.claude/

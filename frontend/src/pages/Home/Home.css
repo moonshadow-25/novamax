@@ -1,0 +1,67 @@
+.home-layout {
+  min-height: 100vh;
+}
+
+.home-header {
+  background: inherit;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.home-content {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.add-model-card {
+  border: 2px dashed rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 40px 20px;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.add-model-card:hover {
+  border-color: #1890ff;
+  background: rgba(24, 144, 255, 0.05);
+}
+
+.add-model-content {
+  text-align: center;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.add-icon {
+  font-size: 48px;
+  color: rgba(0, 0, 0, 0.4);
+  margin-bottom: 12px;
+}
+
+/* 深色主题 */
+[data-theme='dark'] .home-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .add-model-card {
+  border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+}
+
+[data-theme='dark'] .add-model-content {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+[data-theme='dark'] .add-icon {
+  color: rgba(255, 255, 255, 0.65) !important;
+}

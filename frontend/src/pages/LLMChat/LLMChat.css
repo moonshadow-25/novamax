@@ -1,0 +1,53 @@
+.llm-chat-layout {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.llm-chat-header {
+  background: inherit;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.llm-chat-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.messages-container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.message {
+  margin-bottom: 24px;
+  display: flex;
+  gap: 12px;
+}
+
+.message-role {
+  font-weight: 600;
+  min-width: 60px;
+  color: #1890ff;
+}
+
+.message.user .message-role {
+  color: #52c41a;
+}
+
+.message-content {
+  flex: 1;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.llm-chat-footer {
+  background: inherit;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 16px 24px;
+}

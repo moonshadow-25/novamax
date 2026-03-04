@@ -1,0 +1,87 @@
+.quantization-selector {
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* 自定义滚动条样式 */
+.quantization-selector::-webkit-scrollbar {
+  width: 8px;
+}
+
+.quantization-selector::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.quantization-selector::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.quantization-selector::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.quantization-category {
+  margin-bottom: 16px;
+}
+
+.category-header {
+  margin-bottom: 8px;
+}
+
+/* 量化版本列表项 */
+.quantization-item {
+  width: 100%;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  transition: all 0.3s;
+  background: #fff;
+}
+
+.quantization-item:hover {
+  border-color: #40a9ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.quantization-item.current {
+  border-color: #1890ff;
+  border-width: 2px;
+}
+
+.quantization-item.downloading {
+  border-color: #1890ff;
+}
+
+/* 深色主题适配 */
+[data-theme='dark'] .quantization-selector::-webkit-scrollbar-track {
+  background: #1f1f1f;
+}
+
+[data-theme='dark'] .quantization-selector::-webkit-scrollbar-thumb {
+  background: #434343;
+}
+
+[data-theme='dark'] .quantization-selector::-webkit-scrollbar-thumb:hover {
+  background: #595959;
+}
+
+[data-theme='dark'] .quantization-item {
+  background: #141414;
+  border-color: #434343;
+  color: #e0e0e0;
+}
+
+[data-theme='dark'] .quantization-item:hover {
+  border-color: #1890ff;
+  background: #1a1a1a;
+}
+
+[data-theme='dark'] .quantization-item.current {
+  border-color: #1890ff;
+}
+
+[data-theme='dark'] .quantization-item.downloading {
+  border-color: #1890ff;
+}

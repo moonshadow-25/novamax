@@ -1,0 +1,29 @@
+{
+  "name": "novamax-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "open": "^9.1.0",
+    "ws": "^8.14.0"
+  },
+  "pkg": {
+    "assets": [
+      "../../frontend/dist/**/*",
+      "../../data/**/*"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "../../dist"
+  }
+}

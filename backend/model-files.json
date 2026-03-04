@@ -1,0 +1,105 @@
+{
+  "success": true,
+  "files": [
+    {
+      "CommitMessage": "Upload Qwen3.5-35B-A3B-Q8_0.gguf to ModelScope hub",
+      "CommittedDate": 1772449399,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": false,
+      "Mode": "33188",
+      "Name": ".gitattributes",
+      "Path": ".gitattributes",
+      "Revision": "a5404cdd2531b9b647470ccd9d5f5d0d3987e25b",
+      "Sha256": "c7068f1fd6b48e862c3d52768499af70448b906330b544a21ff4b35aa3314c1d",
+      "Size": 2171,
+      "Type": "blob"
+    },
+    {
+      "CommitMessage": "System init configuration.json",
+      "CommittedDate": 1772436321,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": false,
+      "Mode": "33188",
+      "Name": "configuration.json",
+      "Path": "configuration.json",
+      "Revision": "a49663d56df300b059b46b325cacf1a19fa7b4dd",
+      "Sha256": "8fbd3c45576d536e5953c933bf7399d0ea57184032b4a98559461e1b285d74a8",
+      "Size": 49,
+      "Type": "blob"
+    },
+    {
+      "CommitMessage": "Upload mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf to ModelScope hub",
+      "CommittedDate": 1772446983,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": true,
+      "Mode": "33188",
+      "Name": "mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf",
+      "Path": "mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf",
+      "Revision": "39f0956fc2bfc4461929b08e170852991c510f2e",
+      "Sha256": "d341dec9104821b19d61634e6704a34c8e620aa6294dde1659e929deffe44676",
+      "Size": 902822240,
+      "Type": "blob"
+    },
+    {
+      "CommitMessage": "Upload Qwen3.5-35B-A3B-Q8_0.gguf to ModelScope hub",
+      "CommittedDate": 1772449399,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": true,
+      "Mode": "33188",
+      "Name": "Qwen3.5-35B-A3B-Q8_0.gguf",
+      "Path": "Qwen3.5-35B-A3B-Q8_0.gguf",
+      "Revision": "a5404cdd2531b9b647470ccd9d5f5d0d3987e25b",
+      "Sha256": "7ba74a85b1259958eb48467456901de3038d0c15d40627104ede5a1a9e0628ad",
+      "Size": 36903139616,
+      "Type": "blob"
+    },
+    {
+      "CommitMessage": "Update README.md",
+      "CommittedDate": 1772447357,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": false,
+      "Mode": "33188",
+      "Name": "README.md",
+      "Path": "README.md",
+      "Revision": "b85e11fb682d4547e2cdf9c5a026fdcfbd3270c0",
+      "Sha256": "e088e8682f61028df090c3b232494891c89bf9258a02191272c5951fc5102569",
+      "Size": 93146,
+      "Type": "blob"
+    }
+  ],
+  "ggufFiles": [
+    {
+      "CommitMessage": "Upload mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf to ModelScope hub",
+      "CommittedDate": 1772446983,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": true,
+      "Mode": "33188",
+      "Name": "mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf",
+      "Path": "mmproj-Qwen_Qwen3.5-35B-A3B-bf16.gguf",
+      "Revision": "39f0956fc2bfc4461929b08e170852991c510f2e",
+      "Sha256": "d341dec9104821b19d61634e6704a34c8e620aa6294dde1659e929deffe44676",
+      "Size": 902822240,
+      "Type": "blob"
+    },
+    {
+      "CommitMessage": "Upload Qwen3.5-35B-A3B-Q8_0.gguf to ModelScope hub",
+      "CommittedDate": 1772449399,
+      "CommitterName": "shoujiekeji",
+      "InCheck": false,
+      "IsLFS": true,
+      "Mode": "33188",
+      "Name": "Qwen3.5-35B-A3B-Q8_0.gguf",
+      "Path": "Qwen3.5-35B-A3B-Q8_0.gguf",
+      "Revision": "a5404cdd2531b9b647470ccd9d5f5d0d3987e25b",
+      "Sha256": "7ba74a85b1259958eb48467456901de3038d0c15d40627104ede5a1a9e0628ad",
+      "Size": 36903139616,
+      "Type": "blob"
+    }
+  ]
+}
