@@ -6,6 +6,7 @@ import modelManager from './modelManager.js';
 import configManager from './configManager.js';
 import { generateRouterCommand, generateSingleModelCommand } from './llmRunner.js';
 import presetService from './presetService.js';
+import comfyuiRunner from './comfyuiRunner.js';
 
 class ProcessManager {
   constructor() {
@@ -470,16 +471,16 @@ class ProcessManager {
     const externalPaths = configManager.get('external_paths');
 
     switch (model.type) {
-      case 'comfyui':
-        return spawn(
-          'python',
-          [
-            `${externalPaths.comfyui}/main.py`,
-            '--port', port.toString(),
-            '--listen', '127.0.0.1'
-          ],
-          { shell: true }
-        );
+      case 'comfyui': {
+        // 使用comfyuiRunner生成启动命令
+        const cmd = comfyuiRunner.generateCommand(model, port);
+        console.log(`启动ComfyUI: ${cmd.command} ${cmd.args.join(' ')}`);
+
+        return spawn(cmd.command, cmd.args, {
+          cwd: cmd.cwd,
+          shell: true
+        });
+      }
 
       case 'tts':
         return spawn(
@@ -526,6 +527,11 @@ class ProcessManager {
   cleanup(modelId) {
     const processInfo = this.processes.get(modelId);
     if (processInfo) {
+      // 如果是ComfyUI，清理配置文件
+      if (processInfo.type === 'comfyui') {
+        comfyuiRunner.cleanupConfig(modelId);
+      }
+
       this.allocatedPorts.delete(processInfo.port);
       this.processes.delete(modelId);
     }

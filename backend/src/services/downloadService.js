@@ -45,6 +45,16 @@ class DownloadService extends EventEmitter {
    * @param {string} quantizationName - 可选：指定要下载的量化版本
    */
   async startDownload(modelId, quantizationName = null) {
+    const model = modelManager.getById(modelId);
+    if (!model) {
+      throw new Error('模型不存在');
+    }
+
+    // 只处理LLM类型的模型，ComfyUI模型使用comfyuiDownloader
+    if (model.type !== 'llm') {
+      throw new Error(`此下载服务仅支持LLM模型，${model.type}类型请使用对应的下载服务`);
+    }
+
     // 检查是否有活跃下载，但允许暂停状态重新开始
     const existingDownload = downloadStateManager.getFullState(modelId);
     if (existingDownload && existingDownload.status !== 'paused') {
@@ -54,11 +64,6 @@ class DownloadService extends EventEmitter {
     // 如果是暂停状态，清理旧的下载状态
     if (existingDownload && existingDownload.status === 'paused') {
       downloadStateManager.deleteState(modelId);
-    }
-
-    const model = modelManager.getById(modelId);
-    if (!model) {
-      throw new Error('模型不存在');
     }
 
     // 如果指定了量化版本，临时设置它（仅用于下载，不影响当前使用的版本）

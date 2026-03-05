@@ -3,6 +3,7 @@ import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typogra
 import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
 import { modelscopeService } from '../../services/api';
 import ModelPreviewDialog from './ModelPreviewDialog';
+import AddWorkflowTab from './AddWorkflowTab';
 
 const { Text } = Typography;
 
@@ -178,133 +179,150 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         width={700}
         style={{ top: 20 }}
         bodyStyle={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}
+        destroyOnClose={true}
       >
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={[
-            { key: 'modelscope', label: 'ModelScope' },
-            { key: 'custom', label: '自定义' }
-          ]}
-        />
+        {/* ComfyUI类型使用特殊的工作流上传界面 */}
+        {type === 'comfyui' ? (
+          <AddWorkflowTab
+            onSuccess={(model) => {
+              message.success('工作流添加成功');
+              handleClose();
+              if (onSuccess) {
+                onSuccess(model);
+              }
+            }}
+            onClose={handleClose}
+          />
+        ) : (
+          <>
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={[
+                { key: 'modelscope', label: 'ModelScope' },
+                { key: 'custom', label: '自定义' }
+              ]}
+            />
 
-        {activeTab === 'modelscope' && (
-          <div>
-            <Space direction="vertical" style={{ width: '100%' }} size="large">
-              {/* 输入模式切换 */}
-              <Radio.Group
-                value={inputMode}
-                onChange={(e) => {
-                  setInputMode(e.target.value);
-                  setError('');
-                  setSearchResults([]);
-                }}
-              >
-                <Radio.Button value="url">URL 输入</Radio.Button>
-                <Radio.Button value="search">名称搜索</Radio.Button>
-              </Radio.Group>
-
-              {/* URL 输入模式 */}
-              {inputMode === 'url' && (
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input
-                    placeholder="https://www.modelscope.cn/models/owner/name"
-                    prefix={<LinkOutlined />}
-                    value={urlInput}
+            {activeTab === 'modelscope' && (
+              <div>
+                <Space direction="vertical" style={{ width: '100%' }} size="large">
+                  {/* 输入模式切换 */}
+                  <Radio.Group
+                    value={inputMode}
                     onChange={(e) => {
-                      setUrlInput(e.target.value);
+                      setInputMode(e.target.value);
                       setError('');
+                      setSearchResults([]);
                     }}
-                    onPressEnter={handleParseUrl}
-                    disabled={loading}
-                  />
-                  <Button
-                    type="primary"
-                    onClick={handleParseUrl}
-                    loading={loading}
-                    icon={loading ? <LoadingOutlined /> : null}
                   >
-                    解析 URL
-                  </Button>
-                </Space.Compact>
-              )}
+                    <Radio.Button value="url">URL 输入</Radio.Button>
+                    <Radio.Button value="search">名称搜索</Radio.Button>
+                  </Radio.Group>
 
-              {/* 搜索模式 */}
-              {inputMode === 'search' && (
-                <>
-                  <Input
-                    placeholder="输入模型名称 (例如: Qwen3.5) - 自动搜索"
-                    prefix={<SearchOutlined />}
-                    suffix={loading && <LoadingOutlined />}
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setError('');
-                    }}
-                  />
+                  {/* URL 输入模式 */}
+                  {inputMode === 'url' && (
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input
+                        placeholder="https://www.modelscope.cn/models/owner/name"
+                        prefix={<LinkOutlined />}
+                        value={urlInput}
+                        onChange={(e) => {
+                          setUrlInput(e.target.value);
+                          setError('');
+                        }}
+                        onPressEnter={handleParseUrl}
+                        disabled={loading}
+                      />
+                      <Button
+                        type="primary"
+                        onClick={handleParseUrl}
+                        loading={loading}
+                        icon={loading ? <LoadingOutlined /> : null}
+                      >
+                        解析 URL
+                      </Button>
+                    </Space.Compact>
+                  )}
 
-                  {searchResults.length > 0 && (
+                  {/* 搜索模式 */}
+                  {inputMode === 'search' && (
                     <>
-                      <div style={{ marginTop: 8 }}>
-                        <Space>
-                          <Text type="secondary">
-                            找到 {totalCount} 个模型
-                            {searchResults.length < totalCount && ` (显示前 30 个)`}
-                          </Text>
-                        </Space>
-                      </div>
-                      <div style={{ maxHeight: '500px', overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: '4px', marginTop: 8 }}>
-                        <List
-                          dataSource={showAllResults ? searchResults : searchResults.slice(0, INITIAL_DISPLAY_COUNT)}
-                          renderItem={item => (
-                            <List.Item
-                              style={{ cursor: 'pointer', padding: '12px 16px' }}
-                              onClick={() => handleSelectSearchResult(item)}
-                            >
-                              <Space>
-                                <Text strong>{item.name}</Text>
-                                <Text type="secondary" style={{ fontSize: 12 }}>
-                                  ({item.path})
-                                </Text>
-                              </Space>
-                            </List.Item>
+                      <Input
+                        placeholder="输入模型名称 (例如: Qwen3.5) - 自动搜索"
+                        prefix={<SearchOutlined />}
+                        suffix={loading && <LoadingOutlined />}
+                        value={searchQuery}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setError('');
+                        }}
+                      />
+
+                      {searchResults.length > 0 && (
+                        <>
+                          <div style={{ marginTop: 8 }}>
+                            <Space>
+                              <Text type="secondary">
+                                找到 {totalCount} 个模型
+                                {searchResults.length < totalCount && ` (显示前 30 个)`}
+                              </Text>
+                            </Space>
+                          </div>
+                          <div style={{ maxHeight: '500px', overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: '4px', marginTop: 8 }}>
+                            <List
+                              dataSource={showAllResults ? searchResults : searchResults.slice(0, INITIAL_DISPLAY_COUNT)}
+                              renderItem={item => (
+                                <List.Item
+                                  style={{ cursor: 'pointer', padding: '12px 16px' }}
+                                  onClick={() => handleSelectSearchResult(item)}
+                                >
+                                  <Space>
+                                    <Text strong>{item.name}</Text>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                      ({item.path})
+                                    </Text>
+                                  </Space>
+                                </List.Item>
+                              )}
+                            />
+                          </div>
+                          {searchResults.length > INITIAL_DISPLAY_COUNT && (
+                            <div style={{ textAlign: 'center', marginTop: 8 }}>
+                              <Button
+                                type="link"
+                                icon={showAllResults ? <UpOutlined /> : <DownOutlined />}
+                                onClick={() => setShowAllResults(!showAllResults)}
+                              >
+                                {showAllResults
+                                  ? '收起'
+                                  : `显示更多 (还有 ${searchResults.length - INITIAL_DISPLAY_COUNT} 个)`
+                                }
+                              </Button>
+                            </div>
                           )}
-                        />
-                      </div>
-                      {searchResults.length > INITIAL_DISPLAY_COUNT && (
-                        <div style={{ textAlign: 'center', marginTop: 8 }}>
-                          <Button
-                            type="link"
-                            icon={showAllResults ? <UpOutlined /> : <DownOutlined />}
-                            onClick={() => setShowAllResults(!showAllResults)}
-                          >
-                            {showAllResults
-                              ? '收起'
-                              : `显示更多 (还有 ${searchResults.length - INITIAL_DISPLAY_COUNT} 个)`
-                            }
-                          </Button>
-                        </div>
+                        </>
                       )}
                     </>
                   )}
-                </>
-              )}
 
-              {/* 错误提示 */}
-              {error && (
-                <Alert
-                  message={error}
-                  type="error"
-                  closable
-                  onClose={() => setError('')}
-                />
-              )}
-            </Space>
-          </div>
-        )}
+                  {/* 错误提示 */}
+                  {error && (
+                    <Alert
+                      message={error}
+                      type="error"
+                      closable
+                      onClose={() => setError('')}
+                    />
+                  )}
+                </Space>
+              </div>
+            )}
 
-        {activeTab === 'custom' && (
-          <div>自定义模型功能开发中...</div>
+            {activeTab === 'custom' && (
+              <div>自定义模型功能开发中...</div>
+            )}
+          </>
         )}
       </Modal>
 

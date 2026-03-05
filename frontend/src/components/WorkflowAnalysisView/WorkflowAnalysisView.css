@@ -1,0 +1,12 @@
+.workflow-analysis-view {
+  margin: 16px 0;
+}
+
+.workflow-analysis-view .ant-descriptions-item-label {
+  font-weight: 500;
+  width: 120px;
+}
+
+.workflow-analysis-view .ant-descriptions-item-content {
+  padding: 8px;
+}

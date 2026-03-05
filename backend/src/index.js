@@ -11,6 +11,7 @@ import downloadService from './services/downloadService.js';
 import modelsRouter from './routes/models.js';
 import backendRouter from './routes/backend.js';
 import llmRouter from './routes/llm.js';
+import comfyuiRouter from './routes/comfyui.js';
 import configRouter from './routes/config.js';
 import modelscopeRouter from './routes/modelscope.js';
 import downloadRouter from './routes/download.js';
@@ -66,6 +67,7 @@ async function init() {
 app.use('/api', modelsRouter);
 app.use('/api', backendRouter);
 app.use('/api', llmRouter);
+app.use('/api', comfyuiRouter);
 app.use('/api', configRouter);
 app.use('/api', modelscopeRouter);
 app.use('/api', downloadRouter);

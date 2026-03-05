@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Space, Tag, Progress, message, Modal, Input } from 'antd';
+import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer } from 'antd';
 import {
   PlayCircleOutlined,
   StopOutlined,
@@ -9,13 +9,18 @@ import {
   DownloadOutlined,
   PauseCircleOutlined,
   SwapOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
+import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
+import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import './ModelCard.css';
+
+const { Text } = Typography;
 
 function ModelCard({ model, onUpdate }) {
   const navigate = useNavigate();
@@ -25,6 +30,8 @@ function ModelCard({ model, onUpdate }) {
   const [realDownloadedQuantizations, setRealDownloadedQuantizations] = useState([]);
   const [realDownloadedFiles, setRealDownloadedFiles] = useState([]);
   const [pollInterval, setPollInterval] = useState(null);
+  const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
+  const [comfyuiSettingsVisible, setComfyuiSettingsVisible] = useState(false);
 
   // 监听下载状态变化，自动停止轮询
   useEffect(() => {
@@ -226,7 +233,11 @@ function ModelCard({ model, onUpdate }) {
   };
 
   const handleSettings = () => {
-    setParametersVisible(true);
+    if (model.type === 'comfyui') {
+      setComfyuiSettingsVisible(true);
+    } else {
+      setParametersVisible(true);
+    }
   };
 
   const handleCleanFiles = async () => {
@@ -335,7 +346,7 @@ function ModelCard({ model, onUpdate }) {
       {!currentQuant && totalSize > 0 && <div className="model-size">大小: {formatSize(totalSize)}</div>}
 
       {/* 未下载状态 */}
-      {!isDownloaded && !downloadStatus && (
+      {!isDownloaded && !downloadStatus && model.type === 'llm' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           <Button
             type="primary"
@@ -350,7 +361,7 @@ function ModelCard({ model, onUpdate }) {
       )}
 
       {/* 下载中状态 */}
-      {downloadStatus === 'downloading' && (
+      {downloadStatus === 'downloading' && model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="active" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -378,7 +389,7 @@ function ModelCard({ model, onUpdate }) {
       )}
 
       {/* 下载暂停状态 */}
-      {downloadStatus === 'paused' && (
+      {downloadStatus === 'paused' && model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="normal" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -407,7 +418,7 @@ function ModelCard({ model, onUpdate }) {
       )}
 
       {/* 下载失败状态 */}
-      {downloadStatus === 'failed' && (
+      {downloadStatus === 'failed' && model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="exception" />
           <div style={{ marginTop: 8, color: '#ff4d4f', fontSize: '12px' }}>
@@ -428,8 +439,79 @@ function ModelCard({ model, onUpdate }) {
         </div>
       )}
 
-      {/* 已下载状态 */}
-      {isDownloaded && !downloadStatus && (
+      {/* ComfyUI专属按钮 */}
+      {model.type === 'comfyui' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            onClick={() => navigate(`/comfyui/${model.id}`)}
+            block
+          >
+            运行
+          </Button>
+          <Button
+            icon={<FileTextOutlined />}
+            onClick={() => setWorkflowModalVisible(true)}
+            block
+          >
+            管理工作流
+          </Button>
+          {isRunning && (
+            <Button
+              danger
+              icon={<StopOutlined />}
+              onClick={handleStop}
+              loading={loading}
+              block
+            >
+              停止
+            </Button>
+          )}
+        </Space>
+      )}
+
+      {/* ComfyUI工作流管理Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>{model.name}</span>
+          </Space>
+        }
+        open={workflowModalVisible}
+        onCancel={() => setWorkflowModalVisible(false)}
+        footer={null}
+        width={900}
+        destroyOnClose
+      >
+        {model.workflow && (
+          <>
+            <Descriptions size="small" bordered column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="工作流类型">
+                <Tag color="blue">
+                  {{ text2img: '文生图', img2img: '图生图', text2video: '文生视频', img2video: '图生视频' }[model.workflow.type] || model.workflow.type}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="节点数量">
+                {Object.keys(model.workflow.original || {}).length} 个
+              </Descriptions.Item>
+              <Descriptions.Item label="功能描述" span={2}>
+                <Text>{model.workflow.llm_analysis || model.description}</Text>
+              </Descriptions.Item>
+            </Descriptions>
+            <Divider style={{ margin: '12px 0' }} />
+          </>
+        )}
+        <RequiredModelsPanel
+          requiredModels={model.required_models}
+          modelId={model.id}
+          onUpdate={onUpdate}
+        />
+      </Modal>
+
+      {/* 已下载状态（非ComfyUI） */}
+      {isDownloaded && !downloadStatus && model.type !== 'comfyui' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {!isRunning ? (
             <Button
@@ -464,6 +546,23 @@ function ModelCard({ model, onUpdate }) {
           )}
         </Space>
       )}
+
+      {/* ComfyUI 参数映射设置 */}
+      <Drawer
+        title="参数映射配置"
+        placement="right"
+        width={680}
+        open={comfyuiSettingsVisible}
+        onClose={() => setComfyuiSettingsVisible(false)}
+        destroyOnClose
+      >
+        <UserMappingPanel
+          modelId={model.id}
+          model={model}
+          embedded
+          onMappingUpdate={onUpdate}
+        />
+      </Drawer>
 
       {/* 参数配置抽屉 */}
       <ParametersDrawer

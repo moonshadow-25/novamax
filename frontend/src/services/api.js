@@ -69,8 +69,27 @@ export const comfyuiService = {
   generate: (modelId, data) => api.post(`/comfyui/${modelId}/generate`, data),
   getProgress: (modelId, taskId) => api.get(`/comfyui/${modelId}/progress/${taskId}`),
   getResult: (modelId, taskId) => api.get(`/comfyui/${modelId}/result/${taskId}`),
-  analyzeWorkflow: (modelId, workflow) => api.post(`/comfyui/${modelId}/analyze-workflow`, { workflow }),
-  uploadWorkflow: (modelId, formData) => api.post(`/comfyui/${modelId}/upload-workflow`, formData)
+  analyzeWorkflow: (workflow, name) => api.post('/comfyui/analyze-workflow', { workflow, name }),
+  uploadWorkflow: (formData) => api.post('/comfyui/upload-workflow', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  confirmWorkflow: (data) => api.post('/comfyui/confirm-workflow', data),
+  searchModel: (modelId, data) => api.post(`/comfyui/${modelId}/search-model`, data),
+  downloadModel: (modelId, data) => api.post(`/comfyui/${modelId}/download-model`, data),
+  downloadAllModels: (modelId) => api.post(`/comfyui/${modelId}/download-all-models`),
+  getModelsStatus: (modelId) => api.get(`/comfyui/${modelId}/models-status`),
+  getDownloadStatus: (taskId) => api.get(`/comfyui/download-status/${taskId}`),
+  start: (modelId) => api.post(`/comfyui/${modelId}/start`),
+  stop: (modelId) => api.post(`/comfyui/${modelId}/stop`),
+  getStatus: (modelId) => api.get(`/comfyui/${modelId}/status`),
+  checkConnection: (modelId) => api.get(`/comfyui/${modelId}/check`),
+  uploadImage: (modelId, formData) => api.post(`/comfyui/${modelId}/upload-image`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  run: (modelId, params) => api.post(`/comfyui/${modelId}/run`, params),
+  updateConfig: (modelId, config) => modelService.update(modelId, { comfyui_config: config }),
+  getWorkflowNodes: (modelId) => api.get(`/comfyui/${modelId}/workflow-nodes`),
+  updateUserMapping: (modelId, user_parameter_mapping) => api.put(`/comfyui/${modelId}/user-mapping`, { user_parameter_mapping })
 };
 
 export const ttsService = {

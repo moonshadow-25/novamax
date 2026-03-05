@@ -1,0 +1,12 @@
+.required-models-panel {
+  margin: 16px 0;
+}
+
+.required-models-panel .ant-table {
+  font-size: 13px;
+}
+
+.required-models-panel .ant-table-thead > tr > th {
+  background: #fafafa;
+  font-weight: 600;
+}
