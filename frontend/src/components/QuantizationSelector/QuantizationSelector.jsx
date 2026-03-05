@@ -32,9 +32,7 @@ function QuantizationSelector({
   currentSelection,
   downloadedQuantizations,
   downloadedFiles,
-  downloadingQuant,
-  downloadStatus,
-  downloadProgress,
+  downloadStates = [],
   onDownload,
   onSwitch,
   onSwitchFile,
@@ -118,12 +116,14 @@ function QuantizationSelector({
   }
 
   const renderQuantizationItem = (item) => {
-    const isTargetQuant = downloadingQuant === item.name;
-    const isDownloading = isTargetQuant && downloadStatus === 'downloading';
-    const isPaused = isTargetQuant && downloadStatus === 'paused';
-    const isCompleted = isTargetQuant && downloadStatus === 'completed';
+    // 从 downloadStates 数组中查找该量化版本的下载状态
+    const itemState = downloadStates.find(s => s.targetQuantization === item.name);
+    const isDownloading = itemState?.status === 'downloading';
+    const isPaused = itemState?.status === 'paused';
+    const isCompleted = itemState?.status === 'completed';
+    const isFailed = itemState?.status === 'failed';
     const isCurrent = currentSelection === item.name || item.isActive;
-    const progress = (isDownloading || isPaused) ? (downloadProgress || 0) : 0;
+    const progress = itemState?.progress || 0;
 
     return (
       <div
@@ -215,6 +215,14 @@ function QuantizationSelector({
               </Button>
             )}
 
+            {/* 下载失败 */}
+            {isFailed && (
+              <Space size="small">
+                <span style={{ fontSize: 12, color: '#ff4d4f' }}>失败</span>
+                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeDownload(item.name)}>重试</Button>
+              </Space>
+            )}
+
             {/* 正在下载中 */}
             {isDownloading && (
               <Space size="small">
@@ -222,7 +230,7 @@ function QuantizationSelector({
                 <Button
                   size="small"
                   icon={<PauseCircleOutlined />}
-                  onClick={onPauseDownload}
+                  onClick={() => onPauseDownload(item.name)}
                 >
                   暂停
                 </Button>
@@ -230,7 +238,7 @@ function QuantizationSelector({
                   size="small"
                   danger
                   icon={<CloseCircleOutlined />}
-                  onClick={onCancelDownload}
+                  onClick={() => onCancelDownload(item.name)}
                 >
                   取消
                 </Button>
@@ -245,7 +253,7 @@ function QuantizationSelector({
                   size="small"
                   type="primary"
                   icon={<PlayCircleOutlined />}
-                  onClick={onResumeDownload}
+                  onClick={() => onResumeDownload(item.name)}
                 >
                   继续
                 </Button>
@@ -253,7 +261,7 @@ function QuantizationSelector({
                   size="small"
                   danger
                   icon={<CloseCircleOutlined />}
-                  onClick={onCancelDownload}
+                  onClick={() => onCancelDownload(item.name)}
                 >
                   取消
                 </Button>

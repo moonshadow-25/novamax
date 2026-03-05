@@ -44,9 +44,9 @@ export const modelscopeService = {
 
 export const downloadService = {
   start: (modelId, quantizationName = null) => api.post('/download/start', { modelId, quantizationName }),
-  pause: (id) => api.post(`/download/pause/${id}`),
-  resume: (id) => api.post(`/download/resume/${id}`),
-  cancel: (id) => api.delete(`/download/${id}`),
+  pause: (id, quantizationName) => api.post(`/download/pause/${id}`, { quantizationName }),
+  resume: (id, quantizationName) => api.post(`/download/resume/${id}`, { quantizationName }),
+  cancel: (id, quantizationName) => api.delete(`/download/${id}`, { data: { quantizationName } }),
   getStatus: (id) => api.get(`/download/status/${id}`),
   getAll: () => api.get('/download/list')
 };

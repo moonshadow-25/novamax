@@ -15,6 +15,19 @@
   width: 100%;
 }
 
+.home-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.home-toolbar .ant-tabs {
+  margin-bottom: 0;
+}
+
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

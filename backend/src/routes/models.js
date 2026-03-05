@@ -11,23 +11,21 @@ const router = express.Router();
 router.get('/models', async (req, res) => {
   try {
     const models = modelManager.getAll();
-    const allDownloadStates = downloadStateManager.getAllStates();
 
-    // 实时从进程管理器和下载状态管理器获取状态
     const modelsWithStatus = models.map(model => {
       const processStatus = processManager.getStatus(model.id);
-      const downloadState = allDownloadStates[model.id];
+      const downloadStates = downloadStateManager.getStatesByModel(model.id);
+      const primaryDownload = downloadStates[0] || null;
 
       return {
         ...model,
-        // 进程状态（实时）
         status: processStatus.running ? 'running' : 'stopped',
         port: processStatus.port || null,
-        // 下载状态（实时，从内存）
-        download_status: downloadState?.status || null,
-        download_progress: downloadState?.progress || 0,
-        download_error: downloadState?.error || null,
-        downloading_quantization: downloadState?.targetQuantization || null
+        download_states: downloadStates,
+        download_status: primaryDownload?.status || null,
+        download_progress: primaryDownload?.progress || 0,
+        download_error: primaryDownload?.error || null,
+        downloading_quantization: primaryDownload?.targetQuantization || null
       };
     });
     res.json({ models: modelsWithStatus });
@@ -43,20 +41,19 @@ router.get('/models/:id', async (req, res) => {
       return res.status(404).json({ error: 'Model not found' });
     }
 
-    // 实时从进程管理器和下载状态管理器获取状态
     const processStatus = processManager.getStatus(model.id);
-    const downloadState = downloadStateManager.getState(model.id);
+    const downloadStates = downloadStateManager.getStatesByModel(model.id);
+    const primaryDownload = downloadStates[0] || null;
 
     const modelWithStatus = {
       ...model,
-      // 进程状态（实时）
       status: processStatus.running ? 'running' : 'stopped',
       port: processStatus.port || null,
-      // 下载状态（实时，从内存）
-      download_status: downloadState?.status || null,
-      download_progress: downloadState?.progress || 0,
-      download_error: downloadState?.error || null,
-      downloading_quantization: downloadState?.targetQuantization || null
+      download_states: downloadStates,
+      download_status: primaryDownload?.status || null,
+      download_progress: primaryDownload?.progress || 0,
+      download_error: primaryDownload?.error || null,
+      downloading_quantization: primaryDownload?.targetQuantization || null
     };
     res.json(modelWithStatus);
   } catch (error) {
@@ -67,23 +64,21 @@ router.get('/models/:id', async (req, res) => {
 router.get('/models/type/:type', async (req, res) => {
   try {
     const models = modelManager.getByType(req.params.type);
-    const allDownloadStates = downloadStateManager.getAllStates();
 
-    // 实时从进程管理器和下载状态管理器获取状态
     const modelsWithStatus = models.map(model => {
       const processStatus = processManager.getStatus(model.id);
-      const downloadState = allDownloadStates[model.id];
+      const downloadStates = downloadStateManager.getStatesByModel(model.id);
+      const primaryDownload = downloadStates[0] || null;
 
       return {
         ...model,
-        // 进程状态（实时）
         status: processStatus.running ? 'running' : 'stopped',
         port: processStatus.port || null,
-        // 下载状态（实时，从内存）
-        download_status: downloadState?.status || null,
-        download_progress: downloadState?.progress || 0,
-        download_error: downloadState?.error || null,
-        downloading_quantization: downloadState?.targetQuantization || null
+        download_states: downloadStates,
+        download_status: primaryDownload?.status || null,
+        download_progress: primaryDownload?.progress || 0,
+        download_error: primaryDownload?.error || null,
+        downloading_quantization: primaryDownload?.targetQuantization || null
       };
     });
     res.json({ models: modelsWithStatus });
@@ -119,14 +114,21 @@ router.put('/models/:id', async (req, res) => {
         console.log('✅ 找到选择的量化版本:', selectedQuant ? selectedQuant.name : 'not found');
 
         if (selectedQuant) {
-          // 更新 files 字段指向新的量化版本
-          updates.files = {
-            model: selectedQuant.file,
-            mmproj: model.mmproj_options && model.mmproj_options.length > 0
-              ? model.mmproj_options.find(m => m.name === model.selected_mmproj) || model.mmproj_options[0]
-              : null
-          };
-          console.log('📂 更新 files 字段:', updates.files.model.name);
+          if (selectedQuant.is_folder) {
+            // 文件夹类型量化版本，不需要更新 files 字段
+            console.log('📂 文件夹类型量化版本，跳过 files 更新:', selectedQuant.folder_path);
+          } else if (selectedQuant.file) {
+            // 更新 files 字段指向新的量化版本
+            updates.files = {
+              model: selectedQuant.file,
+              mmproj: model.mmproj_options && model.mmproj_options.length > 0
+                ? model.mmproj_options.find(m => m.name === model.selected_mmproj) || model.mmproj_options[0]
+                : null
+            };
+            console.log('📂 更新 files 字段:', updates.files.model?.name || updates.files.model);
+          } else {
+            console.log('⚠️ 量化版本没有 file 属性，跳过 files 更新');
+          }
         }
       }
     }

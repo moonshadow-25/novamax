@@ -55,21 +55,21 @@ class DownloadService extends EventEmitter {
       throw new Error(`此下载服务仅支持LLM模型，${model.type}类型请使用对应的下载服务`);
     }
 
-    // 检查是否有活跃下载，但允许暂停状态重新开始
-    const existingDownload = downloadStateManager.getFullState(modelId);
+    // 确定目标量化版本（在检查状态之前确定，用于复合 key）
+    let targetQuantization = quantizationName;
+    if (!targetQuantization && model.quantizations && model.quantizations.length > 0) {
+      targetQuantization = model.selected_quantization;
+    }
+
+    // 检查该量化版本是否已有活跃下载（使用复合 key，允许不同量化版本并发）
+    const existingDownload = downloadStateManager.getFullState(modelId, targetQuantization);
     if (existingDownload && existingDownload.status !== 'paused') {
-      throw new Error('模型已在下载中');
+      throw new Error('该量化版本已在下载中');
     }
 
     // 如果是暂停状态，清理旧的下载状态
     if (existingDownload && existingDownload.status === 'paused') {
-      downloadStateManager.deleteState(modelId);
-    }
-
-    // 如果指定了量化版本，临时设置它（仅用于下载，不影响当前使用的版本）
-    let targetQuantization = quantizationName;
-    if (!targetQuantization && model.quantizations && model.quantizations.length > 0) {
-      targetQuantization = model.selected_quantization;
+      downloadStateManager.deleteState(modelId, targetQuantization);
     }
 
     // 检查要下载的量化版本是否已下载
@@ -88,17 +88,17 @@ class DownloadService extends EventEmitter {
 
     // 创建内存中的下载状态（不持久化到数据库）
     downloadStateManager.createState(modelId, targetQuantization);
-    downloadStateManager.setController(modelId, new AbortController());
+    downloadStateManager.setController(modelId, new AbortController(), targetQuantization);
 
     // 获取完整的状态对象用于内部方法
-    const downloadState = downloadStateManager.getFullState(modelId);
+    const downloadState = downloadStateManager.getFullState(modelId, targetQuantization);
 
     // 不再保存任何临时字段到数据库
 
     // 开始下载 - 使用 ModelScope
     this._downloadModelWithModelScope(model, downloadState).catch(error => {
       console.error(`Download failed for ${modelId}:`, error);
-      this._handleDownloadError(modelId, error);
+      this._handleDownloadError(modelId, error, targetQuantization);
     });
 
     return downloadState;
@@ -107,8 +107,8 @@ class DownloadService extends EventEmitter {
   /**
    * 暂停下载
    */
-  async pauseDownload(modelId) {
-    const downloadState = downloadStateManager.getFullState(modelId);
+  async pauseDownload(modelId, quantName) {
+    const downloadState = downloadStateManager.getFullState(modelId, quantName);
     if (!downloadState) {
       throw new Error('下载任务不存在');
     }
@@ -124,68 +124,89 @@ class DownloadService extends EventEmitter {
     }
 
     // 只在内存中标记为暂停，不写数据库
-    downloadStateManager.setState(modelId, 'paused');
+    downloadStateManager.setState(modelId, 'paused', null, quantName);
 
-    return downloadStateManager.getState(modelId);
+    return downloadStateManager.getState(modelId, quantName);
   }
 
   /**
    * 恢复下载
    */
-  async resumeDownload(modelId) {
+  async resumeDownload(modelId, quantName) {
     const model = modelManager.getById(modelId);
     if (!model) {
       throw new Error('模型不存在');
     }
 
-    let downloadState = downloadStateManager.getFullState(modelId);
+    let downloadState = downloadStateManager.getFullState(modelId, quantName);
+    const resolvedQuant = quantName || model.selected_quantization;
     if (!downloadState) {
-      // 重新创建下载状态（使用当前的 selected_quantization）
-      downloadStateManager.createState(modelId, model.selected_quantization);
-      downloadStateManager.setController(modelId, new AbortController());
-      downloadState = downloadStateManager.getFullState(modelId);
+      downloadStateManager.createState(modelId, resolvedQuant);
+      downloadStateManager.setController(modelId, new AbortController(), resolvedQuant);
+      downloadState = downloadStateManager.getFullState(modelId, resolvedQuant);
     } else {
-      downloadStateManager.setState(modelId, 'downloading');
-      downloadStateManager.setController(modelId, new AbortController());
+      downloadStateManager.setState(modelId, 'downloading', null, resolvedQuant);
+      downloadStateManager.setController(modelId, new AbortController(), resolvedQuant);
     }
 
-    // 不写数据库，直接开始下载
     this._downloadModelWithModelScope(model, downloadState).catch(error => {
       console.error(`Resume download failed for ${modelId}:`, error);
-      this._handleDownloadError(modelId, error);
+      this._handleDownloadError(modelId, error, resolvedQuant);
     });
 
-    return downloadStateManager.getState(modelId);
+    return downloadStateManager.getState(modelId, resolvedQuant);
   }
 
   /**
    * 取消下载
    */
-  async cancelDownload(modelId) {
-    const downloadState = downloadStateManager.getFullState(modelId);
+  async cancelDownload(modelId, quantName) {
+    const downloadState = downloadStateManager.getFullState(modelId, quantName);
 
-    // 如果下载任务不在内存中（例如后端重启后），直接清理临时文件
+    /** 删除目标目录中属于该下载任务的 .part 文件 */
+    const _deletePartFiles = (model, qName) => {
+      const targetDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+      if (!fs.existsSync(targetDir)) return;
+
+      const effectiveQuant = qName || downloadState?.targetQuantization;
+      const partFiles = fs.readdirSync(targetDir).filter(f => f.endsWith('.part'));
+
+      if (!effectiveQuant || partFiles.length === 0) return;
+
+      // 尝试精确匹配该量化版本的 .gguf.part 文件
+      const quantInfo = model.quantizations?.find(q => q.name === effectiveQuant);
+      const matchedParts = partFiles.filter(f => {
+        const base = f.replace(/\.part$/, '');
+        if (quantInfo?.filename) {
+          return base.toLowerCase() === quantInfo.filename.toLowerCase();
+        }
+        // 通配符：文件名包含量化版本名称
+        return new RegExp(`${effectiveQuant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(base);
+      });
+
+      // 如果没有精确匹配，删除所有 .part 文件（回退策略）
+      const toDelete = matchedParts.length > 0 ? matchedParts : partFiles;
+      for (const f of toDelete) {
+        try {
+          fs.unlinkSync(path.join(targetDir, f));
+          console.log(`已删除 .part 文件: ${f}`);
+        } catch (err) {
+          console.warn(`删除 .part 文件失败: ${f}`, err.message);
+        }
+      }
+    };
+
+    // 如果下载任务不在内存中（例如后端重启后），直接清理 .part 文件
     if (!downloadState) {
-      console.log(`下载任务不在内存中，清理临时文件: ${modelId}`);
+      console.log(`下载任务不在内存中，清理 .part 文件: ${modelId}`);
 
       const model = modelManager.getById(modelId);
       if (model) {
-        // 删除下载目录中的临时文件
-        const downloadDir = path.join(DOWNLOADS_DIR, model.type, modelId);
-        if (fs.existsSync(downloadDir)) {
-          try {
-            fs.rmSync(downloadDir, { recursive: true, force: true });
-            console.log(`已删除下载目录: ${downloadDir}`);
-          } catch (error) {
-            console.error('删除下载目录失败:', error);
-          }
-        }
+        _deletePartFiles(model, quantName);
 
-        // 检查是否还有其他已下载的量化版本
         const downloadedQuantizations = model.downloaded_quantizations || [];
         const hasOtherDownloaded = downloadedQuantizations.length > 0;
 
-        // 只更新持久字段
         await modelManager.update(modelId, {
           downloaded: hasOtherDownloaded,
           local_path: hasOtherDownloaded ? model.local_path : null
@@ -198,7 +219,6 @@ class DownloadService extends EventEmitter {
     // 如果有 Python 进程，强制终止它
     if (downloadState.pythonProcess) {
       try {
-        // 在 Windows 上使用 taskkill 强制终止进程树
         if (process.platform === 'win32') {
           spawn('taskkill', ['/pid', downloadState.pythonProcess.pid.toString(), '/T', '/F']);
           console.log(`已强制终止 Python 进程树: ${downloadState.pythonProcess.pid}`);
@@ -212,26 +232,16 @@ class DownloadService extends EventEmitter {
     }
 
     // 从内存中删除下载状态
-    downloadStateManager.deleteState(modelId);
+    downloadStateManager.deleteState(modelId, quantName);
 
-    // 删除未完成的文件
+    // 删除该量化版本的 .part 文件
     const model = modelManager.getById(modelId);
     if (model) {
-      const downloadDir = path.join(DOWNLOADS_DIR, model.type, modelId);
-      if (fs.existsSync(downloadDir)) {
-        try {
-          fs.rmSync(downloadDir, { recursive: true, force: true });
-          console.log(`已删除下载目录: ${downloadDir}`);
-        } catch (error) {
-          console.error('删除下载目录失败:', error);
-        }
-      }
+      _deletePartFiles(model, quantName || downloadState.targetQuantization);
 
-      // 检查是否还有其他已下载的量化版本
       const downloadedQuantizations = model.downloaded_quantizations || [];
       const hasOtherDownloaded = downloadedQuantizations.length > 0;
 
-      // 只更新持久字段
       await modelManager.update(modelId, {
         downloaded: hasOtherDownloaded,
         local_path: hasOtherDownloaded ? model.local_path : null
@@ -242,10 +252,31 @@ class DownloadService extends EventEmitter {
   }
 
   /**
+   * 删除目录（带重试，解决 Windows EPERM 问题）
+   */
+  async _deleteDir(dir, retries = 5, delayMs = 500) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`已删除下载目录: ${dir}`);
+        return;
+      } catch (err) {
+        if (i < retries - 1 && (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'ENOTEMPTY')) {
+          console.warn(`删除下载目录失败，第 ${i + 1} 次重试 (${err.code}): ${dir}`);
+          await new Promise(resolve => setTimeout(resolve, delayMs * (i + 1)));
+        } else {
+          console.error('删除下载目录失败:', err);
+          return;
+        }
+      }
+    }
+  }
+
+  /**
    * 获取下载状态
    */
-  getDownloadStatus(modelId) {
-    return downloadStateManager.getState(modelId);
+  getDownloadStatus(modelId, quantName) {
+    return downloadStateManager.getState(modelId, quantName);
   }
 
   /**
@@ -257,13 +288,16 @@ class DownloadService extends EventEmitter {
   }
 
   /**
-   * 使用 ModelScope CLI 下载模型
+   * 使用 ModelScope 下载模型
+   * 文件直接写入目标目录，下载中使用 .part 后缀，完成后自动重命名。
+   * 无需临时目录，支持并发下载不同量化版本。
    */
   async _downloadModelWithModelScope(model, downloadState) {
-    // 所有量化版本共享同一个模型目录
-    const modelDir = path.join(DOWNLOADS_DIR, model.type, model.id);
+    const targetQuantization = downloadState?.targetQuantization || model.selected_quantization;
+    // 直接使用最终目标目录，无需临时目录
+    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
 
-    // 创建模型目录
+    // 确保目标目录存在
     if (!fs.existsSync(modelDir)) {
       fs.mkdirSync(modelDir, { recursive: true });
     }
@@ -281,8 +315,7 @@ class DownloadService extends EventEmitter {
         '--output', modelDir
       ];
 
-      // 从下载状态中获取目标量化版本
-      const targetQuantization = downloadState?.targetQuantization || model.selected_quantization;
+      // 从下载状态中获取目标量化版本（已在上面确定）
 
       // 如果用户选择了特定的量化版本，只下载那个文件
       if (targetQuantization) {
@@ -318,7 +351,7 @@ class DownloadService extends EventEmitter {
       const pythonProcess = spawn(PYTHON_PATH, downloadArgs);
 
       // 保存进程引用到状态管理器
-      downloadStateManager.setPythonProcess(downloadState.modelId, pythonProcess);
+      downloadStateManager.setPythonProcess(downloadState.modelId, pythonProcess, downloadState.targetQuantization);
 
       let outputData = '';
       let errorData = '';
@@ -334,17 +367,17 @@ class DownloadService extends EventEmitter {
         console.error(`ModelScope stderr: ${line}`);
 
         // 解析进度信息
-        // 格式: Downloading [filename]:  50%|█████     | 1.47G/2.93G [00:59<00:56, 27.6MB/s]
-        const progressMatch = line.match(/Downloading.*?:\s+(\d+)%.*?\|\s+([\d.]+[KMGT]?)\/([\d.]+[KMGT]?).*?\[.*?,\s*([\d.]+[KMGT]?B\/s)\]/);
+        // 格式: Downloading {filename}: {N}%|{downloaded}/{total}|{speed}
+        const progressMatch = line.match(/Downloading\s+.+?:\s*(\d+)%\|([^/]+)\/([^|]+)\|(.+)/);
 
         if (progressMatch) {
           const progress = parseInt(progressMatch[1]);
-          const downloaded = progressMatch[2];
-          const total = progressMatch[3];
-          const speed = progressMatch[4];
+          const downloaded = progressMatch[2].trim();
+          const total = progressMatch[3].trim();
+          const speed = progressMatch[4].trim();
 
           // 只更新内存中的进度，不写数据库
-          downloadStateManager.updateProgress(downloadState.modelId, progress, speed);
+          downloadStateManager.updateProgress(downloadState.modelId, progress, speed, downloadState.targetQuantization);
 
           console.log(`📊 下载进度: ${progress}% (${downloaded}/${total}) @ ${speed}`);
 
@@ -363,17 +396,16 @@ class DownloadService extends EventEmitter {
       });
 
       // 清理进程引用
-      downloadStateManager.setPythonProcess(downloadState.modelId, null);
+      downloadStateManager.setPythonProcess(downloadState.modelId, null, downloadState.targetQuantization);
 
-      // 检查是否被取消（非正常退出码且任务已被删除）
-      if (!downloadStateManager.hasDownload(model.id)) {
+      // 检查是否被取消
+      if (!downloadStateManager.hasDownload(model.id, downloadState.targetQuantization)) {
         console.log(`下载已被取消: ${model.id}`);
         return;
       }
 
       if (exitCode !== 0) {
-        // 检查是否是被暂停（SIGTERM）- 从状态管理器获取最新状态
-        const currentState = downloadStateManager.getState(model.id);
+        const currentState = downloadStateManager.getState(model.id, downloadState.targetQuantization);
         if (currentState?.status === 'paused') {
           console.log(`下载已暂停: ${model.id}`);
           return;
@@ -394,19 +426,13 @@ class DownloadService extends EventEmitter {
       }
 
       // 下载完成，更新内存状态
-      downloadStateManager.setState(model.id, 'completed');
-      downloadStateManager.updateProgress(model.id, 100);
+      downloadStateManager.setState(model.id, 'completed', null, downloadState.targetQuantization);
+      downloadStateManager.updateProgress(model.id, 100, 0, downloadState.targetQuantization);
 
-      const targetDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+      // 文件已直接下载到目标目录，无需移动或合并
+      const targetDir = modelDir;
 
-      // 如果目标目录已存在，合并文件而不是删除重建
-      if (fs.existsSync(targetDir)) {
-        await this._mergeToModelsDir(modelDir, targetDir);
-      } else {
-        await this._moveToModelsDir(modelDir, targetDir);
-      }
-
-      // 扫描下载的文件并记录
+      // 扫描下载的文件并记录（.part 临时文件已被 Python 脚本自动重命名，无需过滤）
       const downloadedFiles = await this._listDownloadedFiles(targetDir);
       const existingFiles = model.downloaded_files || [];
 
@@ -472,8 +498,9 @@ class DownloadService extends EventEmitter {
       await presetService.generatePresetFile(model.type);
 
       // 5秒后清除已完成的状态
+      const doneQuant = downloadState.targetQuantization;
       setTimeout(() => {
-        downloadStateManager.deleteState(model.id);
+        downloadStateManager.deleteState(model.id, doneQuant);
       }, 5000);
 
       console.log(`✓ 模型 ${model.id} 下载完成并移动到: ${targetDir}`);
@@ -488,10 +515,10 @@ class DownloadService extends EventEmitter {
    * 实际执行下载
    */
   async _downloadModel(model, downloadState) {
-    // 所有量化版本共享同一个模型目录
-    const modelDir = path.join(DOWNLOADS_DIR, model.type, model.id);
+    // 直接使用最终目标目录，无需临时目录
+    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
 
-    // 创建模型目录
+    // 确保目标目录存在
     if (!fs.existsSync(modelDir)) {
       fs.mkdirSync(modelDir, { recursive: true });
     }
@@ -520,7 +547,7 @@ class DownloadService extends EventEmitter {
 
       // 计算总大小并更新到状态管理器
       const totalBytes = filesToDownload.reduce((sum, f) => sum + f.size, 0);
-      downloadStateManager.updateBytes(downloadState.modelId, 0, totalBytes);
+      downloadStateManager.updateBytes(downloadState.modelId, 0, totalBytes, downloadState.targetQuantization);
 
       // 依次下载每个文件
       for (const file of filesToDownload) {
@@ -528,18 +555,11 @@ class DownloadService extends EventEmitter {
       }
 
       // 所有文件下载完成，更新内存状态
-      downloadStateManager.setState(model.id, 'completed');
-      downloadStateManager.updateProgress(model.id, 100);
+      downloadStateManager.setState(model.id, 'completed', null, downloadState.targetQuantization);
+      downloadStateManager.updateProgress(model.id, 100, 0, downloadState.targetQuantization);
 
-      // 移动到 models_dir
-      const targetDir = path.join(MODELS_RUN_DIR, model.type, model.id);
-
-      // 如果目标目录已存在，合并文件而不是删除重建
-      if (fs.existsSync(targetDir)) {
-        await this._mergeToModelsDir(modelDir, targetDir);
-      } else {
-        await this._moveToModelsDir(modelDir, targetDir);
-      }
+      // 文件已直接下载到目标目录，无需移动
+      const targetDir = modelDir;
 
       // 扫描下载的文件并记录
       const downloadedFiles = await this._listDownloadedFiles(targetDir);
@@ -608,8 +628,9 @@ class DownloadService extends EventEmitter {
       await presetService.generatePresetFile(model.type);
 
       // 5秒后清除已完成的状态
+      const doneQuantLegacy = downloadState.targetQuantization;
       setTimeout(() => {
-        downloadStateManager.deleteState(model.id);
+        downloadStateManager.deleteState(model.id, doneQuantLegacy);
       }, 5000);
 
       console.log(`✓ 模型 ${model.id} 下载完成并移动到: ${targetDir}`);
@@ -628,11 +649,16 @@ class DownloadService extends EventEmitter {
    */
   async _downloadFile(fileInfo, modelDir, downloadState) {
     const filePath = path.join(modelDir, fileInfo.name);
-    const tempPath = filePath + '.download';
+    const tempPath = filePath + '.part';
 
-    // 检查已下载的大小
+    // 检查已下载的大小（.part 文件支持断点续传）
     let downloadedSize = 0;
     if (fs.existsSync(tempPath)) {
+      // 如果最终文件已存在，跳过
+      if (fs.existsSync(filePath)) {
+        console.log(`文件已存在，跳过: ${fileInfo.name}`);
+        return;
+      }
       downloadedSize = fs.statSync(tempPath).size;
       console.log(`断点续传: ${fileInfo.name}, 已下载 ${(downloadedSize / 1024 / 1024).toFixed(2)} MB`);
     }
@@ -669,18 +695,16 @@ class DownloadService extends EventEmitter {
     response.data.on('data', (chunk) => {
       // 通过 downloadStateManager 更新字节数
       const newBytes = downloadState.downloadedBytes + chunk.length;
-      downloadStateManager.updateBytes(downloadState.modelId, newBytes, downloadState.totalBytes);
+      downloadStateManager.updateBytes(downloadState.modelId, newBytes, downloadState.totalBytes, downloadState.targetQuantization);
 
-      // 每 500ms 更新一次进度
       const now = Date.now();
       if (now - lastUpdate > 500) {
         const elapsed = (now - lastUpdate) / 1000;
         const bytesInPeriod = newBytes - lastBytes;
-        const speed = bytesInPeriod / elapsed; // bytes/sec
+        const speed = bytesInPeriod / elapsed;
         const progress = (newBytes / downloadState.totalBytes) * 100;
 
-        // 只更新内存中的进度，不写数据库
-        downloadStateManager.updateProgress(downloadState.modelId, progress, speed);
+        downloadStateManager.updateProgress(downloadState.modelId, progress, speed, downloadState.targetQuantization);
 
         lastUpdate = now;
         lastBytes = newBytes;
@@ -875,11 +899,11 @@ class DownloadService extends EventEmitter {
   /**
    * 处理下载错误
    */
-  async _handleDownloadError(modelId, error) {
-    // 只在内存中标记错误，不写数据库
-    downloadStateManager.setState(modelId, 'failed', error.message);
+  async _handleDownloadError(modelId, error, quantName) {
+    downloadStateManager.setState(modelId, 'failed', error.message, quantName);
 
-    this.emit('error', {
+    // 使用 'download-error' 而非 'error'，避免 EventEmitter 无监听时崩溃进程
+    this.emit('download-error', {
       modelId,
       error: error.message
     });

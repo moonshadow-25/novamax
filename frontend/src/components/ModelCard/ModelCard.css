@@ -20,6 +20,22 @@
 
 .model-header h3 {
   margin: 0;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+}
+
+.model-size-badge {
+  font-size: 12px;
+  color: #999;
+  white-space: nowrap;
+}
+
+.model-header h3 {
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
   color: rgba(0, 0, 0, 0.85);

@@ -75,8 +75,9 @@ class ModelscopeParser {
 
       const modelData = infoResponse.data.Data;
 
-      // 2. 获取模型文件列表
-      const filesUrl = `https://www.modelscope.cn/api/v1/models/${modelId}/repo/files`;
+      // 2. 获取模型文件列表（递归模式，获取所有子目录文件）
+      const filesUrl = `https://www.modelscope.cn/api/v1/models/${modelId}/repo/files?Recursive=true&PageSize=500`;
+      console.log(`Fetching files from: ${filesUrl}`);
       const filesResponse = await axios.get(filesUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0',
@@ -209,11 +210,26 @@ class ModelscopeParser {
         recommended: false
       };
 
+      // 统计文件夹内所有文件大小总和，并按文件名排序（确保分片顺序与下载顺序一致）
+      const folderPrefix = folder.Name + '/';
+      const filesInFolder = blobFiles
+        .filter(f => f.Path && f.Path.startsWith(folderPrefix))
+        .sort((a, b) => a.Name.localeCompare(b.Name));
+      const totalSize = filesInFolder.reduce((sum, f) => sum + (f.Size || 0), 0);
+      const sizeLabel = totalSize > 0
+        ? `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`
+        : '文件夹';
+
+      // 保存每个文件的 name+size，供下载时计算累计进度用
+      const folderFileList = filesInFolder.map(f => ({ name: f.Name, size: f.Size || 0 }));
+
       quantizations.push({
         name: quantType,
-        label: `${quantType} - 文件夹`,
+        label: `${quantType} - ${sizeLabel}`,
         is_folder: true,
         folder_path: folder.Name,
+        total_size: totalSize,
+        folder_files: folderFileList,
         category: info.category,
         quality: info.quality,
         description: info.description,

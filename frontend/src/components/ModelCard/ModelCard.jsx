@@ -10,7 +10,9 @@ import {
   PauseCircleOutlined,
   SwapOutlined,
   AppstoreOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  StarFilled,
+  StarOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService } from '../../services/api';
@@ -22,7 +24,7 @@ import './ModelCard.css';
 
 const { Text } = Typography;
 
-function ModelCard({ model, onUpdate }) {
+function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [parametersVisible, setParametersVisible] = useState(false);
@@ -33,15 +35,34 @@ function ModelCard({ model, onUpdate }) {
   const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
   const [comfyuiSettingsVisible, setComfyuiSettingsVisible] = useState(false);
 
-  // 监听下载状态变化，自动停止轮询
+  // 弹框打开时始终轮询，关闭时停止
   useEffect(() => {
-    // 当下载完成或失败时，停止轮询
-    if (pollInterval && (!model.download_status || model.download_status === 'failed')) {
-      console.log('下载状态变化，停止轮询:', model.download_status);
-      clearInterval(pollInterval);
-      setPollInterval(null);
+    if (!quantizationSelectorVisible) {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        setPollInterval(null);
+      }
+      return;
     }
-  }, [model.download_status, pollInterval]);
+    // 已有轮询则不重复创建
+    if (pollInterval) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const filesResult = await modelService.scanDownloadedFiles(model.id);
+        setRealDownloadedFiles(filesResult.downloadedFiles || []);
+        const quantsResult = await modelService.getDownloadedQuantizations(model.id);
+        setRealDownloadedQuantizations(quantsResult.downloadedQuantizations || []);
+        onUpdate();
+      } catch (e) { /* ignore */ }
+    }, 2000);
+    setPollInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantizationSelectorVisible]);
 
   const handleStart = async () => {
     setLoading(true);
@@ -95,44 +116,19 @@ function ModelCard({ model, onUpdate }) {
 
   // 管理量化版本
   const handleManageQuantizations = async () => {
-    // 清理旧的轮询
-    if (pollInterval) {
-      clearInterval(pollInterval);
-      setPollInterval(null);
+    // 先手动读取一次文件列表
+    try {
+      const filesResult = await modelService.scanDownloadedFiles(model.id);
+      setRealDownloadedFiles(filesResult.downloadedFiles || []);
+      const quantsResult = await modelService.getDownloadedQuantizations(model.id);
+      setRealDownloadedQuantizations(quantsResult.downloadedQuantizations || []);
+      onUpdate();
+    } catch (error) {
+      console.error('查询已下载文件失败:', error);
+      setRealDownloadedFiles(model.downloaded_files || []);
+      setRealDownloadedQuantizations(model.downloaded_quantizations || []);
     }
-
-    // 实时查询已下载的量化版本和文件
-    const scanFiles = async () => {
-      try {
-        // 获取新格式的文件列表
-        const filesResult = await modelService.scanDownloadedFiles(model.id);
-        setRealDownloadedFiles(filesResult.downloadedFiles || []);
-        console.log('实时扫描已下载的文件:', filesResult.downloadedFiles);
-
-        // 为了兼容性，也获取旧格式的量化版本列表
-        const quantsResult = await modelService.getDownloadedQuantizations(model.id);
-        setRealDownloadedQuantizations(quantsResult.downloadedQuantizations || []);
-
-        // 调用 onUpdate() 刷新整个 model 对象（包括 download_status）
-        onUpdate();
-      } catch (error) {
-        console.error('查询已下载文件失败:', error);
-        // 失败时使用数据库中的数据
-        setRealDownloadedFiles(model.downloaded_files || []);
-        setRealDownloadedQuantizations(model.downloaded_quantizations || []);
-      }
-    };
-
-    await scanFiles();
-
-    // 如果有下载中的任务，启动轮询
-    if (model.download_status === 'downloading' || model.download_status === 'completed') {
-      const interval = setInterval(async () => {
-        await scanFiles();
-      }, 2000);
-      setPollInterval(interval);
-    }
-
+    // 弹框打开后 useEffect 会自动开始轮询
     setQuantizationSelectorVisible(true);
   };
 
@@ -140,7 +136,6 @@ function ModelCard({ model, onUpdate }) {
   const handleDownloadQuantization = async (quantizationName) => {
     setLoading(true);
     try {
-      // 开始下载（传递量化版本名称，不修改 selected_quantization）
       await downloadService.start(model.id, quantizationName);
       message.success(`开始下载 ${quantizationName} 版本`);
       onUpdate();
@@ -181,10 +176,10 @@ function ModelCard({ model, onUpdate }) {
     }
   };
 
-  const handlePauseDownload = async () => {
+  const handlePauseDownload = async (quantizationName) => {
     setLoading(true);
     try {
-      await downloadService.pause(model.id);
+      await downloadService.pause(model.id, quantizationName);
       message.success('已暂停下载');
       onUpdate();
     } catch (error) {
@@ -194,10 +189,10 @@ function ModelCard({ model, onUpdate }) {
     }
   };
 
-  const handleResumeDownload = async () => {
+  const handleResumeDownload = async (quantizationName) => {
     setLoading(true);
     try {
-      await downloadService.resume(model.id);
+      await downloadService.resume(model.id, quantizationName);
       message.success('继续下载');
       onUpdate();
     } catch (error) {
@@ -207,11 +202,11 @@ function ModelCard({ model, onUpdate }) {
     }
   };
 
-  const handleCancelDownload = async () => {
+  const handleCancelDownload = async (quantizationName) => {
     if (window.confirm('确定要取消下载吗？已下载的数据将被删除。')) {
       setLoading(true);
       try {
-        await downloadService.cancel(model.id);
+        await downloadService.cancel(model.id, quantizationName);
         message.success('已取消下载');
         onUpdate();
       } catch (error) {
@@ -307,12 +302,26 @@ function ModelCard({ model, onUpdate }) {
     return quantName;
   };
 
+  const modelSize = currentQuant?.total_size || currentQuant?.file?.size || totalSize || 0;
+
   return (
     <Card className="model-card" hoverable>
       <div className="model-header">
         <h3 title={model.name}>{model.name}</h3>
-        <Space>
-          <Tag color={isRunning ? 'green' : 'default'}>
+        <Space size={4}>
+          {modelSize > 0 && (
+            <span className="model-size-badge">{(modelSize / (1024 ** 3)).toFixed(0)}GB</span>
+          )}
+          <Button
+            size="small"
+            type="text"
+            icon={isFavorited
+              ? <StarFilled style={{ color: '#faad14' }} />
+              : <StarOutlined style={{ color: '#bbb' }} />}
+            onClick={() => onToggleFavorite?.(model.id)}
+            title={isFavorited ? '取消收藏' : '收藏'}
+          />
+          <Tag color={isRunning ? 'green' : 'default'} style={{ margin: 0 }}>
             {isRunning ? '运行中' : '已停止'}
           </Tag>
           <Button
@@ -370,7 +379,7 @@ function ModelCard({ model, onUpdate }) {
           <Space style={{ width: '100%', marginTop: 8 }}>
             <Button
               icon={<PauseCircleOutlined />}
-              onClick={handlePauseDownload}
+              onClick={() => handlePauseDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
             >
@@ -378,7 +387,7 @@ function ModelCard({ model, onUpdate }) {
             </Button>
             <Button
               danger
-              onClick={handleCancelDownload}
+              onClick={() => handleCancelDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
             >
@@ -399,7 +408,7 @@ function ModelCard({ model, onUpdate }) {
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              onClick={handleResumeDownload}
+              onClick={() => handleResumeDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
             >
@@ -407,7 +416,7 @@ function ModelCard({ model, onUpdate }) {
             </Button>
             <Button
               danger
-              onClick={handleCancelDownload}
+              onClick={() => handleCancelDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
             >
@@ -428,7 +437,7 @@ function ModelCard({ model, onUpdate }) {
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              onClick={handleResumeDownload}
+              onClick={() => handleResumeDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
               block
@@ -582,23 +591,14 @@ function ModelCard({ model, onUpdate }) {
           currentSelection={model.selected_quantization}
           downloadedQuantizations={realDownloadedQuantizations}
           downloadedFiles={realDownloadedFiles}
-          downloadingQuant={model.downloading_quantization || null}
-          downloadStatus={downloadStatus}
-          downloadProgress={downloadProgress}
+          downloadStates={model.download_states || []}
           onDownload={handleDownloadQuantization}
           onSwitch={handleSwitchQuantization}
           onSwitchFile={handleSwitchToFile}
           onPauseDownload={handlePauseDownload}
           onResumeDownload={handleResumeDownload}
           onCancelDownload={handleCancelDownload}
-          onCancel={() => {
-            // 关闭弹框时清理轮询
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
-            }
-            setQuantizationSelectorVisible(false);
-          }}
+          onCancel={() => setQuantizationSelectorVisible(false)}
         />
       )}
     </Card>

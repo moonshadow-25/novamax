@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Tabs, Input, Button, Space, Typography, message } from 'antd';
+import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented } from 'antd';
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined } from '@ant-design/icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { modelService, backendService } from '../../services/api';
@@ -17,14 +17,56 @@ const MODEL_TYPES = [
   { key: 'whisper', label: 'Whisper' }
 ];
 
+const FAVORITES_KEY = 'novamax_model_favorites';
+
+const DEFAULT_FILTER_OPTIONS = (favorites, downloadedModels) => [
+  { label: '全部', value: 'all' },
+  { label: `收藏 ${favorites.length > 0 ? favorites.length : ''}`.trim(), value: 'favorited' },
+  { label: `已下载 ${downloadedModels.length > 0 ? downloadedModels.length : ''}`.trim(), value: 'downloaded' },
+];
+
+const COMFYUI_FILTER_OPTIONS = [
+  { value: 'all',        label: '全部' },
+  { value: 'text2img',   label: '文生图' },
+  { value: 'img2img',    label: '图生图' },
+  { value: 'text2video', label: '文生视频' },
+  { value: 'img2video',  label: '图生视频' },
+];
+
+// 其他类型暂时使用默认选项，后续可以根据需要调整
+const TTS_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
+const WHISPER_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
+
 function Home() {
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('llm');
+  const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', whisper: 'all' });
+  const filterTab = filterTabs[activeTab] || 'all';
+  const setFilterTab = (val) => setFilterTabs(prev => ({ ...prev, [activeTab]: val }));
   const [searchQuery, setSearchQuery] = useState('');
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [routerLoading, setRouterLoading] = useState(false);
+  const [favorites, setFavorites] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); }
+    catch { return []; }
+  });
+
+  const toggleFavorite = (modelId) => {
+    setFavorites(prev => {
+      const next = prev.includes(modelId)
+        ? prev.filter(id => id !== modelId)
+        : [...prev, modelId];
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const isModelDownloaded = (model) =>
+    model.downloaded ||
+    (model.downloaded_quantizations && model.downloaded_quantizations.length > 0) ||
+    model.download_status === 'completed';
 
   useEffect(() => {
     loadModels();
@@ -32,11 +74,11 @@ function Home() {
 
   // 自动刷新下载进度
   useEffect(() => {
-    const hasDownloading = models.some(m =>
-      m.download_status === 'downloading' ||
-      m.download_status === 'paused' ||
-      m.download_status === 'completed'  // 完成状态也需要刷新一次以更新 downloaded 字段
-    );
+    const hasDownloading = models.some(m => {
+      if (m.download_status === 'downloading' || m.download_status === 'paused' || m.download_status === 'completed') return true;
+      if (m.download_states && m.download_states.some(s => s.status === 'downloading' || s.status === 'paused' || s.status === 'completed')) return true;
+      return false;
+    });
 
     if (!hasDownloading) return;
 
@@ -72,12 +114,20 @@ function Home() {
     }
   };
 
-  const filteredModels = models.filter(model =>
-    model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    model.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredModels = models.filter(model => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = model.name.toLowerCase().includes(q) ||
+      model.description?.toLowerCase().includes(q);
+    if (!matchesSearch) return false;
+    if (activeTab === 'comfyui' && filterTab !== 'all') {
+      return model.workflow?.type === filterTab;
+    }
+    if (filterTab === 'downloaded') return isModelDownloaded(model);
+    if (filterTab === 'favorited') return favorites.includes(model.id);
+    return true;
+  });
 
-  const downloadedModels = filteredModels.filter(m => m.downloaded);
+  const downloadedModels = models.filter(m => isModelDownloaded(m));
 
   return (
     <Layout className="home-layout">
@@ -99,15 +149,24 @@ function Home() {
         </Space>
       </Header>
       <Content className="home-content">
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={MODEL_TYPES.map(type => ({
-            key: type.key,
-            label: type.label
-          }))}
-          style={{ marginBottom: 24 }}
-        />
+        <div className="home-toolbar">
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => { setActiveTab(key); }}
+            items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
+            style={{ flex: 1 }}
+          />
+          <Segmented
+            value={filterTab}
+            onChange={setFilterTab}
+            options={
+              activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS
+                : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels)
+                : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels)
+                : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels)
+            }
+          />
+        </div>
 
         {/* LLM Tab 显示启动全部按钮 */}
         {activeTab === 'llm' && downloadedModels.length > 0 && (
@@ -133,6 +192,8 @@ function Home() {
               key={model.id}
               model={model}
               onUpdate={loadModels}
+              isFavorited={favorites.includes(model.id)}
+              onToggleFavorite={toggleFavorite}
             />
           ))}
           <div className="add-model-card" onClick={() => setAddModalVisible(true)}>

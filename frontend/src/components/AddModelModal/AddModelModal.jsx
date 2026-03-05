@@ -12,7 +12,7 @@ const INITIAL_DISPLAY_COUNT = 8;
 
 function AddModelModal({ visible, type, onClose, onSuccess }) {
   const [activeTab, setActiveTab] = useState('modelscope');
-  const [inputMode, setInputMode] = useState('url'); // 'url' | 'search'
+  const [inputMode, setInputMode] = useState('search'); // 'url' | 'search'
   const [urlInput, setUrlInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -28,7 +28,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   // 重置状态
   const resetState = () => {
-    setInputMode('url');
+    setInputMode('search');
     setUrlInput('');
     setSearchQuery('');
     setSearchResults([]);
@@ -216,8 +216,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                       setSearchResults([]);
                     }}
                   >
-                    <Radio.Button value="url">URL 输入</Radio.Button>
                     <Radio.Button value="search">名称搜索</Radio.Button>
+                    <Radio.Button value="url">URL 输入</Radio.Button>
                   </Radio.Group>
 
                   {/* URL 输入模式 */}

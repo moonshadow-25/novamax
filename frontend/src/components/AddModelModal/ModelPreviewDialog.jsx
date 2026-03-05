@@ -88,7 +88,7 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
           可用量化版本 ({preview.quantizations.length})
         </Text>
         <Collapse
-          defaultActiveKey={['balanced']}
+          defaultActiveKey={[]}
           style={{ marginTop: 8 }}
           size="small"
         >

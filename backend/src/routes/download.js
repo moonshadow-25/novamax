@@ -21,7 +21,8 @@ router.post('/download/start', async (req, res) => {
 // 暂停下载
 router.post('/download/pause/:id', async (req, res) => {
   try {
-    const downloadState = await downloadService.pauseDownload(req.params.id);
+    const { quantizationName } = req.body || {};
+    const downloadState = await downloadService.pauseDownload(req.params.id, quantizationName);
     res.json(downloadState);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -31,7 +32,8 @@ router.post('/download/pause/:id', async (req, res) => {
 // 恢复下载
 router.post('/download/resume/:id', async (req, res) => {
   try {
-    const downloadState = await downloadService.resumeDownload(req.params.id);
+    const { quantizationName } = req.body || {};
+    const downloadState = await downloadService.resumeDownload(req.params.id, quantizationName);
     res.json(downloadState);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -41,7 +43,8 @@ router.post('/download/resume/:id', async (req, res) => {
 // 取消下载
 router.delete('/download/:id', async (req, res) => {
   try {
-    const result = await downloadService.cancelDownload(req.params.id);
+    const quantizationName = req.body?.quantizationName || req.query?.q;
+    const result = await downloadService.cancelDownload(req.params.id, quantizationName);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

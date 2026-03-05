@@ -5,21 +5,24 @@
  * - 管理所有下载任务的临时状态（仅在内存中）
  * - 不持久化任何临时数据到数据库
  * - 后端重启时状态自动清空
+ * - 支持同一模型的多个量化版本并发下载
  */
 class DownloadStateManager {
   constructor() {
-    this.states = new Map(); // modelId -> state
+    this.states = new Map(); // key: "modelId" or "modelId::quantName" -> state
+  }
+
+  /** 构建内部 key */
+  _key(modelId, quantName) {
+    return quantName ? `${modelId}::${quantName}` : modelId;
   }
 
   /**
    * 获取下载状态
-   * @param {string} modelId - 模型ID
-   * @returns {object|null} 下载状态对象
    */
-  getState(modelId) {
-    const state = this.states.get(modelId);
+  getState(modelId, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (!state) return null;
-
     return {
       status: state.status,
       progress: state.progress,
@@ -31,14 +34,31 @@ class DownloadStateManager {
   }
 
   /**
+   * 获取某个模型的所有下载任务（返回数组）
+   */
+  getStatesByModel(modelId) {
+    const result = [];
+    for (const [key, state] of this.states.entries()) {
+      if (key === modelId || key.startsWith(modelId + '::')) {
+        result.push({
+          status: state.status,
+          progress: state.progress,
+          error: state.error,
+          targetQuantization: state.targetQuantization,
+          speed: state.speed,
+          startTime: state.startTime
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
    * 创建新的下载状态
-   * @param {string} modelId - 模型ID
-   * @param {string} targetQuantization - 目标量化版本
-   * @returns {object} 下载状态对象
    */
   createState(modelId, targetQuantization) {
     const state = {
-      modelId,  // 保存 modelId，方便后续引用
+      modelId,
       status: 'downloading',
       progress: 0,
       error: null,
@@ -51,18 +71,15 @@ class DownloadStateManager {
       totalBytes: 0,
       files: []
     };
-    this.states.set(modelId, state);
+    this.states.set(this._key(modelId, targetQuantization), state);
     return state;
   }
 
   /**
-   * 更新下载进度（只在内存中）
-   * @param {string} modelId - 模型ID
-   * @param {number} progress - 进度（0-100）
-   * @param {number} speed - 下载速度（bytes/sec）
+   * 更新下载进度
    */
-  updateProgress(modelId, progress, speed = 0) {
-    const state = this.states.get(modelId);
+  updateProgress(modelId, progress, speed = 0, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (state) {
       state.progress = progress;
       state.speed = speed;
@@ -71,12 +88,9 @@ class DownloadStateManager {
 
   /**
    * 更新下载字节数
-   * @param {string} modelId - 模型ID
-   * @param {number} downloadedBytes - 已下载字节数
-   * @param {number} totalBytes - 总字节数
    */
-  updateBytes(modelId, downloadedBytes, totalBytes) {
-    const state = this.states.get(modelId);
+  updateBytes(modelId, downloadedBytes, totalBytes, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (state) {
       state.downloadedBytes = downloadedBytes;
       if (totalBytes !== undefined) {
@@ -87,12 +101,9 @@ class DownloadStateManager {
 
   /**
    * 设置下载状态
-   * @param {string} modelId - 模型ID
-   * @param {string} status - 状态（downloading/paused/completed/failed）
-   * @param {string|null} error - 错误信息
    */
-  setState(modelId, status, error = null) {
-    const state = this.states.get(modelId);
+  setState(modelId, status, error = null, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (state) {
       state.status = status;
       state.error = error;
@@ -100,41 +111,53 @@ class DownloadStateManager {
   }
 
   /**
-   * 删除下载状态
-   * @param {string} modelId - 模型ID
+   * 删除单个下载状态
    */
-  deleteState(modelId) {
-    this.states.delete(modelId);
+  deleteState(modelId, quantName) {
+    this.states.delete(this._key(modelId, quantName));
   }
 
   /**
-   * 获取所有下载状态
-   * @returns {object} 所有下载状态的映射
+   * 删除某个模型的所有下载状态
+   */
+  deleteAllStates(modelId) {
+    for (const key of [...this.states.keys()]) {
+      if (key === modelId || key.startsWith(modelId + '::')) {
+        this.states.delete(key);
+      }
+    }
+  }
+
+  /**
+   * 获取所有下载状态（按 key 映射）
    */
   getAllStates() {
     const result = {};
-    for (const [modelId, state] of this.states.entries()) {
-      result[modelId] = this.getState(modelId);
+    for (const [key, state] of this.states.entries()) {
+      result[key] = {
+        status: state.status,
+        progress: state.progress,
+        error: state.error,
+        targetQuantization: state.targetQuantization,
+        speed: state.speed,
+        startTime: state.startTime
+      };
     }
     return result;
   }
 
   /**
    * 获取完整状态（包含内部字段，用于 downloadService）
-   * @param {string} modelId - 模型ID
-   * @returns {object|null} 完整的状态对象
    */
-  getFullState(modelId) {
-    return this.states.get(modelId) || null;
+  getFullState(modelId, quantName) {
+    return this.states.get(this._key(modelId, quantName)) || null;
   }
 
   /**
    * 设置 Python 进程引用
-   * @param {string} modelId - 模型ID
-   * @param {object} process - Python 进程对象
    */
-  setPythonProcess(modelId, process) {
-    const state = this.states.get(modelId);
+  setPythonProcess(modelId, process, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (state) {
       state.pythonProcess = process;
     }
@@ -142,11 +165,9 @@ class DownloadStateManager {
 
   /**
    * 设置 AbortController
-   * @param {string} modelId - 模型ID
-   * @param {AbortController} controller - AbortController 实例
    */
-  setController(modelId, controller) {
-    const state = this.states.get(modelId);
+  setController(modelId, controller, quantName) {
+    const state = this.states.get(this._key(modelId, quantName));
     if (state) {
       state.controller = controller;
     }
@@ -154,12 +175,11 @@ class DownloadStateManager {
 
   /**
    * 检查下载是否存在
-   * @param {string} modelId - 模型ID
-   * @returns {boolean}
    */
-  hasDownload(modelId) {
-    return this.states.has(modelId);
+  hasDownload(modelId, quantName) {
+    return this.states.has(this._key(modelId, quantName));
   }
 }
 
 export default new DownloadStateManager();
+
