@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import yaml from 'yaml';
-import { PROJECT_ROOT } from '../config/constants.js';
+import { PROJECT_ROOT, DATA_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import configManager from './configManager.js';
 
 /**
@@ -53,7 +53,7 @@ class ComfyUIRunner {
    * @returns {string} 配置文件路径
    */
   generateModelPathsConfig(modelId) {
-    const configDir = path.join(PROJECT_ROOT, 'data', 'comfyui_config');
+    const configDir = path.join(DATA_DIR, 'comfyui_config');
     const configPath = path.join(configDir, `${modelId}.yaml`);
 
     // 确保配置目录存在
@@ -62,7 +62,7 @@ class ComfyUIRunner {
     }
 
     // ComfyUI模型目录
-    const modelsDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'comfyui', 'models');
+    const modelsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'models');
 
     // 生成配置内容
     const config = {
@@ -103,7 +103,7 @@ class ComfyUIRunner {
    * @param {string} modelId - 模型ID
    */
   cleanupConfig(modelId) {
-    const configPath = path.join(PROJECT_ROOT, 'data', 'comfyui_config', `${modelId}.yaml`);
+    const configPath = path.join(DATA_DIR, 'comfyui_config', `${modelId}.yaml`);
 
     if (fs.existsSync(configPath)) {
       fs.unlinkSync(configPath);

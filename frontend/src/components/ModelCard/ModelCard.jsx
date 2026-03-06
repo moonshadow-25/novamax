@@ -158,8 +158,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         selected_quantization: quantizationName
       });
 
+      // 先刷新模型数据，再更新文件列表，避免中间态闪烁
+      await onUpdate();
+      const filesResult = await modelService.scanDownloadedFiles(model.id);
+      setRealDownloadedFiles(filesResult.downloadedFiles || []);
       message.success('量化版本已切换');
-      onUpdate();
     } catch (error) {
       message.error('切换失败');
     }
@@ -169,8 +172,16 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleSwitchToFile = async (filename) => {
     try {
       await modelService.setActiveFile(model.id, filename);
+
+      // 先刷新模型数据，再更新文件列表，避免中间态闪烁
+      await onUpdate();
+      try {
+        const filesResult = await modelService.scanDownloadedFiles(model.id);
+        setRealDownloadedFiles(filesResult.downloadedFiles || []);
+      } catch (e) {
+        console.error('扫描文件失败:', e);
+      }
       message.success('已切换到: ' + filename);
-      onUpdate();
     } catch (error) {
       message.error('切换失败');
     }
@@ -217,6 +228,25 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     }
   };
 
+  // 删除指定量化版本文件
+  const handleDeleteQuantization = async (filename) => {
+    try {
+      await modelService.deleteQuantization(model.id, filename);
+      message.success('已删除');
+      // 先刷新模型数据（更新卡片状态：启动/下载），再刷新文件列表
+      await onUpdate();
+      try {
+        const filesResult = await modelService.scanDownloadedFiles(model.id);
+        setRealDownloadedFiles(filesResult.downloadedFiles || []);
+      } catch (e) {
+        // 如果没有文件了，scanDownloadedFiles 可能返回空
+        setRealDownloadedFiles([]);
+      }
+    } catch (error) {
+      message.error('删除失败');
+    }
+  };
+
   const handleUse = () => {
     const routes = {
       llm: `/llm/${model.id}`,
@@ -260,12 +290,41 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const isRunning = model.status === 'running';
-  // 如果 downloaded_quantizations 数组有内容，或者下载状态是 completed，说明至少有一个量化版本已下载
-  const isDownloaded = model.downloaded
-    || (model.downloaded_quantizations && model.downloaded_quantizations.length > 0)
-    || model.download_status === 'completed';
+  
+  // 统一使用 model.downloaded_files 作为主要数据源（最可靠）
+  // realDownloadedFiles 只在弹窗打开时用于实时显示，关闭后应使用 model 数据
+  const downloadedFiles = model.downloaded_files || [];
+  const hasActiveFile = downloadedFiles.some(f => f.is_active);
+  
+  // 检查是否选择了未下载的量化版本（与active文件互斥）
+  const hasUndownloadedSelection = model.selected_quantization && !hasActiveFile;
+  
+  // 下载状态
   const downloadStatus = model.download_status;
   const downloadProgress = model.download_progress || 0;
+  
+  // 是否正在下载默认版本
+  const isDownloadingDefault = (downloadStatus === 'downloading' || downloadStatus === 'paused') &&
+                                model.downloading_quantization === model.selected_quantization;
+
+  // 默认版本下载完成（必须是默认量化版本的下载完成）
+  const isDefaultDownloadCompleted = downloadStatus === 'completed' &&
+                                     model.downloading_quantization === model.selected_quantization;
+
+  // 判断是否可以启动：
+  // 场景1：有active文件（已下载的默认版本）且不在下载默认版本
+  // 场景2：选中了未下载版本且该版本已下载完成
+  const canStart = (hasActiveFile && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted);
+
+  // 判断是否应该显示下载按钮：选中了未下载版本 且 不在下载中/已完成状态
+  const shouldDownload = hasUndownloadedSelection &&
+                        !isDefaultDownloadCompleted &&
+                        !isDownloadingDefault;
+  
+  // 旧的下载状态判断（兼容）
+  const isDownloaded = model.downloaded
+    || (model.downloaded_quantizations && model.downloaded_quantizations.length > 0)
+    || isDefaultDownloadCompleted;
 
   // 格式化文件大小
   const formatSize = (bytes) => {
@@ -277,7 +336,21 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const totalSize = (model.files?.model?.size || 0) + (model.files?.mmproj?.size || 0);
 
   // 获取当前选择的量化版本信息
-  const currentQuant = model.quantizations?.find(q => q.name === model.selected_quantization);
+  // 卡片状态始终使用 model.downloaded_files（与 model 数据一致），避免与 realDownloadedFiles 不同步导致闪烁
+  let currentQuant = null;
+  let currentQuantName = null;
+
+  if (hasActiveFile) {
+    const activeFile = downloadedFiles.find(f => f.is_active);
+    if (activeFile && activeFile.matched_preset) {
+      currentQuant = model.quantizations?.find(q => q.name === activeFile.matched_preset);
+      currentQuantName = activeFile.matched_preset;
+    }
+  }
+  if (!currentQuant && model.selected_quantization) {
+    currentQuant = model.quantizations?.find(q => q.name === model.selected_quantization);
+    currentQuantName = model.selected_quantization;
+  }
 
   // 从完整的量化名称中提取显示用的量化类型
   const getQuantizationDisplayName = (quantName) => {
@@ -310,7 +383,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <h3 title={model.name}>{model.name}</h3>
         <Space size={4}>
           {modelSize > 0 && (
-            <span className="model-size-badge">{(modelSize / (1024 ** 3)).toFixed(0)}GB</span>
+            <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
           )}
           <Button
             size="small"
@@ -352,10 +425,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </div>
       )}
 
-      {!currentQuant && totalSize > 0 && <div className="model-size">大小: {formatSize(totalSize)}</div>}
 
-      {/* 未下载状态 */}
-      {!isDownloaded && !downloadStatus && model.type === 'llm' && (
+      {/* 下载按钮 - 当选择了未下载的量化版本且不在下载默认版本时显示 */}
+      {shouldDownload && model.type === 'llm' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           <Button
             type="primary"
@@ -369,8 +441,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* 下载中状态 */}
-      {downloadStatus === 'downloading' && model.type === 'llm' && (
+      {/* 下载中状态 - 只有当下载的是选中的默认版本时才显示 */}
+      {downloadStatus === 'downloading' && hasUndownloadedSelection && 
+       model.downloading_quantization === model.selected_quantization && 
+       model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="active" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -397,8 +471,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </div>
       )}
 
-      {/* 下载暂停状态 */}
-      {downloadStatus === 'paused' && model.type === 'llm' && (
+      {/* 下载暂停状态 - 只有当下载的是选中的默认版本时才显示 */}
+      {downloadStatus === 'paused' && hasUndownloadedSelection && 
+       model.downloading_quantization === model.selected_quantization && 
+       model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="normal" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -426,8 +502,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </div>
       )}
 
-      {/* 下载失败状态 */}
-      {downloadStatus === 'failed' && model.type === 'llm' && (
+      {/* 下载失败状态 - 只有当下载的是选中的默认版本时才显示 */}
+      {downloadStatus === 'failed' && hasUndownloadedSelection && 
+       model.downloading_quantization === model.selected_quantization && 
+       model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="exception" />
           <div style={{ marginTop: 8, color: '#ff4d4f', fontSize: '12px' }}>
@@ -519,8 +597,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         />
       </Modal>
 
-      {/* 已下载状态（非ComfyUI） */}
-      {isDownloaded && !downloadStatus && model.type !== 'comfyui' && (
+      {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI） */}
+      {canStart && model.type !== 'comfyui' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {!isRunning ? (
             <Button
@@ -588,7 +666,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <QuantizationSelector
           visible={quantizationSelectorVisible}
           quantizations={model.quantizations}
-          currentSelection={model.selected_quantization}
+          currentSelection={currentQuantName}
           downloadedQuantizations={realDownloadedQuantizations}
           downloadedFiles={realDownloadedFiles}
           downloadStates={model.download_states || []}
@@ -598,7 +676,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           onPauseDownload={handlePauseDownload}
           onResumeDownload={handleResumeDownload}
           onCancelDownload={handleCancelDownload}
-          onCancel={() => setQuantizationSelectorVisible(false)}
+          onDeleteQuantization={handleDeleteQuantization}
+          onCancel={async () => {
+            // 先刷新模型数据，等待完成
+            await onUpdate();
+            
+            // 再关闭弹窗，确保UI使用最新数据
+            setQuantizationSelectorVisible(false);
+          }}
         />
       )}
     </Card>

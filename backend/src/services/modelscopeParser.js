@@ -217,7 +217,7 @@ class ModelscopeParser {
         .sort((a, b) => a.Name.localeCompare(b.Name));
       const totalSize = filesInFolder.reduce((sum, f) => sum + (f.Size || 0), 0);
       const sizeLabel = totalSize > 0
-        ? `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`
+        ? `${parseFloat((totalSize / (1024 * 1024 * 1024)).toFixed(2))} GB`
         : '文件夹';
 
       // 保存每个文件的 name+size，供下载时计算累计进度用
@@ -258,7 +258,7 @@ class ModelscopeParser {
         recommended: false
       };
 
-      const sizeGB = (file.Size / (1024 * 1024 * 1024)).toFixed(2);
+      const sizeGB = parseFloat((file.Size / (1024 * 1024 * 1024)).toFixed(2));
 
       quantizations.push({
         name: quantType,

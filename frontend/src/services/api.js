@@ -24,7 +24,8 @@ export const modelService = {
   search: (query) => api.get(`/models/search?q=${query}`),
   getDownloadedQuantizations: (id) => api.get(`/models/${id}/downloaded-quantizations`),
   scanDownloadedFiles: (id) => api.get(`/models/${id}/scan-files`),
-  setActiveFile: (id, filename) => api.post(`/models/${id}/set-active-file`, { filename })
+  setActiveFile: (id, filename) => api.post(`/models/${id}/set-active-file`, { filename }),
+  deleteQuantization: (id, filename) => api.delete(`/models/${id}/quantization`, { data: { filename } })
 };
 
 export const modelscopeService = {

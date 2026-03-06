@@ -124,6 +124,8 @@ class ModelManager {
 
     console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
 
+    const existingFiles = model.downloaded_files || [];
+
     return ggufFiles.map(filename => {
       const filePath = path.join(modelDir, filename);
       const stats = fs.statSync(filePath);
@@ -144,12 +146,15 @@ class ModelManager {
         matchedPreset = preset?.name || null;
       }
 
+      // 保留已存储的 is_active 状态
+      const existing = existingFiles.find(f => f.filename === filename);
+
       return {
         filename,
         size: stats.size,
         downloaded_at: stats.birthtime.toISOString(),
         matched_preset: matchedPreset,
-        is_active: false  // 默认不激活
+        is_active: existing?.is_active || false
       };
     });
   }
@@ -227,8 +232,8 @@ class ModelManager {
       if (activeFile) {
         const file = scannedFiles.find(f => f.filename === activeFile.filename);
         if (file) file.is_active = true;
-      } else if (scannedFiles.length > 0) {
-        // 否则激活第一个文件
+      } else if (scannedFiles.length > 0 && !model.selected_quantization) {
+        // 仅在没有设置 selected_quantization 时才自动激活第一个文件
         scannedFiles[0].is_active = true;
       }
 

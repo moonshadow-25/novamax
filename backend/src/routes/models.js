@@ -131,6 +131,15 @@ router.put('/models/:id', async (req, res) => {
           }
         }
       }
+
+      // 设置selected_quantization时，清除所有已下载文件的active状态（已下载和未下载只能有一个默认）
+      if (model && model.downloaded_files && model.downloaded_files.length > 0) {
+        updates.downloaded_files = model.downloaded_files.map(f => ({
+          ...f,
+          is_active: false
+        }));
+        console.log('🔄 清除所有已下载文件的active状态');
+      }
     }
 
     const updatedModel = await modelManager.update(req.params.id, updates);
@@ -141,6 +150,72 @@ router.put('/models/:id', async (req, res) => {
     res.json(updatedModel);
   } catch (error) {
     console.error('❌ 更新模型失败:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 删除指定量化版本的文件
+router.delete('/models/:id/quantization', async (req, res) => {
+  try {
+    const { filename } = req.body;
+    const model = modelManager.getById(req.params.id);
+
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+    if (!filename) return res.status(400).json({ error: 'filename is required' });
+
+    // 删除运行时目录中的文件
+    const runtimeFile = path.join(MODELS_RUN_DIR, model.type, req.params.id, filename);
+    if (fs.existsSync(runtimeFile)) {
+      fs.unlinkSync(runtimeFile);
+      console.log(`✓ 已删除文件: ${runtimeFile}`);
+    }
+
+    // 删除下载目录中的文件
+    const downloadFile = path.join(DOWNLOADS_DIR, model.type, req.params.id, filename);
+    if (fs.existsSync(downloadFile)) {
+      fs.unlinkSync(downloadFile);
+      console.log(`✓ 已删除下载文件: ${downloadFile}`);
+    }
+
+    // 更新 downloaded_files，移除该文件
+    const existingFiles = model.downloaded_files || [];
+    const deletedFile = existingFiles.find(f => f.filename === filename);
+    let updatedFiles = existingFiles.filter(f => f.filename !== filename);
+
+    // 如果删除的是激活文件，将该量化版本设为 selected_quantization（保持默认不变，只是回到未下载状态）
+    let newSelectedQuantization = model.selected_quantization;
+    if (deletedFile?.is_active) {
+      // 不再自动激活其他文件，而是保留该预设为默认
+      if (deletedFile.matched_preset) {
+        newSelectedQuantization = deletedFile.matched_preset;
+      }
+    }
+
+    // 同步更新 downloaded_quantizations，移除被删文件对应的量化版本名
+    let updatedQuantizations = model.downloaded_quantizations || [];
+    if (deletedFile?.matched_preset) {
+      // 只有当没有其他文件也匹配同一个预设时才移除
+      const otherFileWithSamePreset = updatedFiles.some(f => f.matched_preset === deletedFile.matched_preset);
+      if (!otherFileWithSamePreset) {
+        updatedQuantizations = updatedQuantizations.filter(q => q !== deletedFile.matched_preset);
+      }
+    }
+
+    // 清除该量化版本的下载状态（允许重新下载）
+    if (deletedFile?.matched_preset) {
+      downloadStateManager.deleteState(req.params.id, deletedFile.matched_preset);
+    }
+
+    await modelManager.update(req.params.id, {
+      downloaded_files: updatedFiles,
+      downloaded_quantizations: updatedQuantizations,
+      downloaded: updatedFiles.length > 0,
+      selected_quantization: newSelectedQuantization
+    });
+
+    res.json({ success: true, message: '量化版本文件已删除' });
+  } catch (error) {
+    console.error('删除量化版本文件失败:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -252,22 +327,30 @@ router.post('/models/:id/set-active-file', async (req, res) => {
       return res.status(404).json({ error: 'Model not found' });
     }
 
-    const downloadedFiles = model.downloaded_files || [];
+    // 重新扫描文件以获取正确的 matched_preset（修正历史数据中的错误匹配）
+    const scannedFiles = await modelManager.scanDownloadedFiles(req.params.id);
 
     // 检查文件是否存在
-    const fileExists = downloadedFiles.some(f => f.filename === filename);
+    const fileExists = scannedFiles.some(f => f.filename === filename);
     if (!fileExists) {
-      return res.status(404).json({ error: 'File not found' });
+      // 回退到已存储的文件列表检查
+      const storedExists = (model.downloaded_files || []).some(f => f.filename === filename);
+      if (!storedExists) {
+        return res.status(404).json({ error: 'File not found' });
+      }
     }
 
-    // 更新激活状态
-    const updatedFiles = downloadedFiles.map(f => ({
+    // 使用扫描结果（含正确的 matched_preset），更新激活状态
+    const baseFiles = scannedFiles.length > 0 ? scannedFiles : (model.downloaded_files || []);
+    const updatedFiles = baseFiles.map(f => ({
       ...f,
       is_active: f.filename === filename
     }));
 
+    // 设置active文件时，清除selected_quantization（已下载和未下载只能有一个默认）
     await modelManager.update(req.params.id, {
-      downloaded_files: updatedFiles
+      downloaded_files: updatedFiles,
+      selected_quantization: null
     });
 
     res.json({ success: true });

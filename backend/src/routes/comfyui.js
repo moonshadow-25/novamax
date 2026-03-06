@@ -10,7 +10,7 @@ import modelscopeParser from '../services/modelscopeParser.js';
 import openaiProxyService from '../services/openaiProxyService.js';
 import urlConverter from '../services/urlConverter.js';
 import comfyuiDownloader from '../services/comfyuiDownloader.js';
-import { PROJECT_ROOT } from '../config/constants.js';
+import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 
 const router = express.Router();
 
@@ -141,7 +141,7 @@ router.post('/comfyui/upload-workflow', upload.fields([
 
     // 保存工作流到workflows目录
     const workflowId = Date.now().toString();
-    const workflowsDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'comfyui', 'workflows');
+    const workflowsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'workflows');
     const workflowPath = path.join(workflowsDir, `${workflowId}.json`);
 
     // 确保目录存在

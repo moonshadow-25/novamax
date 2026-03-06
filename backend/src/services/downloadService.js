@@ -441,9 +441,9 @@ class DownloadService extends EventEmitter {
         const filePath = path.join(targetDir, filename);
         const stats = fs.statSync(filePath);
 
-        // 尝试匹配预设
-        let matchedPreset = downloadState?.targetQuantization || null;
-        if (model.quantizations && !matchedPreset) {
+        // 尝试匹配预设：优先使用文件名正则匹配，回退到 targetQuantization
+        let matchedPreset = null;
+        if (model.quantizations) {
           const preset = model.quantizations.find(q => {
             if (q.filename && filename === q.filename) return true;
             const pattern = q.filename || `*${q.name}*.gguf`;
@@ -451,6 +451,9 @@ class DownloadService extends EventEmitter {
             return regex.test(filename);
           });
           matchedPreset = preset?.name || null;
+        }
+        if (!matchedPreset) {
+          matchedPreset = downloadState?.targetQuantization || null;
         }
 
         return {
@@ -475,8 +478,18 @@ class DownloadService extends EventEmitter {
         }
       }
 
-      // 如果没有激活的文件，激活第一个
-      if (!mergedFiles.some(f => f.is_active) && mergedFiles.length > 0) {
+      // 下载完成后激活逻辑：
+      // 1. 如果下载的文件匹配 selected_quantization，自动激活并清除 selected_quantization
+      // 2. 如果没有激活的文件且没有 selected_quantization，激活第一个
+      let shouldClearSelectedQuantization = false;
+      if (model.selected_quantization && !mergedFiles.some(f => f.is_active)) {
+        const matchingFile = mergedFiles.find(f => f.matched_preset === model.selected_quantization);
+        if (matchingFile) {
+          matchingFile.is_active = true;
+          shouldClearSelectedQuantization = true;
+        }
+      }
+      if (!mergedFiles.some(f => f.is_active) && mergedFiles.length > 0 && !model.selected_quantization) {
         mergedFiles[0].is_active = true;
       }
 
@@ -487,12 +500,16 @@ class DownloadService extends EventEmitter {
       }
 
       // 只更新持久字段到数据库
-      await modelManager.update(model.id, {
+      const updateData = {
         downloaded: true,
         downloaded_files: mergedFiles,
         downloaded_quantizations: downloadedQuantizations,
         local_path: targetDir
-      });
+      };
+      if (shouldClearSelectedQuantization) {
+        updateData.selected_quantization = null;
+      }
+      await modelManager.update(model.id, updateData);
 
       // 重新生成 INI 预设文件
       await presetService.generatePresetFile(model.type);
@@ -570,9 +587,9 @@ class DownloadService extends EventEmitter {
         const filePath = path.join(targetDir, filename);
         const stats = fs.statSync(filePath);
 
-        // 尝试匹配预设
-        let matchedPreset = downloadState?.targetQuantization || null;
-        if (model.quantizations && !matchedPreset) {
+        // 尝试匹配预设：优先使用文件名正则匹配，回退到 targetQuantization
+        let matchedPreset = null;
+        if (model.quantizations) {
           const preset = model.quantizations.find(q => {
             if (q.filename && filename === q.filename) return true;
             const pattern = q.filename || `*${q.name}*.gguf`;
@@ -580,6 +597,9 @@ class DownloadService extends EventEmitter {
             return regex.test(filename);
           });
           matchedPreset = preset?.name || null;
+        }
+        if (!matchedPreset) {
+          matchedPreset = downloadState?.targetQuantization || null;
         }
 
         return {
@@ -604,8 +624,18 @@ class DownloadService extends EventEmitter {
         }
       }
 
-      // 如果没有激活的文件，激活第一个
-      if (!mergedFiles.some(f => f.is_active) && mergedFiles.length > 0) {
+      // 下载完成后激活逻辑：
+      // 1. 如果下载的文件匹配 selected_quantization，自动激活并清除 selected_quantization
+      // 2. 如果没有激活的文件且没有 selected_quantization，激活第一个
+      let shouldClearSelectedQuantization = false;
+      if (model.selected_quantization && !mergedFiles.some(f => f.is_active)) {
+        const matchingFile = mergedFiles.find(f => f.matched_preset === model.selected_quantization);
+        if (matchingFile) {
+          matchingFile.is_active = true;
+          shouldClearSelectedQuantization = true;
+        }
+      }
+      if (!mergedFiles.some(f => f.is_active) && mergedFiles.length > 0 && !model.selected_quantization) {
         mergedFiles[0].is_active = true;
       }
 
@@ -617,12 +647,16 @@ class DownloadService extends EventEmitter {
       }
 
       // 只更新持久字段到数据库
-      await modelManager.update(model.id, {
+      const updateData = {
         downloaded: true,
         downloaded_files: mergedFiles,
         downloaded_quantizations: downloadedQuantizations,
         local_path: targetDir
-      });
+      };
+      if (shouldClearSelectedQuantization) {
+        updateData.selected_quantization = null;
+      }
+      await modelManager.update(model.id, updateData);
 
       // 重新生成 INI 预设文件
       await presetService.generatePresetFile(model.type);

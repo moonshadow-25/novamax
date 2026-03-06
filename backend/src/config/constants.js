@@ -1,4 +1,5 @@
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,12 +35,21 @@ export const DEFAULT_PORTS = {
   WHISPER: 8201
 };
 
-// 使用绝对路径，从项目根目录开始
+// 使用绝对路径，从项目根目录开始（用于 external 工具等）
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
 export { PROJECT_ROOT };
-export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
-export const MODELS_DIR = path.join(PROJECT_ROOT, 'data', 'models');
-export const DOWNLOADS_DIR = path.join(PROJECT_ROOT, 'data', 'downloads');
-export const MODELS_RUN_DIR = path.join(PROJECT_ROOT, 'data', 'models_dir');
-export const PRESETS_DIR = path.join(PROJECT_ROOT, 'data', 'presets');
-export const CONFIG_FILE = path.join(PROJECT_ROOT, 'data', 'config.json');
+
+//  Windows 目录联接（Junction）示例：
+// 1. 创建一个新的目录作为数据目录（如果不存在）
+//    mkdir C:\novastudio_data
+// 2. 创建一个联接，将 ~/.novastudio 指向新的数据目录
+//    mklink /J C:\Users\YourUsername\.novastudio C:\novastudio_data
+// 用户数据目录：~/.novastudio
+// export const DATA_DIR = 'C:\\linglong';
+export const DATA_DIR = path.join(os.homedir(), '.novastudio');
+export const MODELS_DIR = path.join(DATA_DIR, 'models');
+export const DOWNLOADS_DIR = path.join(DATA_DIR, 'downloads');
+export const MODELS_RUN_DIR = path.join(DATA_DIR, 'models_dir');
+export const PRESETS_DIR = path.join(DATA_DIR, 'presets');
+export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+export const CACHE_DIR = path.join(DATA_DIR, 'cache');

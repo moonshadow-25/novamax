@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { PROJECT_ROOT } from '../config/constants.js';
+import { PROJECT_ROOT, CACHE_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import urlConverter from './urlConverter.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -190,7 +190,7 @@ class ComfyUIDownloader {
       // 固定的确定性目录，与 LLM 下载保持一致，后端重启后 ModelScope SDK 可续传
       const typeDir = path.basename(path.dirname(targetPath));
       const baseName = path.basename(targetPath, path.extname(targetPath));
-      const tempDir = path.join(PROJECT_ROOT, 'data', 'cache', `ms_${typeDir}_${baseName}`);
+      const tempDir = path.join(CACHE_DIR, `ms_${typeDir}_${baseName}`);
 
       console.log(`  ModelScope 模型: ${modelId}, 文件: ${filename}`);
       console.log(`  续传目录: ${tempDir}`);
@@ -242,7 +242,7 @@ class ComfyUIDownloader {
       // 固定的确定性目录，支持续传
       const typeDir = path.basename(path.dirname(targetPath));
       const baseName = path.basename(targetPath, path.extname(targetPath));
-      const tempDir = path.join(PROJECT_ROOT, 'data', 'cache', `hf_${typeDir}_${baseName}`);
+      const tempDir = path.join(CACHE_DIR, `hf_${typeDir}_${baseName}`);
 
       console.log(`  HF 仓库: ${repoId}, 文件路径: ${filepath}`);
       console.log(`  续传目录: ${tempDir}`);
@@ -462,7 +462,7 @@ class ComfyUIDownloader {
    * type 是 ComfyUI 目录名（text_encoders / vae / diffusion_models / checkpoints 等）
    */
   _getTargetPath(type, filename) {
-    const modelsDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'comfyui', 'models');
+    const modelsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'models');
     return path.join(modelsDir, type, filename);
   }
 

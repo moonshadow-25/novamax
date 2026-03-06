@@ -6,7 +6,8 @@ import {
   DownloadOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import './QuantizationSelector.css';
 
@@ -39,6 +40,7 @@ function QuantizationSelector({
   onPauseDownload,
   onResumeDownload,
   onCancelDownload,
+  onDeleteQuantization,
   onCancel
 }) {
   // 使用新的 downloadedFiles 或回退到旧的 downloadedQuantizations
@@ -88,6 +90,9 @@ function QuantizationSelector({
       }))
   ];
 
+  // 是否有任何文件处于激活状态
+  const hasAnyActiveFile = allItems.some(i => i.isActive);
+
   // 按分类组织量化版本
   const groupedQuantizations = {};
   allItems.forEach(item => {
@@ -110,9 +115,9 @@ function QuantizationSelector({
   function formatBytes(bytes) {
     if (!bytes) return '未知';
     const gb = bytes / (1024 * 1024 * 1024);
-    if (gb >= 1) return `${gb.toFixed(2)} GB`;
+    if (gb >= 1) return `${parseFloat(gb.toFixed(2))} GB`;
     const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(2)} MB`;
+    return `${parseFloat(mb.toFixed(2))} MB`;
   }
 
   const renderQuantizationItem = (item) => {
@@ -122,7 +127,12 @@ function QuantizationSelector({
     const isPaused = itemState?.status === 'paused';
     const isCompleted = itemState?.status === 'completed';
     const isFailed = itemState?.status === 'failed';
-    const isCurrent = currentSelection === item.name || item.isActive;
+    // 判断是否为当前默认：
+    // - 有激活文件时：只有激活的文件是当前默认
+    // - 没有激活文件时：匹配 currentSelection（selected_quantization）的是当前默认
+    const isCurrent = hasAnyActiveFile
+      ? item.isActive
+      : currentSelection === item.name;
     const progress = itemState?.progress || 0;
 
     return (
@@ -162,9 +172,6 @@ function QuantizationSelector({
                   <StarOutlined style={{ color: '#faad14', marginLeft: 8, fontSize: 16 }} />
                 </Tooltip>
               )}
-              {isCurrent && (
-                <Tag color="blue" style={{ marginLeft: 8 }}>当前使用</Tag>
-              )}
             </div>
             <div style={{ fontSize: 12, color: '#666' }}>
               {item.description}
@@ -180,27 +187,19 @@ function QuantizationSelector({
 
           {/* 右侧：操作按钮 */}
           <div style={{ marginLeft: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* 已下载标记 */}
-            {(item.isDownloaded || isCompleted) && !isDownloading && !isPaused && (
-              <CheckCircleFilled style={{ color: '#52c41a', fontSize: 20 }} />
-            )}
-
-            {/* 设为默认按钮 - 统一逻辑，不区分已下载/未下载 */}
-            {!isCurrent && !isDownloading && !isPaused && (
+            {/* 删除按钮 - 仅已下载的量化版本显示 */}
+            {(item.isDownloaded || isCompleted) && !isDownloading && !isPaused && item.file && onDeleteQuantization && (
               <Button
                 size="small"
+                danger
+                icon={<DeleteOutlined />}
                 onClick={() => {
-                  // 如果有文件信息且已下载，使用新的切换文件方法
-                  if (item.file && item.isDownloaded && onSwitchFile) {
-                    onSwitchFile(item.file.filename);
-                  } else {
-                    // 否则使用设置默认量化版本方法
-                    onSwitch(item.name);
+                  if (window.confirm(`确定要删除 ${item.label} 吗？此操作不可恢复。`)) {
+                    onDeleteQuantization(item.file.filename);
                   }
                 }}
-              >
-                设为默认
-              </Button>
+                title="删除此量化版本"
+              />
             )}
 
             {/* 下载按钮 - 仅未下载的预设时显示 */}
@@ -212,6 +211,27 @@ function QuantizationSelector({
                 size="small"
               >
                 下载
+              </Button>
+            )}
+
+            {/* 默认选中标记 */}
+            {isCurrent && !isDownloading && !isPaused && (
+              <CheckCircleFilled style={{ color: '#52c41a', fontSize: 20 }} />
+            )}
+
+            {/* 设为默认按钮 - 统一逻辑，不区分已下载/未下载 */}
+            {!isCurrent && !isDownloading && !isPaused && (
+              <Button
+                size="small"
+                onClick={() => {
+                  if (item.file && item.isDownloaded && onSwitchFile) {
+                    onSwitchFile(item.file.filename);
+                  } else {
+                    onSwitch(item.name);
+                  }
+                }}
+              >
+                设为默认
               </Button>
             )}
 
