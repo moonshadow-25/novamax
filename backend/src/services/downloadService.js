@@ -366,6 +366,14 @@ class DownloadService extends EventEmitter {
           filesToDownload.push(wildcardPattern);
         }
 
+        // 如果模型有视觉功能，下载所有 mmproj 文件
+        if (model.mmproj_options && model.mmproj_options.length > 0) {
+          for (const mmproj of model.mmproj_options) {
+            filesToDownload.push(mmproj.name);
+            console.log(`添加视觉投影文件: ${mmproj.name}`);
+          }
+        }
+
         // 添加必要的配置文件（但排除其他 .gguf 文件）
         filesToDownload.push('*.json', 'tokenizer*', '*.txt', 'LICENSE', 'README*');
 
@@ -373,8 +381,16 @@ class DownloadService extends EventEmitter {
         console.log(`下载文件列表: ${filesToDownload.join(', ')}`);
       } else if (model.files?.model?.name) {
         // 如果有指定模型文件名，只下载该文件
-        console.log(`只下载模型文件: ${model.files.model.name}`);
-        downloadArgs.push('--files', model.files.model.name);
+        const fallbackFiles = [model.files.model.name];
+        // 如果模型有视觉功能，下载所有 mmproj 文件
+        if (model.mmproj_options && model.mmproj_options.length > 0) {
+          for (const mmproj of model.mmproj_options) {
+            fallbackFiles.push(mmproj.name);
+            console.log(`添加视觉投影文件: ${mmproj.name}`);
+          }
+        }
+        console.log(`下载文件列表: ${fallbackFiles.join(', ')}`);
+        downloadArgs.push('--files', ...fallbackFiles);
       }
 
       // 调用 Python 脚本
