@@ -16,6 +16,7 @@ import configRouter from './routes/config.js';
 import modelscopeRouter from './routes/modelscope.js';
 import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
+import eventBus from './services/eventBus.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,6 +73,11 @@ app.use('/api', configRouter);
 app.use('/api', modelscopeRouter);
 app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
+
+// SSE 实时事件推送
+app.get('/api/events', (req, res) => {
+  eventBus.addClient(res);
+});
 
 const frontendPath = path.join(__dirname, '../../frontend/dist');
 app.use(express.static(frontendPath));

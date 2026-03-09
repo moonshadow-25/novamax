@@ -71,7 +71,7 @@ function LLMChat() {
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/?tab=llm')}
           />
           <Title level={4} style={{ margin: 0 }}>{model?.name || 'LLM Chat'}</Title>
         </Space>

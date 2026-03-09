@@ -5,6 +5,7 @@ import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
+import eventBus from '../services/eventBus.js';
 
 const router = express.Router();
 
@@ -147,6 +148,7 @@ router.put('/models/:id', async (req, res) => {
       return res.status(404).json({ error: 'Model not found' });
     }
     console.log('✅ 模型更新成功:', updatedModel.id);
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
     res.json(updatedModel);
   } catch (error) {
     console.error('❌ 更新模型失败:', error);
@@ -353,6 +355,7 @@ router.post('/models/:id/set-active-file', async (req, res) => {
       selected_quantization: null
     });
 
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });

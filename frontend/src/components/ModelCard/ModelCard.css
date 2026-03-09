@@ -45,6 +45,15 @@
   max-width: 70%; /* 留出空间给右侧按钮 */
 }
 
+.model-source {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .model-description {
   color: rgba(0, 0, 0, 0.65);
   font-size: 14px;
@@ -80,6 +89,10 @@
 /* 深色主题 */
 [data-theme='dark'] .model-header h3 {
   color: rgba(255, 255, 255, 0.95) !important;
+}
+
+[data-theme='dark'] .model-source {
+  color: rgba(255, 255, 255, 0.45) !important;
 }
 
 [data-theme='dark'] .model-description {

@@ -1,5 +1,6 @@
 import express from 'express';
 import processManager from '../services/processManager.js';
+import eventBus from '../services/eventBus.js';
 
 const router = express.Router();
 
@@ -8,6 +9,7 @@ router.post('/backend/start/:modelId', async (req, res) => {
   try {
     const { mode } = req.query; // 'single' 或 'router'
     const result = await processManager.startBackend(req.params.modelId, mode);
+    eventBus.broadcast('model-updated', { modelId: req.params.modelId });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -18,6 +20,7 @@ router.post('/backend/start/:modelId', async (req, res) => {
 router.post('/backend/start-router/:type', async (req, res) => {
   try {
     const result = await processManager.startRouterWithAllModels(req.params.type);
+    eventBus.broadcast('model-updated', { type: req.params.type });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -27,6 +30,7 @@ router.post('/backend/start-router/:type', async (req, res) => {
 router.post('/backend/stop/:modelId', async (req, res) => {
   try {
     const result = await processManager.stopBackend(req.params.modelId);
+    eventBus.broadcast('model-updated', { modelId: req.params.modelId });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

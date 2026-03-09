@@ -7,9 +7,12 @@
  * - 后端重启时状态自动清空
  * - 支持同一模型的多个量化版本并发下载
  */
+import eventBus from './eventBus.js';
+
 class DownloadStateManager {
   constructor() {
     this.states = new Map(); // key: "modelId" or "modelId::quantName" -> state
+    this._lastBroadcast = 0;
   }
 
   /** 构建内部 key */
@@ -83,6 +86,12 @@ class DownloadStateManager {
     if (state) {
       state.progress = progress;
       state.speed = speed;
+      // 限流：最多每 2 秒广播一次进度
+      const now = Date.now();
+      if (now - this._lastBroadcast >= 2000) {
+        this._lastBroadcast = now;
+        eventBus.broadcast('download-progress', { modelId });
+      }
     }
   }
 
@@ -107,6 +116,7 @@ class DownloadStateManager {
     if (state) {
       state.status = status;
       state.error = error;
+      eventBus.broadcast('download-progress', { modelId, status });
     }
   }
 

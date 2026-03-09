@@ -492,7 +492,7 @@ function ComfyUI() {
       <Layout style={{ minHeight: '100vh' }}>
         <Content style={{ padding: 24 }}>
           <Empty description="模型不存在" />
-          <Button onClick={() => navigate('/')} style={{ marginTop: 16 }}>返回首页</Button>
+          <Button onClick={() => navigate('/?tab=comfyui')} style={{ marginTop: 16 }}>返回首页</Button>
         </Content>
       </Layout>
     );
@@ -545,7 +545,7 @@ function ComfyUI() {
         <Button
           type="text"
           icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/?tab=comfyui')}
         />
         <Title level={4} style={{ display: 'inline', marginLeft: 16, marginBottom: 0 }}>
           ComfyUI — {model.name}

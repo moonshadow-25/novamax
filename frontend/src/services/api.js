@@ -107,7 +107,9 @@ export const configService = {
   get: () => api.get('/config'),
   update: (data) => api.put('/config', data),
   getTheme: () => api.get('/config/theme'),
-  setTheme: (theme) => api.put('/config/theme', { theme })
+  setTheme: (theme) => api.put('/config/theme', { theme }),
+  getFavorites: () => api.get('/config/favorites'),
+  setFavorites: (favorites) => api.put('/config/favorites', { favorites })
 };
 
 export default api;

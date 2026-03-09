@@ -248,6 +248,12 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const handleUse = () => {
+    if (model.type === 'llm' && model.port) {
+      // LLM 模型直接打开 llama.cpp 自带的对话页面
+      const host = window.location.hostname || '127.0.0.1';
+      window.open(`http://${host}:${model.port}`, '_blank');
+      return;
+    }
     const routes = {
       llm: `/llm/${model.id}`,
       comfyui: `/comfyui/${model.id}`,
@@ -385,15 +391,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           {modelSize > 0 && (
             <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
           )}
-          <Button
-            size="small"
-            type="text"
-            icon={isFavorited
-              ? <StarFilled style={{ color: '#faad14' }} />
-              : <StarOutlined style={{ color: '#bbb' }} />}
-            onClick={() => onToggleFavorite?.(model.id)}
-            title={isFavorited ? '取消收藏' : '收藏'}
-          />
+          {model.type === 'llm' && (
+            <Button
+              size="small"
+              type="text"
+              icon={isFavorited
+                ? <StarFilled style={{ color: '#faad14' }} />
+                : <StarOutlined style={{ color: '#bbb' }} />}
+              onClick={() => onToggleFavorite?.(model.id)}
+              title={isFavorited ? '取消收藏' : '收藏'}
+            />
+          )}
           <Tag color={isRunning ? 'green' : 'default'} style={{ margin: 0 }}>
             {isRunning ? '运行中' : '已停止'}
           </Tag>
@@ -405,6 +413,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           />
         </Space>
       </div>
+      {model.modelscope_id && (
+        <div className="model-source" title={model.modelscope_id}>
+          {model.modelscope_id.split('/')[0]}
+        </div>
+      )}
       <p className="model-description">{model.description || '暂无描述'}</p>
 
       {/* 显示量化版本信息 */}

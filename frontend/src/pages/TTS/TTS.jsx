@@ -16,7 +16,7 @@ function TTS() {
         <Button
           type="text"
           icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/?tab=tts')}
         />
         <Title level={4} style={{ display: 'inline', marginLeft: 16 }}>TTS</Title>
       </Header>

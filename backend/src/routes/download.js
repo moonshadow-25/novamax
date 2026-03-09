@@ -1,5 +1,6 @@
 import express from 'express';
 import downloadService from '../services/downloadService.js';
+import eventBus from '../services/eventBus.js';
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ router.post('/download/start', async (req, res) => {
     }
 
     const downloadState = await downloadService.startDownload(modelId, quantizationName);
+    eventBus.broadcast('download-progress', { modelId, status: 'downloading' });
     res.json(downloadState);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -23,6 +25,7 @@ router.post('/download/pause/:id', async (req, res) => {
   try {
     const { quantizationName } = req.body || {};
     const downloadState = await downloadService.pauseDownload(req.params.id, quantizationName);
+    eventBus.broadcast('download-progress', { modelId: req.params.id, status: 'paused' });
     res.json(downloadState);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -34,6 +37,7 @@ router.post('/download/resume/:id', async (req, res) => {
   try {
     const { quantizationName } = req.body || {};
     const downloadState = await downloadService.resumeDownload(req.params.id, quantizationName);
+    eventBus.broadcast('download-progress', { modelId: req.params.id, status: 'downloading' });
     res.json(downloadState);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -45,6 +49,7 @@ router.delete('/download/:id', async (req, res) => {
   try {
     const quantizationName = req.body?.quantizationName || req.query?.q;
     const result = await downloadService.cancelDownload(req.params.id, quantizationName);
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

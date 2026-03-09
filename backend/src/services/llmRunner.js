@@ -21,7 +21,7 @@ export function generateRouterCommand(type = 'llm', port = DEFAULT_PORTS.LLAMACP
     '--models-dir', modelsDir,
     '--models-preset', presetPath,
     '--port', port.toString(),
-    '--host', '127.0.0.1',
+    '--host', '0.0.0.0',
     '--timeout', '600',
   ];
 
@@ -56,8 +56,8 @@ export function generateSingleModelCommand(model, port) {
     throw new Error('模型文件路径不存在');
   }
 
-  // 查找模型文件
-  const modelPath = _findModelFile(model.local_path);
+  // 查找模型文件（优先使用用户选中的激活文件）
+  const modelPath = _findModelFile(model.local_path, model);
   if (!modelPath) {
     throw new Error('找不到模型文件');
   }
@@ -69,7 +69,7 @@ export function generateSingleModelCommand(model, port) {
   const args = [
     '-m', modelPath,
     '--port', port.toString(),
-    '--host', '127.0.0.1',
+    '--host', '0.0.0.0',
   ];
 
   // 默认参数值（当用户未设置时使用）
@@ -131,8 +131,9 @@ export function generateSingleModelCommand(model, port) {
 
 /**
  * 查找模型主文件
+ * 优先使用 downloaded_files 中 is_active 的文件
  */
-function _findModelFile(localPath) {
+function _findModelFile(localPath, model) {
   // 检查是否是单文件模型
   if (localPath.endsWith('.gguf') && fs.existsSync(localPath)) {
     return localPath;
@@ -140,6 +141,19 @@ function _findModelFile(localPath) {
 
   // 检查是否是目录
   if (fs.existsSync(localPath) && fs.statSync(localPath).isDirectory()) {
+    // 优先使用用户选中的激活文件
+    if (model?.downloaded_files?.length > 0) {
+      const activeFile = model.downloaded_files.find(f => f.is_active);
+      if (activeFile) {
+        const activePath = path.join(localPath, activeFile.filename);
+        if (fs.existsSync(activePath)) {
+          console.log(`使用激活文件: ${activeFile.filename}`);
+          return activePath;
+        }
+      }
+    }
+
+    // 回退：使用目录中第一个 .gguf 文件
     const files = fs.readdirSync(localPath);
     const modelFile = files.find(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
     if (modelFile) {

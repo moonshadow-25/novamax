@@ -16,7 +16,7 @@ function Whisper() {
         <Button
           type="text"
           icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/?tab=whisper')}
         />
         <Title level={4} style={{ display: 'inline', marginLeft: 16 }}>Whisper</Title>
       </Header>

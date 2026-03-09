@@ -42,7 +42,8 @@ class ConfigManager {
         comfyui: 8188,
         tts: 8200,
         whisper: 8201
-      }
+      },
+      favorites: []
     };
   }
 

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented } from 'antd';
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService } from '../../services/api';
+import { modelService, backendService, configService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import './Home.css';
@@ -16,8 +17,6 @@ const MODEL_TYPES = [
   { key: 'tts', label: 'TTS' },
   { key: 'whisper', label: 'Whisper' }
 ];
-
-const FAVORITES_KEY = 'novamax_model_favorites';
 
 const DEFAULT_FILTER_OPTIONS = (favorites, downloadedModels) => [
   { label: '全部', value: 'all' },
@@ -39,7 +38,11 @@ const WHISPER_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
 
 function Home() {
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState('llm');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = searchParams.get('tab');
+    return ['llm', 'comfyui', 'tts', 'whisper'].includes(tab) ? tab : 'llm';
+  });
   const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', whisper: 'all' });
   const filterTab = filterTabs[activeTab] || 'all';
   const setFilterTab = (val) => setFilterTabs(prev => ({ ...prev, [activeTab]: val }));
@@ -48,17 +51,20 @@ function Home() {
   const [loading, setLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [routerLoading, setRouterLoading] = useState(false);
-  const [favorites, setFavorites] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); }
-    catch { return []; }
-  });
+  const [favorites, setFavorites] = useState([]);
+
+  useEffect(() => {
+    configService.getFavorites().then(res => {
+      setFavorites(res.favorites || []);
+    }).catch(() => {});
+  }, []);
 
   const toggleFavorite = (modelId) => {
     setFavorites(prev => {
       const next = prev.includes(modelId)
         ? prev.filter(id => id !== modelId)
         : [...prev, modelId];
-      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      configService.setFavorites(next).catch(() => {});
       return next;
     });
   };
@@ -68,38 +74,38 @@ function Home() {
     (model.downloaded_quantizations && model.downloaded_quantizations.length > 0) ||
     model.download_status === 'completed';
 
-  useEffect(() => {
-    loadModels();
-  }, [activeTab]);
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
-  // 自动刷新下载进度
-  useEffect(() => {
-    const hasDownloading = models.some(m => {
-      if (m.download_status === 'downloading' || m.download_status === 'paused' || m.download_status === 'completed') return true;
-      if (m.download_states && m.download_states.some(s => s.status === 'downloading' || s.status === 'paused' || s.status === 'completed')) return true;
-      return false;
-    });
-
-    if (!hasDownloading) return;
-
-    const interval = setInterval(() => {
-      loadModels();
-    }, 2000); // 每2秒刷新一次
-
-    return () => clearInterval(interval);
-  }, [models]);
-
-  const loadModels = async () => {
+  const loadModels = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await modelService.getByType(activeTab);
+      const data = await modelService.getByType(activeTabRef.current);
       setModels(data.models || []);
     } catch (error) {
       console.error('Failed to load models:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadModels();
+  }, [activeTab]);
+
+  // SSE 实时状态同步
+  useEffect(() => {
+    const es = new EventSource('/api/events');
+    es.addEventListener('model-updated', () => loadModels());
+    es.addEventListener('download-progress', () => loadModels());
+    es.addEventListener('favorites-updated', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setFavorites(data.favorites || []);
+      } catch {}
+    });
+    return () => es.close();
+  }, [loadModels]);
 
   const handleStartRouter = async () => {
     setRouterLoading(true);
