@@ -216,19 +216,43 @@ class DownloadService extends EventEmitter {
       return { success: true };
     }
 
-    // 如果有 Python 进程，强制终止它
+    // 标记为取消中，防止进程退出时误报失败
+    downloadStateManager.setState(modelId, 'cancelling', null, quantName);
+
+    // 如果有 Python 进程，强制终止它并等待退出
     if (downloadState.pythonProcess) {
       try {
+        const pid = downloadState.pythonProcess.pid;
         if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', downloadState.pythonProcess.pid.toString(), '/T', '/F']);
-          console.log(`已强制终止 Python 进程树: ${downloadState.pythonProcess.pid}`);
+          spawn('taskkill', ['/pid', pid.toString(), '/T', '/F']);
+          console.log(`已强制终止 Python 进程树: ${pid}`);
         } else {
           downloadState.pythonProcess.kill('SIGKILL');
           console.log(`已强制终止 Python 进程: ${modelId}`);
         }
+        // 等待进程完全退出，释放文件句柄
+        await new Promise(resolve => {
+          const onExit = () => resolve();
+          downloadState.pythonProcess.on('exit', onExit);
+          downloadState.pythonProcess.on('error', onExit);
+          // 超时兜底
+          setTimeout(onExit, 3000);
+        });
       } catch (error) {
         console.error('终止进程失败:', error);
       }
+    }
+
+    // 如果有 axios controller，终止 HTTP 下载
+    if (downloadState.controller) {
+      try {
+        downloadState.controller.abort();
+        console.log(`已终止 HTTP 下载: ${modelId}`);
+      } catch (error) {
+        console.error('终止 HTTP 下载失败:', error);
+      }
+      // 等待文件句柄释放
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     // 从内存中删除下载状态
@@ -284,7 +308,13 @@ class DownloadService extends EventEmitter {
    */
   getAllDownloads() {
     const allStates = downloadStateManager.getAllStates();
-    return Object.values(allStates);
+    return Object.values(allStates).map(state => {
+      const model = modelManager.getById(state.modelId);
+      return {
+        ...state,
+        modelName: model?.name || state.modelId
+      };
+    });
   }
 
   /**
@@ -376,8 +406,23 @@ class DownloadService extends EventEmitter {
           const total = progressMatch[3].trim();
           const speed = progressMatch[4].trim();
 
+          // 解析字节数
+          const parseSize = (s) => {
+            const m = s.match(/([\d.]+)\s*(B|KB|MB|GB|TB|K|M|G|T)?/i);
+            if (!m) return 0;
+            const val = parseFloat(m[1]);
+            const unit = (m[2] || 'B').toUpperCase();
+            const units = { B: 1, K: 1024, KB: 1024, M: 1024**2, MB: 1024**2, G: 1024**3, GB: 1024**3, T: 1024**4, TB: 1024**4 };
+            return Math.floor(val * (units[unit] || 1));
+          };
+
+          const dlBytes = parseSize(downloaded);
+          const ttBytes = parseSize(total);
+          const speedBytes = parseSize(speed);
+
           // 只更新内存中的进度，不写数据库
-          downloadStateManager.updateProgress(downloadState.modelId, progress, speed, downloadState.targetQuantization);
+          downloadStateManager.updateProgress(downloadState.modelId, progress, speedBytes, downloadState.targetQuantization);
+          downloadStateManager.updateBytes(downloadState.modelId, dlBytes, ttBytes, downloadState.targetQuantization);
 
           console.log(`📊 下载进度: ${progress}% (${downloaded}/${total}) @ ${speed}`);
 
@@ -408,6 +453,10 @@ class DownloadService extends EventEmitter {
         const currentState = downloadStateManager.getState(model.id, downloadState.targetQuantization);
         if (currentState?.status === 'paused') {
           console.log(`下载已暂停: ${model.id}`);
+          return;
+        }
+        if (currentState?.status === 'cancelling') {
+          console.log(`下载已取消: ${model.id}`);
           return;
         }
         throw new Error(`ModelScope download failed (exit code ${exitCode}): ${errorData || 'Unknown error'}`);
@@ -934,6 +983,10 @@ class DownloadService extends EventEmitter {
    * 处理下载错误
    */
   async _handleDownloadError(modelId, error, quantName) {
+    // 如果已被取消或状态已删除，不设置失败状态
+    const currentState = downloadStateManager.getState(modelId, quantName);
+    if (!currentState || currentState.status === 'cancelling') return;
+
     downloadStateManager.setState(modelId, 'failed', error.message, quantName);
 
     // 使用 'download-error' 而非 'error'，避免 EventEmitter 无监听时崩溃进程

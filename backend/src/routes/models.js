@@ -91,6 +91,17 @@ router.get('/models/type/:type', async (req, res) => {
 router.post('/models', async (req, res) => {
   try {
     const { type, ...modelData } = req.body;
+
+    // 检查是否已存在相同 modelscope_id 的模型
+    if (modelData.modelscope_id) {
+      const existing = modelManager.getAll().find(
+        m => m.modelscope_id === modelData.modelscope_id && m.type === type
+      );
+      if (existing) {
+        return res.status(409).json({ error: `模型已存在：${existing.modelscope_id}` });
+      }
+    }
+
     const model = await modelManager.create(type, modelData);
     res.json(model);
   } catch (error) {

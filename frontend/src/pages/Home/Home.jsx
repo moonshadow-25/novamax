@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined } from '@ant-design/icons';
+import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge } from 'antd';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService, configService } from '../../services/api';
+import { modelService, backendService, configService, downloadService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
+import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
 import './Home.css';
 
 const { Header, Content } = Layout;
@@ -51,6 +52,8 @@ function Home() {
   const [loading, setLoading] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [routerLoading, setRouterLoading] = useState(false);
+  const [downloadCenterVisible, setDownloadCenterVisible] = useState(false);
+  const [downloadingCount, setDownloadingCount] = useState(0);
   const [favorites, setFavorites] = useState([]);
 
   useEffect(() => {
@@ -93,11 +96,20 @@ function Home() {
     loadModels();
   }, [activeTab]);
 
+  const refreshDownloadCount = useCallback(() => {
+    downloadService.getAll().then(data => {
+      const count = (data.downloads || []).filter(d => d.status === 'downloading').length;
+      setDownloadingCount(count);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { refreshDownloadCount(); }, []);
+
   // SSE 实时状态同步
   useEffect(() => {
     const es = new EventSource('/api/events');
-    es.addEventListener('model-updated', () => loadModels());
-    es.addEventListener('download-progress', () => loadModels());
+    es.addEventListener('model-updated', () => { loadModels(); refreshDownloadCount(); });
+    es.addEventListener('download-progress', () => { loadModels(); refreshDownloadCount(); });
     es.addEventListener('favorites-updated', (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -147,11 +159,21 @@ function Home() {
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ width: 400 }}
           />
-          <Button
-            type="text"
-            icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
-            onClick={toggleTheme}
-          />
+          <Space size={4}>
+            <Badge count={downloadingCount} size="small">
+              <Button
+                type="text"
+                icon={<DownloadOutlined />}
+                onClick={() => setDownloadCenterVisible(true)}
+                title="下载中心"
+              />
+            </Badge>
+            <Button
+              type="text"
+              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
+              onClick={toggleTheme}
+            />
+          </Space>
         </Space>
       </Header>
       <Content className="home-content">
@@ -215,6 +237,10 @@ function Home() {
         type={activeTab}
         onClose={() => setAddModalVisible(false)}
         onSuccess={loadModels}
+      />
+      <DownloadCenter
+        visible={downloadCenterVisible}
+        onClose={() => setDownloadCenterVisible(false)}
       />
     </Layout>
   );

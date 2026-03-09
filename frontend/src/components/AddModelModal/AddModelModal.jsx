@@ -59,7 +59,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   // 解析 URL
   const handleParseUrl = async (urlToUse = null) => {
-    const url = urlToUse || urlInput;
+    const url = (typeof urlToUse === 'string' ? urlToUse : null) || urlInput;
     const validationError = validateUrl(url);
     if (validationError) {
       setError(validationError);

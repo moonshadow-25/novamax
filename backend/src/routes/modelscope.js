@@ -248,6 +248,16 @@ router.post('/modelscope/confirm', async (req, res) => {
       return res.status(400).json({ error: `无效的模型类型: ${config.type}` });
     }
 
+    // 检查是否已存在相同 modelscope_id 的模型
+    if (config.modelscope_id) {
+      const existing = modelManager.getAll().find(
+        m => m.modelscope_id === config.modelscope_id && m.type === config.type
+      );
+      if (existing) {
+        return res.status(409).json({ error: `模型已存在：${existing.modelscope_id}` });
+      }
+    }
+
     // 保存模型
     const savedModel = await modelManager.create(config.type, config);
 

@@ -145,12 +145,15 @@ class DownloadStateManager {
     const result = {};
     for (const [key, state] of this.states.entries()) {
       result[key] = {
+        modelId: state.modelId,
         status: state.status,
         progress: state.progress,
         error: state.error,
         targetQuantization: state.targetQuantization,
         speed: state.speed,
-        startTime: state.startTime
+        startTime: state.startTime,
+        downloadedBytes: state.downloadedBytes,
+        totalBytes: state.totalBytes
       };
     }
     return result;
