@@ -181,6 +181,22 @@ export function getDataPath(...parts) {
   return getResourcePath('data', ...parts);
 }
 
+/**
+ * 获取模型目录路径
+ * - 如果有 modelscope_id (格式: owner/name)，使用 baseDir/type/owner/name
+ * - 否则使用 baseDir/type/id
+ * @param {string} baseDir - 基础目录 (如 MODELS_RUN_DIR)
+ * @param {object} model - 模型对象
+ * @returns {string} 模型目录完整路径
+ */
+export function getModelPath(baseDir, model) {
+  if (model.modelscope_id && model.modelscope_id.includes('/')) {
+    const [owner, name] = model.modelscope_id.split('/');
+    return path.join(baseDir, model.type, owner, name);
+  }
+  return path.join(baseDir, model.type, model.id);
+}
+
 export default {
   getProjectRoot,
   getResourcePath,
@@ -190,5 +206,6 @@ export default {
   getPythonScriptPath,
   getFrontendDistPath,
   getDataPath,
+  getModelPath,
   reloadExternalConfig
 };

@@ -6,6 +6,7 @@ import path from 'path';
 import { PRESETS_DIR, MODELS_RUN_DIR, MODEL_TYPES } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import parameterService from './parameterService.js';
+import { getModelPath } from '../utils/pathHelper.js';
 
 class PresetService {
   constructor() {
@@ -163,7 +164,7 @@ class PresetService {
    * 获取模型文件路径（扁平化目录结构）
    */
   _getModelPath(model) {
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     // 检查目录是否存在
     if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {
@@ -205,7 +206,7 @@ class PresetService {
    * 获取 mmproj 文件路径（扁平化目录结构）
    */
   _getMmprojPath(model) {
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {
       return null;

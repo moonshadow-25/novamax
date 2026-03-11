@@ -6,6 +6,7 @@ import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
+import { getModelPath } from '../utils/pathHelper.js';
 
 const router = express.Router();
 
@@ -177,14 +178,14 @@ router.delete('/models/:id/quantization', async (req, res) => {
     if (!filename) return res.status(400).json({ error: 'filename is required' });
 
     // 删除运行时目录中的文件
-    const runtimeFile = path.join(MODELS_RUN_DIR, model.type, req.params.id, filename);
+    const runtimeFile = path.join(getModelPath(MODELS_RUN_DIR, model), filename);
     if (fs.existsSync(runtimeFile)) {
       fs.unlinkSync(runtimeFile);
       console.log(`✓ 已删除文件: ${runtimeFile}`);
     }
 
     // 删除下载目录中的文件
-    const downloadFile = path.join(DOWNLOADS_DIR, model.type, req.params.id, filename);
+    const downloadFile = path.join(getModelPath(DOWNLOADS_DIR, model), filename);
     if (fs.existsSync(downloadFile)) {
       fs.unlinkSync(downloadFile);
       console.log(`✓ 已删除下载文件: ${downloadFile}`);
@@ -242,14 +243,14 @@ router.delete('/models/:id/files', async (req, res) => {
     }
 
     // 删除运行时目录中的所有量化版本文件
-    const runtimeDir = path.join(MODELS_RUN_DIR, model.type, req.params.id);
+    const runtimeDir = getModelPath(MODELS_RUN_DIR, model);
     if (fs.existsSync(runtimeDir)) {
       fs.rmSync(runtimeDir, { recursive: true, force: true });
       console.log(`✓ 已删除运行时文件: ${runtimeDir}`);
     }
 
     // 删除下载目录中的所有量化版本文件
-    const downloadDir = path.join(DOWNLOADS_DIR, model.type, req.params.id);
+    const downloadDir = getModelPath(DOWNLOADS_DIR, model);
     if (fs.existsSync(downloadDir)) {
       fs.rmSync(downloadDir, { recursive: true, force: true });
       console.log(`✓ 已删除下载文件: ${downloadDir}`);
@@ -278,12 +279,12 @@ router.delete('/models/:id', async (req, res) => {
     }
 
     // 删除文件
-    const runtimeDir = path.join(MODELS_RUN_DIR, model.type, req.params.id);
+    const runtimeDir = getModelPath(MODELS_RUN_DIR, model);
     if (fs.existsSync(runtimeDir)) {
       fs.rmSync(runtimeDir, { recursive: true, force: true });
     }
 
-    const downloadDir = path.join(DOWNLOADS_DIR, model.type, req.params.id);
+    const downloadDir = getModelPath(DOWNLOADS_DIR, model);
     if (fs.existsSync(downloadDir)) {
       fs.rmSync(downloadDir, { recursive: true, force: true });
     }

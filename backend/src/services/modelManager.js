@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { readJSON, writeJSON, generateId } from '../utils/fileHelper.js';
 import { MODELS_DIR, MODELS_RUN_DIR, MODEL_STATUS } from '../config/constants.js';
+import { getModelPath } from '../utils/pathHelper.js';
 
 class ModelManager {
   constructor() {
@@ -108,7 +109,7 @@ class ModelManager {
       return [];
     }
 
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     // 检查目录是否存在
     if (!fs.existsSync(modelDir)) {
@@ -168,7 +169,7 @@ class ModelManager {
       return [];
     }
 
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     // 检查目录是否存在
     if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {

@@ -8,7 +8,7 @@ import { DOWNLOADS_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
-import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
+import { getPythonPath, getPythonScriptPath, getModelPath } from '../utils/pathHelper.js';
 
 const PYTHON_PATH = getPythonPath();
 const DOWNLOADER_SCRIPT = getPythonScriptPath('modelscope_downloader.py');
@@ -161,7 +161,7 @@ class DownloadService extends EventEmitter {
 
     /** 删除目标目录中属于该下载任务的 .part 文件 */
     const _deletePartFiles = (model, qName) => {
-      const targetDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+      const targetDir = getModelPath(MODELS_RUN_DIR, model);
       if (!fs.existsSync(targetDir)) return;
 
       const effectiveQuant = qName || downloadState?.targetQuantization;
@@ -321,7 +321,7 @@ class DownloadService extends EventEmitter {
   async _downloadModelWithModelScope(model, downloadState) {
     const targetQuantization = downloadState?.targetQuantization || model.selected_quantization;
     // 直接使用最终目标目录，无需临时目录
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     // 确保目标目录存在
     if (!fs.existsSync(modelDir)) {
@@ -362,11 +362,22 @@ class DownloadService extends EventEmitter {
           filesToDownload.push(wildcardPattern);
         }
 
-        // 如果模型有视觉功能，下载所有 mmproj 文件
+        // 如果模型有视觉功能，优先下载 BF16 版本的 mmproj 文件
         if (model.mmproj_options && model.mmproj_options.length > 0) {
-          for (const mmproj of model.mmproj_options) {
-            filesToDownload.push(mmproj.name);
-            console.log(`添加视觉投影文件: ${mmproj.name}`);
+          const bf16Mmprojs = model.mmproj_options.filter(mmproj => 
+            /bf16/i.test(mmproj.name)
+          );
+          if (bf16Mmprojs.length > 0) {
+            // 找到 BF16 版本，下载所有 BF16 投影文件
+            for (const mmproj of bf16Mmprojs) {
+              filesToDownload.push(mmproj.name);
+              console.log(`添加视觉投影文件 (BF16): ${mmproj.name}`);
+            }
+          } else {
+            // 没有 BF16 版本，下载第一个投影文件
+            const firstMmproj = model.mmproj_options[0];
+            filesToDownload.push(firstMmproj.name);
+            console.log(`未找到 BF16 版本，下载第一个投影文件: ${firstMmproj.name}`);
           }
         }
 
@@ -378,11 +389,22 @@ class DownloadService extends EventEmitter {
       } else if (model.files?.model?.name) {
         // 如果有指定模型文件名，只下载该文件
         const fallbackFiles = [model.files.model.name];
-        // 如果模型有视觉功能，下载所有 mmproj 文件
+        // 如果模型有视觉功能，优先下载 BF16 版本的 mmproj 文件
         if (model.mmproj_options && model.mmproj_options.length > 0) {
-          for (const mmproj of model.mmproj_options) {
-            fallbackFiles.push(mmproj.name);
-            console.log(`添加视觉投影文件: ${mmproj.name}`);
+          const bf16Mmprojs = model.mmproj_options.filter(mmproj => 
+            /bf16/i.test(mmproj.name)
+          );
+          if (bf16Mmprojs.length > 0) {
+            // 找到 BF16 版本，下载所有 BF16 投影文件
+            for (const mmproj of bf16Mmprojs) {
+              fallbackFiles.push(mmproj.name);
+              console.log(`添加视觉投影文件 (BF16): ${mmproj.name}`);
+            }
+          } else {
+            // 没有 BF16 版本，下载第一个投影文件
+            const firstMmproj = model.mmproj_options[0];
+            fallbackFiles.push(firstMmproj.name);
+            console.log(`未找到 BF16 版本，下载第一个投影文件: ${firstMmproj.name}`);
           }
         }
         console.log(`下载文件列表: ${fallbackFiles.join(', ')}`);
@@ -594,7 +616,7 @@ class DownloadService extends EventEmitter {
    */
   async _downloadModel(model, downloadState) {
     // 直接使用最终目标目录，无需临时目录
-    const modelDir = path.join(MODELS_RUN_DIR, model.type, model.id);
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
     // 确保目标目录存在
     if (!fs.existsSync(modelDir)) {

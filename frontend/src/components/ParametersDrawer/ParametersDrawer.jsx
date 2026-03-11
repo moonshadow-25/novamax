@@ -289,7 +289,7 @@ function ParametersDrawer({ visible, modelId, onClose }) {
             form={form}
             layout="vertical"
           >
-            <Collapse defaultActiveKey={['runtime', 'sampling']} ghost>
+            <Collapse defaultActiveKey={[]} ghost>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
                 {['context_length', 'gpu_layers', 'threads', 'parallel', 'batch', 'ubatch']

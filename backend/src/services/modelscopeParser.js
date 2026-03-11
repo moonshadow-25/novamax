@@ -202,6 +202,24 @@ class ModelscopeParser {
         continue;
       }
 
+      // 统计文件夹内所有文件，并按文件名排序
+      const folderPrefix = folder.Name + '/';
+      const filesInFolder = blobFiles
+        .filter(f => f.Path && f.Path.startsWith(folderPrefix))
+        .sort((a, b) => a.Name.localeCompare(b.Name));
+
+      // 检查文件夹内是否包含 .gguf 文件（排除 mmproj）
+      const ggufFilesInFolder = filesInFolder.filter(f =>
+        f.Name?.toLowerCase().endsWith('.gguf') &&
+        !f.Name.toLowerCase().includes('mmproj')
+      );
+
+      // 如果文件夹内没有 .gguf 文件，跳过该文件夹
+      if (ggufFilesInFolder.length === 0) {
+        console.log(`⏭ 跳过文件夹 "${folder.Name}"：不包含 .gguf 文件`);
+        continue;
+      }
+
       const quantType = folder.Name.toUpperCase();
       const info = QUANTIZATION_INFO[quantType] || {
         category: 'balanced',
@@ -210,11 +228,6 @@ class ModelscopeParser {
         recommended: false
       };
 
-      // 统计文件夹内所有文件大小总和，并按文件名排序（确保分片顺序与下载顺序一致）
-      const folderPrefix = folder.Name + '/';
-      const filesInFolder = blobFiles
-        .filter(f => f.Path && f.Path.startsWith(folderPrefix))
-        .sort((a, b) => a.Name.localeCompare(b.Name));
       const totalSize = filesInFolder.reduce((sum, f) => sum + (f.Size || 0), 0);
       const sizeLabel = totalSize > 0
         ? `${parseFloat((totalSize / (1024 * 1024 * 1024)).toFixed(2))} GB`
