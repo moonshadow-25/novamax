@@ -1,0 +1,5 @@
+{
+  "node": "external/node/node.exe",
+  "python": "external/python313/python.exe",
+  "llamacpp": "external/llamacpp"
+}

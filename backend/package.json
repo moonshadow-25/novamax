@@ -6,7 +6,9 @@
   "bin": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "check": "node check-build-env.js",
+    "build": "node build-portable.js"
   },
   "dependencies": {
     "axios": "^1.13.6",
@@ -17,15 +19,5 @@
     "open": "^9.1.0",
     "ws": "^8.14.0",
     "yaml": "^2.8.2"
-  },
-  "pkg": {
-    "assets": [
-      "../../frontend/dist/**/*",
-      "../../data/**/*"
-    ],
-    "targets": [
-      "node18-win-x64"
-    ],
-    "outputPath": "../../dist"
   }
 }

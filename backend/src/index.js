@@ -79,7 +79,8 @@ app.get('/api/events', (req, res) => {
   eventBus.addClient(res);
 });
 
-const frontendPath = path.join(__dirname, '../../frontend/dist');
+import { getFrontendDistPath } from './utils/pathHelper.js';
+const frontendPath = getFrontendDistPath();
 app.use(express.static(frontendPath));
 
 app.get('*', (req, res) => {

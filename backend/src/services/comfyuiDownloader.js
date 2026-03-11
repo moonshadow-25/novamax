@@ -5,11 +5,7 @@ import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { PROJECT_ROOT, CACHE_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import urlConverter from './urlConverter.js';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 
 const TASK_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -24,9 +20,9 @@ const TASK_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
  */
 class ComfyUIDownloader {
   constructor() {
-    this.pythonPath = path.join(PROJECT_ROOT, 'external', 'python313', 'python.exe');
-    this.msScript = path.join(__dirname, 'modelscope_downloader.py');
-    this.hfScript = path.join(__dirname, 'hf_downloader.py');
+    this.pythonPath = getPythonPath();
+    this.msScript = getPythonScriptPath('modelscope_downloader.py');
+    this.hfScript = getPythonScriptPath('hf_downloader.py');
     this.tasks = new Map();
   }
 

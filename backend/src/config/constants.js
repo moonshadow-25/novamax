@@ -1,9 +1,6 @@
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getProjectRoot } from '../utils/pathHelper.js';
 
 export const MODEL_TYPES = {
   LLM: 'llm',
@@ -36,7 +33,7 @@ export const DEFAULT_PORTS = {
 };
 
 // 使用绝对路径，从项目根目录开始（用于 external 工具等）
-const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const PROJECT_ROOT = getProjectRoot();
 export { PROJECT_ROOT };
 
 //  Windows 目录联接（Junction）示例：

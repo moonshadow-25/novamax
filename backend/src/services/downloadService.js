@@ -8,14 +8,10 @@ import { DOWNLOADS_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const PYTHON_PATH = path.join(PROJECT_ROOT, 'external/python313/python.exe');
-const DOWNLOADER_SCRIPT = path.join(__dirname, 'modelscope_downloader.py');
+const PYTHON_PATH = getPythonPath();
+const DOWNLOADER_SCRIPT = getPythonScriptPath('modelscope_downloader.py');
 
 class DownloadService extends EventEmitter {
   constructor() {

@@ -7,6 +7,9 @@ yarn.lock
 frontend/dist/
 backend/dist/
 dist/
+release/
+*.7z
+*.zip
 
 # Logs
 *.log
