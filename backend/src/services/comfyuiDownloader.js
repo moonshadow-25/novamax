@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { PROJECT_ROOT, CACHE_DIR, MODELS_RUN_DIR } from '../config/constants.js';
+import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import urlConverter from './urlConverter.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 
@@ -170,7 +170,7 @@ class ComfyUIDownloader {
 
   /**
    * 使用 modelscope_downloader.py 下载
-   * tempDir 使用确定性路径（从 targetPath 推导），支持断点续传
+   * 与 LLM 下载方式一致：直接输出到目标目录，脚本内部用 .part 文件，完成后自动重命名
    */
   async _downloadWithModelScopeSDK(url, targetPath, onProgress) {
     try {
@@ -182,46 +182,36 @@ class ComfyUIDownloader {
 
       const modelId = `${repoInfo.org}/${repoInfo.repo}`;
       const filename = path.basename(repoInfo.filepath || targetPath);
-
-      // 固定的确定性目录，与 LLM 下载保持一致，后端重启后 ModelScope SDK 可续传
-      const typeDir = path.basename(path.dirname(targetPath));
-      const baseName = path.basename(targetPath, path.extname(targetPath));
-      const tempDir = path.join(CACHE_DIR, `ms_${typeDir}_${baseName}`);
+      const targetDir = path.dirname(targetPath);
 
       console.log(`  ModelScope 模型: ${modelId}, 文件: ${filename}`);
-      console.log(`  续传目录: ${tempDir}`);
 
-      fs.mkdirSync(tempDir, { recursive: true });
+      fs.mkdirSync(targetDir, { recursive: true });
 
       const result = await this._execScript(this.msScript, [
         modelId,
-        '--output', tempDir,
+        '--output', targetDir,
         '--files', filename
       ], onProgress, targetPath);
 
       if (result.success) {
-        const found = this._findFileRecursive(tempDir, filename);
-        if (found) {
-          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-          fs.renameSync(found, targetPath);
-          // 成功后才清理临时目录，失败/中断时保留供下次续传
-          this._cleanDir(tempDir);
+        if (fs.existsSync(targetPath)) {
           console.log(`  ✅ ModelScope SDK 下载成功`);
           return true;
         }
         console.log('  下载脚本成功但未找到文件');
       } else {
-        console.log(`  ModelScope SDK 失败: exit code ${result.code}（临时目录已保留，下次可续传）`);
+        console.log(`  ModelScope SDK 失败: exit code ${result.code}`);
       }
     } catch (error) {
-      console.log(`  ModelScope SDK 异常: ${error.message}（临时目录已保留，下次可续传）`);
+      console.log(`  ModelScope SDK 异常: ${error.message}`);
     }
     return false;
   }
 
   /**
    * 使用 hf_downloader.py + hf-mirror 端点下载
-   * tempDir 使用确定性路径，支持断点续传
+   * 直接输出到目标目录；hf_hub_download 可能保留仓库内路径结构，用 _findFileRecursive 兜底定位
    */
   async _downloadWithHuggingFaceSDK(url, targetPath, onProgress) {
     try {
@@ -234,20 +224,15 @@ class ComfyUIDownloader {
       const repoId = `${repoInfo.org}/${repoInfo.repo}`;
       const filepath = repoInfo.filepath;
       const filename = path.basename(filepath || targetPath);
-
-      // 固定的确定性目录，支持续传
-      const typeDir = path.basename(path.dirname(targetPath));
-      const baseName = path.basename(targetPath, path.extname(targetPath));
-      const tempDir = path.join(CACHE_DIR, `hf_${typeDir}_${baseName}`);
+      const targetDir = path.dirname(targetPath);
 
       console.log(`  HF 仓库: ${repoId}, 文件路径: ${filepath}`);
-      console.log(`  续传目录: ${tempDir}`);
 
-      fs.mkdirSync(tempDir, { recursive: true });
+      fs.mkdirSync(targetDir, { recursive: true });
 
       const args = [
         repoId,
-        '--output', tempDir,
+        '--output', targetDir,
         '--endpoint', 'https://hf-mirror.com'
       ];
       if (filepath) {
@@ -257,21 +242,24 @@ class ComfyUIDownloader {
       const result = await this._execScript(this.hfScript, args, onProgress, targetPath);
 
       if (result.success) {
-        const found = this._findFileRecursive(tempDir, filename);
+        // 优先检查文件是否已在正确位置
+        if (fs.existsSync(targetPath)) {
+          console.log(`  ✅ HF SDK (hf-mirror) 下载成功`);
+          return true;
+        }
+        // hf_hub_download 可能把文件放在子目录（保留仓库路径），递归查找后移动
+        const found = this._findFileRecursive(targetDir, filename);
         if (found) {
-          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           fs.renameSync(found, targetPath);
-          // 成功后才清理，失败/中断时保留供续传
-          this._cleanDir(tempDir);
           console.log(`  ✅ HF SDK (hf-mirror) 下载成功`);
           return true;
         }
         console.log('  下载脚本成功但未找到文件');
       } else {
-        console.log(`  HF SDK 失败: exit code ${result.code}（临时目录已保留，下次可续传）`);
+        console.log(`  HF SDK 失败: exit code ${result.code}`);
       }
     } catch (error) {
-      console.log(`  HF SDK 异常: ${error.message}（临时目录已保留，下次可续传）`);
+      console.log(`  HF SDK 异常: ${error.message}`);
     }
     return false;
   }
@@ -405,7 +393,8 @@ class ComfyUIDownloader {
   _execScript(scriptPath, args, onProgress = null, targetPath = null) {
     return new Promise((resolve) => {
       const proc = spawn(this.pythonPath, [scriptPath, ...args], {
-        cwd: PROJECT_ROOT
+        cwd: PROJECT_ROOT,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
       });
 
       let stdout = '';

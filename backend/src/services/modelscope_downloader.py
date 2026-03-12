@@ -178,7 +178,7 @@ def download_model(model_id, output_dir, files=None, revision='master'):
 
         # 过滤要下载的文件
         if files:
-            files_to_download = [f for f in all_files if match_patterns(f.get('Name', ''), files)]
+            files_to_download = [f for f in all_files if match_patterns(f.get('Path', '') or f.get('Name', ''), files)]
             print(f"匹配 patterns {files}: {len(files_to_download)} 个文件", file=sys.stderr)
         else:
             files_to_download = all_files
@@ -188,7 +188,8 @@ def download_model(model_id, output_dir, files=None, revision='master'):
 
         # 逐个下载
         for f in files_to_download:
-            file_path_in_repo = f.get('Name', '')
+            # Path 包含完整相对路径（含子目录），Name 仅为文件名，子目录文件必须用 Path
+            file_path_in_repo = f.get('Path', '') or f.get('Name', '')
             file_name = os.path.basename(file_path_in_repo)
             if not file_name:
                 continue
