@@ -104,6 +104,9 @@ export const comfyuiService = {
   downloadAllModels: (modelId) => api.post(`/comfyui/${modelId}/download-all-models`),
   getModelsStatus: (modelId) => api.get(`/comfyui/${modelId}/models-status`),
   getDownloadStatus: (taskId) => api.get(`/comfyui/download-status/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/comfyui/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/comfyui/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/comfyui/download-cancel/${taskId}`),
   getWorkflowNodes: (modelId) => api.get(`/comfyui/${modelId}/workflow-nodes`),
   updateUserMapping: (modelId, user_parameter_mapping) => api.put(`/comfyui/${modelId}/user-mapping`, { user_parameter_mapping })
 };
