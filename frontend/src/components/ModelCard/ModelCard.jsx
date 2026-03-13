@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer } from 'antd';
+import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer, Alert } from 'antd';
 import {
   PlayCircleOutlined,
   StopOutlined,
@@ -34,6 +34,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [pollInterval, setPollInterval] = useState(null);
   const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
   const [comfyuiSettingsVisible, setComfyuiSettingsVisible] = useState(false);
+  const [deleteWorkflowVisible, setDeleteWorkflowVisible] = useState(false);
+  const [deleteWorkflowInput, setDeleteWorkflowInput] = useState('');
 
   // 弹框打开时始终轮询，关闭时停止
   useEffect(() => {
@@ -292,6 +294,20 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       } catch (error) {
         message.error('删除失败');
       }
+    }
+  };
+
+  const handleDeleteWorkflow = async () => {
+    if (deleteWorkflowInput !== 'delete') return;
+    try {
+      await modelService.delete(model.id);
+      message.success('工作流已删除');
+      setDeleteWorkflowVisible(false);
+      setDeleteWorkflowInput('');
+      setWorkflowModalVisible(false);
+      onUpdate();
+    } catch (error) {
+      message.error('删除失败');
     }
   };
 
@@ -581,7 +597,13 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         }
         open={workflowModalVisible}
         onCancel={() => setWorkflowModalVisible(false)}
-        footer={null}
+        footer={
+          <div style={{ textAlign: 'left' }}>
+            <Button danger icon={<DeleteOutlined />} onClick={() => setDeleteWorkflowVisible(true)}>
+              删除工作流
+            </Button>
+          </div>
+        }
         width={900}
         destroyOnClose
       >
@@ -608,6 +630,36 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           modelId={model.id}
           onUpdate={onUpdate}
         />
+      </Modal>
+
+      {/* 删除工作流确认对话框 */}
+      <Modal
+        title="确认删除工作流"
+        open={deleteWorkflowVisible}
+        onOk={handleDeleteWorkflow}
+        onCancel={() => {
+          setDeleteWorkflowVisible(false);
+          setDeleteWorkflowInput('');
+        }}
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: deleteWorkflowInput !== 'delete' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert
+            message="提示"
+            description="此操作仅删除工作流配置，不会删除已下载的模型文件。"
+            type="warning"
+            showIcon
+          />
+          <div>请输入 <strong>delete</strong> 确认删除：</div>
+          <Input
+            placeholder="输入 delete"
+            value={deleteWorkflowInput}
+            onChange={(e) => setDeleteWorkflowInput(e.target.value)}
+            onPressEnter={handleDeleteWorkflow}
+          />
+        </Space>
       </Modal>
 
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI） */}
