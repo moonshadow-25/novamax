@@ -34,6 +34,7 @@ class ComfyUIDownloader {
    */
   startDownload(modelInfo, onComplete = null) {
     const taskId = randomUUID();
+    const abortController = new AbortController();
     this.tasks.set(taskId, {
       taskId,
       filename: modelInfo.filename,
@@ -45,7 +46,12 @@ class ComfyUIDownloader {
       speed: null,
       source: null,
       path: null,
-      error: null
+      error: null,
+      // 用于暂停/取消
+      _abortController: abortController,
+      _modelInfo: modelInfo,
+      _onComplete: onComplete,
+      _process: null  // 当前运行的子进程引用
     });
 
     // 后台执行，不 await
@@ -55,12 +61,75 @@ class ComfyUIDownloader {
   }
 
   /**
+   * 暂停下载
+   */
+  pauseDownload(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task || (task.status !== 'downloading' && task.status !== 'pending')) {
+      return false;
+    }
+    // 中止当前下载（子进程或 HTTP 请求）
+    task._abortController.abort();
+    if (task._process) {
+      try { task._process.kill('SIGTERM'); } catch {}
+      task._process = null;
+    }
+    task.status = 'paused';
+    task.speed = 0;
+    return true;
+  }
+
+  /**
+   * 恢复下载
+   */
+  resumeDownload(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status !== 'paused') {
+      return false;
+    }
+    // 创建新的 AbortController
+    task._abortController = new AbortController();
+    task.status = 'downloading';
+    // 重新启动下载（各下载方法内部支持断点续传）
+    this._runDownload(taskId, task._modelInfo, task._onComplete);
+    return true;
+  }
+
+  /**
+   * 取消下载
+   */
+  cancelDownload(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task) return false;
+    // 中止当前下载
+    task._abortController.abort();
+    if (task._process) {
+      try { task._process.kill('SIGTERM'); } catch {}
+      task._process = null;
+    }
+    // 清理临时文件
+    const targetPath = this._getTargetPath(task.type, task.filename);
+    const tempPath = targetPath + '.downloading';
+    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+    task.status = 'cancelled';
+    task.speed = 0;
+    task.progress = 0;
+    // 5秒后清理任务记录
+    setTimeout(() => this.tasks.delete(taskId), 5000);
+    return true;
+  }
+
+  /**
    * 获取任务状态
    * @param {string} taskId
    * @returns {Object|null}
    */
   getTask(taskId) {
-    return this.tasks.get(taskId) || null;
+    const task = this.tasks.get(taskId);
+    if (!task) return null;
+    // 不暴露内部字段
+    const { _abortController, _modelInfo, _onComplete, _process, ...publicTask } = task;
+    return publicTask;
   }
 
   /**
@@ -80,7 +149,7 @@ class ComfyUIDownloader {
         if (info.totalBytes != null) t.totalBytes = info.totalBytes;
         if (info.downloadedBytes != null) t.downloadedBytes = info.downloadedBytes;
         if (info.speed != null) t.speed = info.speed;
-      });
+      }, task._abortController.signal);
 
       const t = this.tasks.get(taskId);
       if (t) {
@@ -89,30 +158,36 @@ class ComfyUIDownloader {
           t.progress = 100;
           t.source = result.source;
           t.path = result.path;
+        } else if (result.aborted) {
+          // 被暂停或取消，不覆盖状态
+          return;
         } else {
           t.status = 'failed';
           t.error = result.error;
         }
       }
 
-      if (onComplete) {
+      if (onComplete && !result.aborted) {
         onComplete(result);
       }
     } catch (error) {
       const t = this.tasks.get(taskId);
-      if (t) {
+      if (t && t.status !== 'paused' && t.status !== 'cancelled') {
         t.status = 'failed';
         t.error = error.message;
-      }
-      if (onComplete) {
-        onComplete({ success: false, error: error.message });
+        if (onComplete) {
+          onComplete({ success: false, error: error.message });
+        }
       }
     }
 
-    // 10分钟后自动清理
-    setTimeout(() => {
-      this.tasks.delete(taskId);
-    }, TASK_CLEANUP_MS);
+    // 仅在终态时设置自动清理
+    const finalTask = this.tasks.get(taskId);
+    if (finalTask && (finalTask.status === 'completed' || finalTask.status === 'failed')) {
+      setTimeout(() => {
+        this.tasks.delete(taskId);
+      }, TASK_CLEANUP_MS);
+    }
   }
 
   /**
@@ -120,7 +195,7 @@ class ComfyUIDownloader {
    * @param {Object} modelInfo
    * @param {Function} onProgress - 进度回调 (0-100)
    */
-  async download(modelInfo, onProgress = null) {
+  async download(modelInfo, onProgress = null, abortSignal = null) {
     const targetPath = this._getTargetPath(modelInfo.type, modelInfo.filename);
 
     if (fs.existsSync(targetPath)) {
@@ -137,32 +212,39 @@ class ComfyUIDownloader {
     console.log(`\n开始下载: ${modelInfo.filename}`);
     console.log(`原始URL: ${originalUrl}`);
 
+    const checkAborted = () => abortSignal?.aborted;
+
     // 1. ModelScope SDK
+    if (checkAborted()) return { aborted: true };
     console.log('[1/4] 尝试 ModelScope SDK...');
-    if (await this._downloadWithModelScopeSDK(originalUrl, targetPath, onProgress)) {
+    if (await this._downloadWithModelScopeSDK(originalUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'modelscope_sdk' };
     }
 
     // 2. HuggingFace SDK via hf-mirror
+    if (checkAborted()) return { aborted: true };
     console.log('[2/4] 尝试 HuggingFace SDK (hf-mirror)...');
-    if (await this._downloadWithHuggingFaceSDK(originalUrl, targetPath, onProgress)) {
+    if (await this._downloadWithHuggingFaceSDK(originalUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'hf_mirror_sdk' };
     }
 
     // 3. HTTP - ModelScope URL
+    if (checkAborted()) return { aborted: true };
     console.log('[3/4] 尝试 HTTP (ModelScope)...');
     const msUrl = this._toModelScopeUrl(originalUrl);
-    if (msUrl && await this._downloadWithHTTP(msUrl, targetPath, onProgress)) {
+    if (msUrl && await this._downloadWithHTTP(msUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'http_modelscope' };
     }
 
     // 4. HTTP - hf-mirror URL
+    if (checkAborted()) return { aborted: true };
     console.log('[4/4] 尝试 HTTP (hf-mirror)...');
     const hfMirrorUrl = this._toHFMirrorUrl(originalUrl);
-    if (hfMirrorUrl && await this._downloadWithHTTP(hfMirrorUrl, targetPath, onProgress)) {
+    if (hfMirrorUrl && await this._downloadWithHTTP(hfMirrorUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'http_hf_mirror' };
     }
 
+    if (checkAborted()) return { aborted: true };
     return { success: false, error: '所有下载源都失败' };
   }
 
@@ -172,7 +254,7 @@ class ComfyUIDownloader {
    * 使用 modelscope_downloader.py 下载
    * 与 LLM 下载方式一致：直接输出到目标目录，脚本内部用 .part 文件，完成后自动重命名
    */
-  async _downloadWithModelScopeSDK(url, targetPath, onProgress) {
+  async _downloadWithModelScopeSDK(url, targetPath, onProgress, abortSignal = null) {
     try {
       const repoInfo = urlConverter.parseRepoInfo(url);
       if (!repoInfo) {
@@ -192,7 +274,7 @@ class ComfyUIDownloader {
         modelId,
         '--output', targetDir,
         '--files', filename
-      ], onProgress, targetPath);
+      ], onProgress, targetPath, abortSignal);
 
       if (result.success) {
         if (fs.existsSync(targetPath)) {
@@ -213,7 +295,7 @@ class ComfyUIDownloader {
    * 使用 hf_downloader.py + hf-mirror 端点下载
    * 直接输出到目标目录；hf_hub_download 可能保留仓库内路径结构，用 _findFileRecursive 兜底定位
    */
-  async _downloadWithHuggingFaceSDK(url, targetPath, onProgress) {
+  async _downloadWithHuggingFaceSDK(url, targetPath, onProgress, abortSignal = null) {
     try {
       const repoInfo = urlConverter.parseRepoInfo(url);
       if (!repoInfo) {
@@ -239,7 +321,7 @@ class ComfyUIDownloader {
         args.push('--files', filepath);
       }
 
-      const result = await this._execScript(this.hfScript, args, onProgress, targetPath);
+      const result = await this._execScript(this.hfScript, args, onProgress, targetPath, abortSignal);
 
       if (result.success) {
         // 优先检查文件是否已在正确位置
@@ -267,7 +349,7 @@ class ComfyUIDownloader {
   /**
    * 使用 HTTP 直接下载，带进度/速度回调，支持 Range 断点续传
    */
-  async _downloadWithHTTP(url, targetPath, onProgress) {
+  async _downloadWithHTTP(url, targetPath, onProgress, abortSignal = null) {
     const tempPath = targetPath + '.downloading';
     try {
       console.log(`  HTTP 下载: ${url}`);
@@ -292,7 +374,8 @@ class ComfyUIDownloader {
         url,
         responseType: 'stream',
         timeout: 30000,
-        headers
+        headers,
+        signal: abortSignal || undefined
       });
 
       // 服务器返回 206 表示支持 Range，否则从头下载
@@ -390,12 +473,32 @@ class ComfyUIDownloader {
    * @param {Function} onProgress - 进度回调 ({ progress, totalBytes, downloadedBytes, speed })
    * @param {string} targetPath - 用于监测磁盘写入速度（可选）
    */
-  _execScript(scriptPath, args, onProgress = null, targetPath = null) {
+  _execScript(scriptPath, args, onProgress = null, targetPath = null, abortSignal = null) {
     return new Promise((resolve) => {
+      if (abortSignal?.aborted) {
+        return resolve({ success: false, aborted: true });
+      }
+
       const proc = spawn(this.pythonPath, [scriptPath, ...args], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
       });
+
+      // 存储进程引用到对应的 task（通过遍历查找）
+      for (const task of this.tasks.values()) {
+        if (task._abortController?.signal === abortSignal && task._process === null) {
+          task._process = proc;
+          break;
+        }
+      }
+
+      // 监听 abort 信号，杀掉子进程
+      const onAbort = () => {
+        try { proc.kill('SIGTERM'); } catch {}
+      };
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', onAbort, { once: true });
+      }
 
       let stdout = '';
       let stderr = '';
@@ -423,6 +526,15 @@ class ComfyUIDownloader {
       });
 
       proc.on('close', (code) => {
+        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+        // 清除进程引用
+        for (const task of this.tasks.values()) {
+          if (task._process === proc) { task._process = null; break; }
+        }
+
+        if (abortSignal?.aborted) {
+          return resolve({ success: false, aborted: true });
+        }
         if (code === 0) {
           try {
             const lastLine = stdout.trim().split('\n').pop();
@@ -437,6 +549,13 @@ class ComfyUIDownloader {
       });
 
       proc.on('error', (error) => {
+        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+        for (const task of this.tasks.values()) {
+          if (task._process === proc) { task._process = null; break; }
+        }
+        if (abortSignal?.aborted) {
+          return resolve({ success: false, aborted: true });
+        }
         resolve({ success: false, code: -1, error: error.message, stdout, stderr });
       });
     });

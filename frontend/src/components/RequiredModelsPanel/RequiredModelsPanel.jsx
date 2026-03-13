@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Table, Tag, Button, Space, Typography, message, Tooltip, Progress } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
 import { comfyuiService } from '../../services/api';
 import './RequiredModelsPanel.css';
 
@@ -92,6 +92,18 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
                 toComplete.push(filename);
               } else if (status === 'failed') {
                 toFail.push({ filename, error: response.task?.error });
+              } else if (status === 'cancelled') {
+                toComplete.push(filename);
+              } else if (status === 'paused') {
+                const t = response.task;
+                taskUpdates[filename] = {
+                  taskId,
+                  progress: t.progress ?? progress,
+                  totalBytes: t.totalBytes ?? null,
+                  downloadedBytes: t.downloadedBytes ?? null,
+                  speed: 0,
+                  paused: true
+                };
               } else {
                 // pending or downloading — 更新进度、大小、速度
                 const t = response.task;
@@ -100,7 +112,8 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
                   progress: t.progress ?? 0,
                   totalBytes: t.totalBytes ?? null,
                   downloadedBytes: t.downloadedBytes ?? null,
-                  speed: t.speed ?? null
+                  speed: t.speed ?? null,
+                  paused: false
                 };
               }
             } catch (e) {
@@ -245,6 +258,50 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     }
   };
 
+  const handlePause = async (filename) => {
+    const taskInfo = downloadingTasks[filename];
+    if (!taskInfo?.taskId) return;
+    try {
+      await comfyuiService.pauseDownload(taskInfo.taskId);
+      setDownloadingTasks(prev => ({
+        ...prev,
+        [filename]: { ...prev[filename], paused: true, speed: 0 }
+      }));
+    } catch (error) {
+      message.error('暂停失败: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleResume = async (filename) => {
+    const taskInfo = downloadingTasks[filename];
+    if (!taskInfo?.taskId) return;
+    try {
+      await comfyuiService.resumeDownload(taskInfo.taskId);
+      setDownloadingTasks(prev => ({
+        ...prev,
+        [filename]: { ...prev[filename], paused: false }
+      }));
+    } catch (error) {
+      message.error('恢复失败: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleCancel = async (filename) => {
+    const taskInfo = downloadingTasks[filename];
+    if (!taskInfo?.taskId) return;
+    try {
+      await comfyuiService.cancelDownload(taskInfo.taskId);
+      setDownloadingTasks(prev => {
+        const next = { ...prev };
+        delete next[filename];
+        return next;
+      });
+      message.info(`已取消下载: ${filename}`);
+    } catch (error) {
+      message.error('取消失败: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
   const columns = [
     {
       title: '类型',
@@ -282,7 +339,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
               <Progress
                 percent={taskInfo.progress}
                 size="small"
-                status="active"
+                status={taskInfo.paused ? 'exception' : 'active'}
                 style={{ margin: 0 }}
               />
               {taskInfo.totalBytes > 0 && (
@@ -290,11 +347,13 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
                   {formatBytes(taskInfo.downloadedBytes || 0)} / {formatBytes(taskInfo.totalBytes)}
                 </div>
               )}
-              {taskInfo.speed > 0 && (
+              {taskInfo.paused ? (
+                <div style={{ fontSize: 11, color: '#faad14', lineHeight: 1.4 }}>已暂停</div>
+              ) : taskInfo.speed > 0 ? (
                 <div style={{ fontSize: 11, color: '#1677ff', lineHeight: 1.4 }}>
                   ↓ {formatSpeed(taskInfo.speed)}
                 </div>
-              )}
+              ) : null}
             </div>
           );
         }
@@ -308,15 +367,28 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 180,
       render: (_, record) => {
-        const isDownloading = !!downloadingTasks[record.filename];
+        const taskInfo = downloadingTasks[record.filename];
 
-        if (record.downloaded && !isDownloading) {
+        if (taskInfo) {
+          return (
+            <Space size={4}>
+              {taskInfo.paused ? (
+                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>继续</Button>
+              ) : (
+                <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>暂停</Button>
+              )}
+              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>取消</Button>
+            </Space>
+          );
+        }
+
+        if (record.downloaded) {
           return <Button size="small" disabled>已下载</Button>;
         }
 
-        if (!record.has_url && !isDownloading) {
+        if (!record.has_url) {
           return (
             <Tooltip title="无下载源">
               <Button size="small" disabled icon={<DownloadOutlined />}>下载</Button>
@@ -329,11 +401,10 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
             size="small"
             type="primary"
             icon={<DownloadOutlined />}
-            loading={isDownloading}
-            disabled={isDownloading || !modelId}
+            disabled={!modelId}
             onClick={() => handleDownload(record)}
           >
-            {isDownloading ? '下载中' : '下载'}
+            下载
           </Button>
         );
       }

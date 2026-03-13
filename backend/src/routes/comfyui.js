@@ -436,6 +436,42 @@ router.get('/comfyui/download-status/:taskId', (req, res) => {
 });
 
 /**
+ * 暂停下载任务
+ * POST /api/comfyui/download-pause/:taskId
+ */
+router.post('/comfyui/download-pause/:taskId', (req, res) => {
+  const ok = comfyuiDownloader.pauseDownload(req.params.taskId);
+  if (!ok) {
+    return res.status(400).json({ error: '无法暂停该任务' });
+  }
+  res.json({ success: true });
+});
+
+/**
+ * 恢复下载任务
+ * POST /api/comfyui/download-resume/:taskId
+ */
+router.post('/comfyui/download-resume/:taskId', (req, res) => {
+  const ok = comfyuiDownloader.resumeDownload(req.params.taskId);
+  if (!ok) {
+    return res.status(400).json({ error: '无法恢复该任务' });
+  }
+  res.json({ success: true });
+});
+
+/**
+ * 取消下载任务
+ * POST /api/comfyui/download-cancel/:taskId
+ */
+router.post('/comfyui/download-cancel/:taskId', (req, res) => {
+  const ok = comfyuiDownloader.cancelDownload(req.params.taskId);
+  if (!ok) {
+    return res.status(400).json({ error: '无法取消该任务' });
+  }
+  res.json({ success: true });
+});
+
+/**
  * 获取模型状态
  * GET /api/comfyui/:id/models-status
  */
