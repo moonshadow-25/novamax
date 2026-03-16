@@ -97,11 +97,12 @@ class ProcessManager {
 
       console.log(`启动单模型: ${cmd.command} ${cmd.args.join(' ')}`);
 
-      const llamacppPath = engineManager.getEnginePath('llamacpp', model.engine_version || null);
+      const actualVersion = model.engine_version || engineManager.getDefaultVersion('llamacpp');
+      const llamacppPath = engineManager.getEnginePath('llamacpp', actualVersion);
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
       // 构建环境变量（添加引擎目录和 ROCm 等依赖）
-      const env = this._buildEngineEnv(model.engine_version, llamacppPath);
+      const env = this._buildEngineEnv(actualVersion, llamacppPath);
 
       const process = spawn(llamaServerPath, cmd.args, { env });
 
@@ -287,10 +288,14 @@ class ProcessManager {
       console.log(`启动路由进程: ${cmd.command} ${cmd.args.join(' ')}`);
 
       // 启动进程（路由模式使用默认最新版本）
-      const llamacppPath = engineManager.getEnginePath('llamacpp');
+      const defaultVersion = engineManager.getDefaultVersion('llamacpp');
+      const llamacppPath = engineManager.getEnginePath('llamacpp', defaultVersion);
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
-      const process = spawn(llamaServerPath, cmd.args);
+      // 构建环境变量（添加 ROCm 等依赖）
+      const env = this._buildEngineEnv(defaultVersion, llamacppPath);
+
+      const process = spawn(llamaServerPath, cmd.args, { env });
 
       const routerInfo = {
         process,
