@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef } from 'react';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, theme } from 'antd';
+import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { configService, updateService, engineService, modelService } from '../../services/api';
+import { configService, updateService, engineService, modelService, systemService, backendService } from '../../services/api';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
 const { Text } = Typography;
@@ -13,10 +13,11 @@ const { Text } = Typography;
  */
 const GlobalSettings = () => {
   const navigate = useNavigate();
+  const { token } = theme.useToken();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [selectedMenu, setSelectedMenu] = useState('engines');
+  const [selectedMenu, setSelectedMenu] = useState('runtime');
 
   // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -42,6 +43,20 @@ const GlobalSettings = () => {
   const [exportVersionMap, setExportVersionMap] = useState({});
   const [exportJson, setExportJson] = useState('');
 
+  // 运行状态相关
+  const [systemInfo, setSystemInfo] = useState(null);
+  const [systemLoading, setSystemLoading] = useState(false);
+  const [stoppingId, setStoppingId] = useState(null);
+  const systemTimerRef = useRef(null);
+
+  // 模型存储相关
+  const [storage, setStorage] = useState(null);
+  const [migrateModal, setMigrateModal] = useState({ open: false, type: null, label: '' });
+  const [migratePath, setMigratePath] = useState('');
+  const [migrating, setMigrating] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const [restoringType, setRestoringType] = useState(null);
+
   useEffect(() => {
     loadSettings();
     loadEngines();
@@ -53,6 +68,24 @@ const GlobalSettings = () => {
 
     return () => es.close();
   }, []);
+
+  // 运行状态定时刷新
+  useEffect(() => {
+    if (selectedMenu !== 'runtime') {
+      if (systemTimerRef.current) clearInterval(systemTimerRef.current);
+      return;
+    }
+    loadSystemInfo();
+    systemTimerRef.current = setInterval(loadSystemInfo, 3000);
+    return () => {
+      if (systemTimerRef.current) clearInterval(systemTimerRef.current);
+    };
+  }, [selectedMenu]);
+
+  // 切换到存储标签时加载
+  useEffect(() => {
+    if (selectedMenu === 'storage') loadStorage();
+  }, [selectedMenu]);
 
   // 有下载进行中时，每 2 秒轮询一次，防止 SSE 事件丢失
   useEffect(() => {
@@ -113,6 +146,114 @@ const GlobalSettings = () => {
     } catch (e) {
       console.error('Failed to load models for export:', e);
     }
+  };
+
+  const loadSystemInfo = async () => {
+    try {
+      const data = await systemService.getInfo();
+      setSystemInfo(data);
+    } catch (e) {
+      console.error('Failed to load system info:', e);
+    }
+  };
+
+  const loadStorage = async () => {
+    try {
+      const data = await systemService.getStorage();
+      setStorage(data);
+    } catch (e) {
+      console.error('Failed to load storage:', e);
+    }
+  };
+
+  const handleOpenFolder = async (dirPath) => {
+    try {
+      await systemService.openFolder(dirPath);
+    } catch (e) {
+      message.error('打开失败: ' + (e.response?.data?.error || e.message));
+    }
+  };
+
+  const handleMigrate = async () => {
+    if (!migratePath.trim()) {
+      message.warning('请输入目标路径');
+      return;
+    }
+    setMigrating(true);
+    try {
+      const res = await systemService.migrateStorage(migrateModal.type, migratePath.trim());
+      message.success(res.message || '迁移成功');
+      setMigrateModal({ open: false, type: null, label: '' });
+      setMigratePath('');
+      loadStorage();
+    } catch (e) {
+      message.error(e.response?.data?.error || '迁移失败');
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleRestore = async (type, label) => {
+    setRestoringType(type);
+    try {
+      const res = await systemService.restoreStorage(type);
+      message.success(res.message || '还原成功');
+      loadStorage();
+    } catch (e) {
+      message.error(e.response?.data?.error || '还原失败');
+    } finally {
+      setRestoringType(null);
+    }
+  };
+
+  const handleStopProcess = async (proc) => {
+    setStoppingId(proc.id);
+    try {
+      if (proc.category === 'system') {
+        message.warning('无法停止 NovaMax 主服务');
+        return;
+      }
+      if (proc.category === 'router') {
+        for (const modelId of (proc.modelIds || [])) {
+          await backendService.stop(modelId);
+        }
+      } else {
+        await backendService.stop(proc.id);
+      }
+      message.success(`已停止 ${proc.name}`);
+      loadSystemInfo();
+    } catch (e) {
+      message.error(`停止失败: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setStoppingId(null);
+    }
+  };
+
+  const formatBytes = (bytes) => {
+    if (!bytes) return '-';
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  };
+
+  const formatUptime = (seconds) => {
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (d > 0) return `${d}天 ${h}小时`;
+    if (h > 0) return `${h}小时 ${m}分钟`;
+    return `${m}分钟`;
+  };
+
+  const formatDuration = (startTime) => {
+    if (!startTime) return '-';
+    const sec = Math.floor((Date.now() - startTime) / 1000);
+    if (sec < 60) return `${sec}秒`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}分${sec % 60}秒`;
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return `${h}时${m}分`;
   };
 
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
@@ -294,14 +435,6 @@ const GlobalSettings = () => {
   const openVersionDrawer = (engine) => {
     setSelectedEngine(engine);
     setVersionDrawerVisible(true);
-  };
-
-  const formatBytes = (bytes) => {
-    if (!bytes) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
   };
 
   const renderEnginesContent = () => (
@@ -596,9 +729,174 @@ const GlobalSettings = () => {
     </Card>
   );
 
+  const renderRuntimeContent = () => {
+    const hw = systemInfo?.hardware;
+    const processes = systemInfo?.processes || [];
+    const typeColorMap = {
+      llm: 'blue', comfyui: 'purple',
+      tts: 'green', whisper: 'orange', system: 'default'
+    };
+    const processColumns = [
+      {
+        title: '名称', dataIndex: 'name', key: 'name',
+        ellipsis: true, width: 200,
+        render: (name, record) => (
+          <Space>
+            <Text strong>{name}</Text>
+            {record.category === 'router' && record.modelNames?.length > 0 && (
+              <Tooltip title={`已加载: ${record.modelNames.join(', ')}`}>
+                <Tag style={{ cursor: 'help' }}>{record.modelNames.length} 模型</Tag>
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
+      {
+        title: '类型', dataIndex: 'type', key: 'type', width: 90,
+        render: (type) => <Tag color={typeColorMap[type] || 'default'}>{type.toUpperCase()}</Tag>
+      },
+      {
+        title: 'PID', dataIndex: 'pid', key: 'pid', width: 70,
+        render: (pid) => <Text type="secondary">{pid || '-'}</Text>
+      },
+      {
+        title: '端口', dataIndex: 'port', key: 'port', width: 70,
+        render: (port) => <Tag color="cyan">:{port}</Tag>
+      },
+      {
+        title: '内存', dataIndex: 'memory', key: 'memory', width: 100,
+        sorter: (a, b) => (a.memory || 0) - (b.memory || 0),
+        render: (mem) => formatBytes(mem)
+      },
+      {
+        title: '运行时长', dataIndex: 'startTime', key: 'startTime', width: 100,
+        render: (t) => formatDuration(t)
+      },
+      {
+        title: '操作', key: 'action', width: 80, align: 'center',
+        render: (_, record) => (
+          record.category === 'system' ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>主服务</Text>
+          ) : (
+            <Popconfirm
+              title="确认停止"
+              description={`确定要停止 ${record.name} 吗？`}
+              onConfirm={() => handleStopProcess(record)}
+              okText="停止" cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<CloseCircleOutlined />}
+                loading={stoppingId === record.id}>停止</Button>
+            </Popconfirm>
+          )
+        )
+      }
+    ];
+
+    return (
+      <Card title="运行状态">
+        {hw && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>CPU</div>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
+              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+            </div>
+            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存</div>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
+              <Progress percent={hw.memory.usagePercent} size="small"
+                strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
+                format={(p) => `${p}%`} />
+            </div>
+            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>系统</div>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>
+              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
+            </div>
+          </div>
+        )}
+        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <Space>
+              <Text strong>进程列表</Text>
+              <Tag color={processes.length > 0 ? 'green' : 'default'}>{processes.length} 个进程</Tag>
+            </Space>
+            <Button type="text" size="small" icon={<ReloadOutlined spin={systemLoading} />}
+              onClick={() => { setSystemLoading(true); loadSystemInfo().finally(() => setSystemLoading(false)); }}>刷新</Button>
+          </div>
+          <Table columns={processColumns} dataSource={processes} rowKey="id"
+            size="small" pagination={false} scroll={{ y: 340 }}
+            locale={{ emptyText: <Empty description="暂无运行中的进程" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
+        </div>
+      </Card>
+    );
+  };
+
+  const renderStorageContent = () => {
+    const storageItems = storage?.items || [];
+    const totalSize = storageItems.reduce((sum, s) => sum + (s.size || 0), 0);
+
+    return (
+      <Card title="模型存储">
+        <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text type="secondary">管理各类模型的存储目录，支持迁移到其他磁盘</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>总占用: {formatBytes(totalSize)}</Text>
+        </div>
+        {storageItems.length === 0 ? (
+          <Empty description="加载中..." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {storageItems.map((item) => (
+              <div key={item.type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                    <Text strong>{item.label}</Text>
+                    <Tag color={item.exists ? 'default' : 'error'} style={{ marginLeft: 8 }}>{formatBytes(item.size)}</Tag>
+                    {item.isJunction && (
+                      <>
+                        <Tooltip title={`Junction → ${item.junctionTarget}`}>
+                          <Tag color="blue" icon={<LinkOutlined />}>已迁移</Tag>
+                        </Tooltip>
+                        <Popconfirm
+                          title="确认还原"
+                          description={`确定要将 ${item.label} 还原到原路径吗？文件将从 ${item.junctionTarget} 移回原位置。`}
+                          onConfirm={() => handleRestore(item.type, item.label)}
+                          okText="还原"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Tag color="orange" style={{ cursor: 'pointer' }}
+                            icon={restoringType === item.type ? <SyncOutlined spin /> : undefined}>
+                            还原
+                          </Tag>
+                        </Popconfirm>
+                      </>
+                    )}
+                  </div>
+                  <Text type="secondary" style={{ fontSize: 12 }} copyable={{ text: item.path }}>
+                    {item.isJunction ? item.junctionTarget : item.path}
+                  </Text>
+                </div>
+                <div style={{ flexShrink: 0, display: 'flex', gap: 8, marginLeft: 16 }}>
+                  <Button size="small" icon={<FolderOpenOutlined />} disabled={!item.exists}
+                    onClick={() => handleOpenFolder(item.path)}>打开</Button>
+                  <Button size="small" icon={<SwapOutlined />}
+                    onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label }); setMigratePath(''); }}>迁移</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    );
+  };
+
   const renderContent = () => {
     switch (selectedMenu) {
+      case 'runtime': return renderRuntimeContent();
       case 'engines': return renderEnginesContent();
+      case 'storage': return renderStorageContent();
       case 'export':  return renderExportContent();
       case 'update':  return renderUpdateContent();
       default:        return null;
@@ -759,6 +1057,8 @@ const GlobalSettings = () => {
             onClick={({ key }) => setSelectedMenu(key)}
             style={{ height: '100%', borderRight: 0 }}
             items={[
+              { key: 'runtime', icon: <DashboardOutlined />, label: '运行状态' },
+              { key: 'storage', icon: <DatabaseOutlined />, label: '模型存储' },
               { key: 'engines', icon: <AppstoreOutlined />, label: '引擎管理' },
               { key: 'export',  icon: <ExportOutlined />,   label: '导出配置' },
               { key: 'update',  icon: <SyncOutlined />,     label: '更新设置' }
@@ -772,6 +1072,58 @@ const GlobalSettings = () => {
       </Layout>
 
       {renderVersionDrawer()}
+
+      {/* 迁移确认弹窗 */}
+      <Modal
+        title={`迁移 ${migrateModal.label}`}
+        open={migrateModal.open}
+        onCancel={() => setMigrateModal({ open: false, type: null, label: '' })}
+        onOk={handleMigrate}
+        okText="开始迁移"
+        cancelText="取消"
+        confirmLoading={migrating}
+        okButtonProps={{ danger: true }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">
+            将模型文件移动到新位置，并在原路径创建目录联接（mklink /J），程序无需修改即可正常使用。
+          </Text>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <Text strong>目标路径:</Text>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Input
+            placeholder="例如: D:\novastudio\llm"
+            value={migratePath}
+            onChange={(e) => setMigratePath(e.target.value)}
+            onPressEnter={handleMigrate}
+            style={{ flex: 1 }}
+          />
+          <Button icon={<FolderOpenOutlined />}
+            loading={pickingFolder}
+            onClick={async () => {
+              setPickingFolder(true);
+              try {
+                const res = await systemService.pickFolder();
+                if (!res.cancelled && res.path) {
+                  setMigratePath(res.path);
+                }
+              } catch (e) {
+                message.error('打开文件夹选择器失败');
+              } finally {
+                setPickingFolder(false);
+              }
+            }}>
+            浏览
+          </Button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Text type="warning" style={{ fontSize: 12 }}>
+            注意: 迁移过程中请勿关闭程序，大文件可能需要较长时间。目标路径必须为空目录或不存在的路径。
+          </Text>
+        </div>
+      </Modal>
     </Layout>
   );
 };

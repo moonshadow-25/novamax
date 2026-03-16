@@ -152,6 +152,15 @@ export const updateService = {
   apply: () => api.post('/update/apply')
 };
 
+export const systemService = {
+  getInfo: () => api.get('/system/info'),
+  getStorage: () => api.get('/system/storage'),
+  openFolder: (dirPath) => api.post('/system/storage/open', { dirPath }),
+  migrateStorage: (type, targetPath) => api.post('/system/storage/migrate', { type, targetPath }),
+  restoreStorage: (type) => api.post('/system/storage/restore', { type }),
+  pickFolder: () => api.post('/system/storage/pick-folder', {}, { timeout: 120000 })
+};
+
 export const remoteConfigService = {
   sync: () => api.post('/remote-config/sync'),
   status: () => api.get('/remote-config/status')

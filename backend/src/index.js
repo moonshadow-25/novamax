@@ -23,6 +23,7 @@ import modelscopeRouter from './routes/modelscope.js';
 import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
 import enginesRouter from './routes/engines.js';
+import systemRouter from './routes/system.js';
 import eventBus from './services/eventBus.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -106,6 +107,7 @@ app.use('/api', modelscopeRouter);
 app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
 app.use('/api', enginesRouter);
+app.use('/api', systemRouter);
 
 // SSE 实时事件推送
 app.get('/api/events', (req, res) => {

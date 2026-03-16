@@ -567,6 +567,42 @@ class ProcessManager {
     };
   }
 
+  /**
+   * 获取所有运行中的进程信息
+   */
+  getAllRunning() {
+    const running = [];
+
+    // 单模型进程
+    for (const [modelId, info] of this.processes) {
+      running.push({
+        id: modelId,
+        pid: info.process?.pid || null,
+        type: info.type,
+        mode: info.mode || 'single',
+        port: info.port,
+        category: 'model',
+        startTime: info.startTime || null
+      });
+    }
+
+    // 路由进程
+    for (const [type, info] of this.routers) {
+      running.push({
+        id: `router-${type}`,
+        pid: info.process?.pid || null,
+        type,
+        mode: 'router',
+        port: info.port,
+        category: 'router',
+        modelIds: [...info.modelIds],
+        startTime: info.startTime || null
+      });
+    }
+
+    return running;
+  }
+
   getLogs(modelId) {
     const model = modelManager.getById(modelId);
     if (!model) {
