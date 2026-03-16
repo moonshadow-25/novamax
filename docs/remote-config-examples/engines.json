@@ -1,0 +1,117 @@
+{
+  "version": "1.0.1",
+  "last_updated": "2026-03-15T00:00:00Z",
+  "engines": {
+    "rocm": {
+      "id": "rocm",
+      "name": "ROCm + PyTorch",
+      "category": "runtime",
+      "description": "AMD GPU 运行时和 PyTorch ROCm 版本",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "7.12+2.12",
+          "modelscope_file": "torch_rocm_env_313.tar.gz",
+          "size": 976870912
+        }
+      ],
+      "dependencies": []
+    },
+    "llamacpp": {
+      "id": "llamacpp",
+      "name": "llama.cpp",
+      "category": "engine",
+      "description": "LLM 推理引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "202603151200",
+          "modelscope_file": "llamacpp/llamacpp_202603151200.tar.gz",
+          "size": 71000000,
+          "rocm_version": "7.12+2.12"
+        },
+        {
+          "version": "202603141238",
+          "modelscope_file": "llamacpp/llamacpp_202603141238.tar.gz",
+          "size": 69675881,
+          "rocm_version": "7.12+2.12"
+        }
+      ],
+      "dependencies": [
+        "rocm"
+      ]
+    },
+    "comfyui": {
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "category": "engine",
+      "description": "图像生成工作流引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "v0.18.0",
+          "modelscope_file": "comfyui/comfyui_0180_202603150000.tar.gz",
+          "size": 7400000,
+          "rocm_version": "7.12+2.12"
+        },
+        {
+          "version": "v0.17.0",
+          "modelscope_file": "comfyui/comfyui_0170_202603141237.tar.gz",
+          "size": 7225165,
+          "rocm_version": "7.12+2.12"
+        }
+      ],
+      "dependencies": [
+        "rocm"
+      ]
+    },
+    "tts": {
+      "id": "tts",
+      "name": "TTS Engine",
+      "category": "engine",
+      "description": "文本转语音引擎",
+      "modelscope_repo": "shoujiekeji/tts-engine",
+      "versions": [
+        {
+          "version": "v1.0",
+          "modelscope_file": "tts-v1.0-win64.zip",
+          "size": 209715200
+        }
+      ],
+      "dependencies": []
+    },
+    "whisper": {
+      "id": "whisper",
+      "name": "Whisper",
+      "category": "engine",
+      "description": "语音识别引擎",
+      "modelscope_repo": "shoujiekeji/whisper-engine",
+      "versions": [
+        {
+          "version": "v1.0",
+          "modelscope_file": "whisper-v1.0-win64.zip",
+          "size": 314572800
+        }
+      ],
+      "dependencies": []
+    },
+    "app": {
+      "id": "app",
+      "name": "NovaMax",
+      "category": "app",
+      "description": "NovaMax 主程序",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "1.0.3",
+          "modelscope_file": "novamax/novamax-1.0.3-update.tar.gz",
+          "size": 81548638,
+          "release_notes": "",
+          "min_version": "1.0.0",
+          "release_date": "2026-03-15T11:29:33Z"
+        }
+      ],
+      "dependencies": []
+    }
+  }
+}

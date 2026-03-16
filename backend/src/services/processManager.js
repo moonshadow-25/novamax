@@ -1,9 +1,11 @@
 import { spawn } from 'child_process';
 import axios from 'axios';
 import path from 'path';
+import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import configManager from './configManager.js';
+import engineManager from './engineManager.js';
 import { generateRouterCommand, generateSingleModelCommand } from './llmRunner.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
@@ -95,10 +97,13 @@ class ProcessManager {
 
       console.log(`启动单模型: ${cmd.command} ${cmd.args.join(' ')}`);
 
-      const externalPaths = configManager.get('external_paths');
-      const llamaServerPath = path.join(PROJECT_ROOT, externalPaths.llamacpp, 'vulkan', 'llama-server.exe');
+      const llamacppPath = engineManager.getEnginePath('llamacpp', model.engine_version || null);
+      const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
-      const process = spawn(llamaServerPath, cmd.args);
+      // 构建环境变量（添加引擎目录和 ROCm 等依赖）
+      const env = this._buildEngineEnv(model.engine_version, llamacppPath);
+
+      const process = spawn(llamaServerPath, cmd.args, { env });
 
       this.processes.set(modelId, {
         process,
@@ -281,9 +286,9 @@ class ProcessManager {
 
       console.log(`启动路由进程: ${cmd.command} ${cmd.args.join(' ')}`);
 
-      // 启动进程
-      const externalPaths = configManager.get('external_paths');
-      const llamaServerPath = path.join(PROJECT_ROOT, externalPaths.llamacpp, 'vulkan', 'llama-server.exe');
+      // 启动进程（路由模式使用默认最新版本）
+      const llamacppPath = engineManager.getEnginePath('llamacpp');
+      const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
       const process = spawn(llamaServerPath, cmd.args);
 
@@ -524,6 +529,13 @@ class ProcessManager {
     return { status: MODEL_STATUS.STOPPED };
   }
 
+  /**
+   * 获取 llama-server.exe 路径
+   */
+  _getLlamaServerPath(basePath) {
+    return path.join(basePath, 'llama-server.exe');
+  }
+
   cleanup(modelId) {
     const processInfo = this.processes.get(modelId);
     if (processInfo) {
@@ -570,6 +582,40 @@ class ProcessManager {
       return [];
     }
     return processInfo.logs;
+  }
+
+  /**
+   * 构建引擎启动所需的环境变量
+   * 根据引擎版本添加必要的 PATH（如 ROCm）
+   */
+  _buildEngineEnv(engineVersion, enginePath) {
+    const env = { ...process.env };
+
+    // 1. 添加引擎自己的目录到 PATH（用于加载 ggml.dll 等）
+    if (enginePath && fs.existsSync(enginePath)) {
+      env.PATH = `${enginePath};${env.PATH}`;
+      console.log(`Added engine path to PATH: ${enginePath}`);
+    }
+
+    // 2. 如果指定了引擎版本，查找对应的 ROCm 版本
+    if (engineVersion) {
+      const engine = engineManager.getEngine('llamacpp');
+      if (engine) {
+        const versionInfo = engine.versions.find(v => v.version === engineVersion);
+        if (versionInfo && versionInfo.rocm_version) {
+          const rocmBasePath = path.join(PROJECT_ROOT, 'external', 'rocm', versionInfo.rocm_version);
+          const rocmBinPath = path.join(rocmBasePath, 'Lib', 'site-packages', 'torch', 'lib', 'rocm', 'bin');
+          if (fs.existsSync(rocmBinPath)) {
+            env.PATH = `${rocmBinPath};${env.PATH}`;
+            console.log(`Added ROCm ${versionInfo.rocm_version} to PATH: ${rocmBinPath}`);
+          } else {
+            console.warn(`ROCm bin not found at ${rocmBinPath}`);
+          }
+        }
+      }
+    }
+
+    return env;
   }
 }
 

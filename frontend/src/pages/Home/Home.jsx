@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined } from '@ant-design/icons';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService, configService, downloadService } from '../../services/api';
+import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
+import ComfyUIInstanceCard from '../../components/ComfyUIInstanceCard/ComfyUIInstanceCard';
+import ComfyUIInstanceSettings from '../../components/ComfyUIInstanceSettings/ComfyUIInstanceSettings';
 import './Home.css';
 
 const { Header, Content } = Layout;
@@ -39,6 +41,7 @@ const WHISPER_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
 
 function Home() {
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
@@ -56,11 +59,59 @@ function Home() {
   const [downloadingCount, setDownloadingCount] = useState(0);
   const [favorites, setFavorites] = useState([]);
 
+  // ComfyUI 实例管理
+  const [comfyuiInstances, setComfyuiInstances] = useState([]);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [currentInstance, setCurrentInstance] = useState(null);
+
   useEffect(() => {
     configService.getFavorites().then(res => {
       setFavorites(res.favorites || []);
     }).catch(() => {});
+
+    // 启动时触发远程模型同步，完成后刷新列表
+    remoteConfigService.sync().then(() => loadModels()).catch(() => {});
   }, []);
+
+  // 加载 ComfyUI 实例列表
+  const loadComfyUIInstances = useCallback(async () => {
+    if (activeTab !== 'comfyui') return;
+    try {
+      const res = await comfyuiService.getInstances();
+      setComfyuiInstances(res.instances || []);
+    } catch (error) {
+      console.error('Failed to load ComfyUI instances:', error);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'comfyui') {
+      loadComfyUIInstances();
+      const timer = setInterval(loadComfyUIInstances, 3000); // 轮询状态
+      return () => clearInterval(timer);
+    }
+  }, [activeTab, loadComfyUIInstances]);
+
+  const handleCreateInstance = async () => {
+    try {
+      await comfyuiService.createInstance({
+        name: '新实例',
+        host: '0.0.0.0',
+        port: 8189,
+        engine_version: null,
+        custom_args: ''
+      });
+      message.success('实例已创建');
+      loadComfyUIInstances();
+    } catch (error) {
+      message.error(error.response?.data?.error || '创建失败');
+    }
+  };
+
+  const handleInstanceSettings = (instance) => {
+    setCurrentInstance(instance);
+    setSettingsVisible(true);
+  };
 
   const toggleFavorite = (modelId) => {
     setFavorites(prev => {
@@ -170,6 +221,12 @@ function Home() {
             </Badge>
             <Button
               type="text"
+              icon={<SettingOutlined />}
+              onClick={() => navigate('/global-settings')}
+              title="全局设置"
+            />
+            <Button
+              type="text"
               icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
               onClick={toggleTheme}
             />
@@ -214,6 +271,48 @@ function Home() {
           </div>
         )}
 
+        {/* ComfyUI Tab 实例管理（折叠面板）*/}
+        {activeTab === 'comfyui' && (
+          <Collapse
+            style={{ marginBottom: 16 }}
+            items={[
+              {
+                key: 'instances',
+                label: 'ComfyUI 管理',
+                children: (
+                  <div>
+                    {comfyuiInstances.length === 0 ? (
+                      <div style={{ padding: '16px 0', textAlign: 'center', color: '#999' }}>
+                        暂无实例，点击模型卡片的"运行"按钮将自动创建
+                      </div>
+                    ) : (
+                      <>
+                        {comfyuiInstances.map(instance => (
+                          <ComfyUIInstanceCard
+                            key={instance.id}
+                            instance={instance}
+                            onUpdate={loadComfyUIInstances}
+                            onSettings={handleInstanceSettings}
+                          />
+                        ))}
+                        <Button
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={handleCreateInstance}
+                          block
+                          style={{ marginTop: 8 }}
+                        >
+                          新增实例
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )
+              }
+            ]}
+          />
+        )}
+
         <div className="model-grid">
           {filteredModels.map(model => (
             <ModelCard
@@ -241,6 +340,13 @@ function Home() {
       <DownloadCenter
         visible={downloadCenterVisible}
         onClose={() => setDownloadCenterVisible(false)}
+      />
+      <ComfyUIInstanceSettings
+        visible={settingsVisible}
+        instance={currentInstance}
+        onClose={() => setSettingsVisible(false)}
+        onSave={loadComfyUIInstances}
+        onDelete={loadComfyUIInstances}
       />
     </Layout>
   );

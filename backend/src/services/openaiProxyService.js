@@ -195,6 +195,7 @@ class OpenAIProxyService {
       const timer = setTimeout(() => controller.abort(), 30000);
       let response;
       try {
+        console.log(`[DEBUG] POST http://${host}:${port}/prompt with body:`, JSON.stringify({ prompt: wf }).substring(0, 500));
         response = await fetch(`http://${host}:${port}/prompt`, {
           method: 'POST',
           signal: controller.signal,
@@ -205,6 +206,7 @@ class OpenAIProxyService {
         clearTimeout(timer);
       }
       const data = await response.json();
+      console.log('[DEBUG] ComfyUI response:', JSON.stringify(data));
       if (!data.prompt_id) {
         throw new Error('Failed to submit workflow: no prompt_id returned');
       }

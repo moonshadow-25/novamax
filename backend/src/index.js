@@ -1,12 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import open from 'open';
 
 import configManager from './services/configManager.js';
 import modelManager from './services/modelManager.js';
 import downloadService from './services/downloadService.js';
+import engineManager from './services/engineManager.js';
+import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
+import remoteConfigService from './services/remoteConfigService.js';
+import { PROJECT_ROOT } from './config/constants.js';
 
 import modelsRouter from './routes/models.js';
 import backendRouter from './routes/backend.js';
@@ -16,6 +22,7 @@ import configRouter from './routes/config.js';
 import modelscopeRouter from './routes/modelscope.js';
 import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
+import enginesRouter from './routes/engines.js';
 import eventBus from './services/eventBus.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +38,8 @@ async function init() {
   console.log('Initializing NovaMax...');
   await configManager.init();
   await modelManager.init();
+  await engineManager.init();
+  comfyuiInstanceManager.init(); // 初始化 ComfyUI 实例管理器
 
   // 一次性清理所有临时状态字段（重构后不再需要持久化这些字段）
   console.log('清理旧的临时状态字段...');
@@ -63,6 +72,29 @@ async function init() {
   await modelManager.syncAllDownloadedQuantizations();
 
   console.log('Initialization complete');
+
+  // 写当前版本的 app .installed 标记
+  try {
+    const _require = createRequire(import.meta.url);
+    const pkg = _require(path.join(__dirname, '../package.json'));
+    const currentVersion = pkg.version || '0.0.0';
+    const appMarkerDir = path.join(PROJECT_ROOT, 'external', 'app', currentVersion);
+    fs.mkdirSync(appMarkerDir, { recursive: true });
+    const markerPath = path.join(appMarkerDir, '.installed');
+    if (!fs.existsSync(markerPath)) {
+      fs.writeFileSync(markerPath, JSON.stringify({
+        installed_at: new Date().toISOString(), engine: 'app'
+      }));
+    }
+  } catch (e) {
+    console.warn('[init] 写 app .installed 标记失败:', e.message);
+  }
+
+  // 非阻塞并行拉取远程配置
+  Promise.all([
+    remoteConfigService.syncModels(),
+    remoteConfigService.syncEngines()
+  ]).catch(err => console.warn('[remoteConfig] 启动同步失败:', err.message));
 }
 
 app.use('/api', modelsRouter);
@@ -73,11 +105,14 @@ app.use('/api', configRouter);
 app.use('/api', modelscopeRouter);
 app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
+app.use('/api', enginesRouter);
 
 // SSE 实时事件推送
 app.get('/api/events', (req, res) => {
   eventBus.addClient(res);
 });
+
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 import { getFrontendDistPath } from './utils/pathHelper.js';
 const frontendPath = getFrontendDistPath();

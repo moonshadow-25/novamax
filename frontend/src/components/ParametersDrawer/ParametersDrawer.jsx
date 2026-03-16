@@ -15,6 +15,7 @@ import {
   Col,
   Tooltip,
   Modal,
+  Select,
   message
 } from 'antd';
 import {
@@ -22,14 +23,17 @@ import {
   ReloadOutlined,
   PlusOutlined,
   DeleteOutlined,
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  UndoOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
+import { engineService, modelService } from '../../services/api';
 import './ParametersDrawer.css';
 
 const { Panel } = Collapse;
+const { Option } = Select;
 
-function ParametersDrawer({ visible, modelId, onClose }) {
+function ParametersDrawer({ visible, modelId, model, onClose }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [parameters, setParameters] = useState(null);
@@ -40,11 +44,40 @@ function ParametersDrawer({ visible, modelId, onClose }) {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
 
+  // 引擎版本相关
+  const [engineVersions, setEngineVersions] = useState([]);
+  const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
+
   useEffect(() => {
     if (visible && modelId) {
       loadData();
+      loadEngineVersions();
     }
   }, [visible, modelId]);
+
+  const loadEngineVersions = async () => {
+    // 只有 LLM 类型才需要引擎版本选择
+    if (model?.type !== 'llm') return;
+    try {
+      const data = await engineService.getById('llamacpp');
+      setEngineVersions(data.installed_versions || []);
+      // 读取模型当前配置的版本，没有则显示"默认（最新）"
+      setSelectedEngineVersion(model?.engine_version || null);
+    } catch (e) {
+      console.error('加载引擎版本失败:', e);
+    }
+  };
+
+  const handleEngineVersionChange = async (version) => {
+    try {
+      // null 表示使用默认（最新）版本
+      await modelService.update(modelId, { engine_version: version || null });
+      setSelectedEngineVersion(version);
+      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+    } catch (e) {
+      message.error('切换引擎版本失败');
+    }
+  };
 
   const loadData = async () => {
     // 先加载元数据，再加载参数
@@ -99,8 +132,24 @@ function ParametersDrawer({ visible, modelId, onClose }) {
       setLoading(true);
       const values = await form.validateFields();
 
-      // 合并标准参数和自定义参数
-      const allParams = { ...values };
+      // 标准参数键（确保所有标准参数都被保存）
+      const standardKeys = [
+        'context_length', 'gpu_layers', 'threads', 'parallel',
+        'batch', 'ubatch', 'temperature', 'top_p', 'top_k',
+        'repeat_penalty'
+      ];
+
+      // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
+      const allParams = {};
+      standardKeys.forEach(key => {
+        if (values[key] !== undefined) {
+          allParams[key] = values[key];
+        } else if (parameters[key] !== undefined) {
+          allParams[key] = parameters[key];
+        }
+      });
+
+      // 添加自定义参数
       customParams.forEach(({ key, value }) => {
         allParams[key] = value;
       });
@@ -228,6 +277,24 @@ function ParametersDrawer({ visible, modelId, onClose }) {
         onClose={onClose}
         extra={
           <Space>
+            {model?.source === 'remote' && (
+              <Popconfirm
+                title="恢复远程默认参数？"
+                description="将重置量化选择（LLM）或参数映射（ComfyUI）为默认值"
+                onConfirm={async () => {
+                  try {
+                    await modelService.restoreDefaults(modelId);
+                    message.success('已恢复默认');
+                  } catch (e) {
+                    message.error('恢复失败');
+                  }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button icon={<UndoOutlined />}>恢复默认</Button>
+              </Popconfirm>
+            )}
             <Popconfirm
               title="确定重置为默认参数？"
               onConfirm={handleReset}
@@ -289,6 +356,37 @@ function ParametersDrawer({ visible, modelId, onClose }) {
             form={form}
             layout="vertical"
           >
+            {/* 引擎版本选择（仅 LLM） */}
+            {model?.type === 'llm' && engineVersions.length > 0 && (
+              <>
+                <Form.Item
+                  label={
+                    <Space>
+                      引擎版本
+                      <Tooltip title="选择运行此模型使用的 llama.cpp 版本，默认使用最新安装的版本">
+                        <QuestionCircleOutlined style={{ color: '#999' }} />
+                      </Tooltip>
+                    </Space>
+                  }
+                >
+                  <Select
+                    value={selectedEngineVersion}
+                    onChange={handleEngineVersionChange}
+                    style={{ width: '100%' }}
+                    placeholder="默认（最新版本）"
+                    allowClear
+                  >
+                    {engineVersions.map((v, index) => (
+                      <Option key={v.version} value={v.version}>
+                        {v.version}{index === 0 ? '（最新）' : ''}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+                <Divider />
+              </>
+            )}
+
             <Collapse defaultActiveKey={[]} ghost>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">

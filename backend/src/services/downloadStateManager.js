@@ -58,10 +58,16 @@ class DownloadStateManager {
 
   /**
    * 创建新的下载状态
+   * @param {string} id - 模型ID或引擎ID
+   * @param {string} targetQuantization - 量化版本（模型）或版本号（引擎）
+   * @param {string} type - 下载类型：'model' 或 'engine'
    */
-  createState(modelId, targetQuantization) {
+  createState(id, targetQuantization, type = 'model') {
     const state = {
-      modelId,
+      id,
+      modelId: type === 'model' ? id : null, // 兼容旧代码
+      engineId: type === 'engine' ? id : null,
+      type,
       status: 'downloading',
       progress: 0,
       error: null,
@@ -74,7 +80,7 @@ class DownloadStateManager {
       totalBytes: 0,
       files: []
     };
-    this.states.set(this._key(modelId, targetQuantization), state);
+    this.states.set(this._key(id, targetQuantization), state);
     return state;
   }
 
@@ -145,7 +151,10 @@ class DownloadStateManager {
     const result = {};
     for (const [key, state] of this.states.entries()) {
       result[key] = {
+        id: state.id,
         modelId: state.modelId,
+        engineId: state.engineId,
+        type: state.type || 'model', // 兼容旧数据
         status: state.status,
         progress: state.progress,
         error: state.error,

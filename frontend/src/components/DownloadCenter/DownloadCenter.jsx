@@ -21,6 +21,8 @@ const formatSize = (bytes) => {
 
 const statusMap = {
   downloading: { color: 'processing', label: '下载中' },
+  unpacking: { color: 'processing', label: '解压中' },
+  installing: { color: 'processing', label: '安装中' },
   paused: { color: 'warning', label: '已暂停' },
   completed: { color: 'success', label: '已完成' },
   failed: { color: 'error', label: '失败' }
@@ -98,6 +100,14 @@ function DownloadCenter({ visible, onClose }) {
               : dl.status === 'failed' ? 'exception'
               : 'success';
 
+            // 引擎下载使用阶段映射，避免小文件 tqdm 来不及到 100% 导致进度偏低
+            const displayPercent = dl.type === 'engine'
+              ? (dl.status === 'completed' ? 100
+                : dl.status === 'installing' ? 85
+                : dl.status === 'unpacking' ? 70
+                : Math.round((dl.progress || 0) * 0.6))
+              : Math.floor(dl.progress || 0);
+
             return (
               <div key={idx} style={{
                 padding: 12,
@@ -107,6 +117,7 @@ function DownloadCenter({ visible, onClose }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <Text strong style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {dl.modelName}
+                    {dl.type === 'engine' && <Tag color="purple" style={{ marginLeft: 8 }}>引擎</Tag>}
                   </Text>
                   <Space size={4}>
                     {dl.targetQuantization && (
@@ -117,7 +128,7 @@ function DownloadCenter({ visible, onClose }) {
                 </div>
 
                 <Progress
-                  percent={Math.floor(dl.progress || 0)}
+                  percent={displayPercent}
                   status={progressStatus}
                   size="small"
                 />

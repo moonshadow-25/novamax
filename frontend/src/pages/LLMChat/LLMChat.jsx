@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Input, Button, Space, Typography, message } from 'antd';
 import { ArrowLeftOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
-import { llmService, modelService } from '../../services/api';
+import { llmService, modelService, engineService } from '../../services/api';
+import EngineDownloadModal from '../../components/EngineDownloadModal/EngineDownloadModal';
 import './LLMChat.css';
 
 const { Header, Content, Footer } = Layout;
@@ -18,13 +19,44 @@ function LLMChat() {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
+  // 引擎检查相关状态
+  const [engineReady, setEngineReady] = useState(false);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [engineInfo, setEngineInfo] = useState(null);
+
   useEffect(() => {
-    loadModel();
-  }, [modelId]);
+    checkEngine();
+  }, []);
+
+  useEffect(() => {
+    if (engineReady) {
+      loadModel();
+    }
+  }, [modelId, engineReady]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  const checkEngine = async () => {
+    try {
+      const result = await engineService.checkInstalled('llamacpp');
+      if (!result.installed) {
+        setEngineInfo(result.engineInfo);
+        setShowDownloadModal(true);
+      } else {
+        setEngineReady(true);
+      }
+    } catch (error) {
+      console.error('Failed to check engine:', error);
+      setEngineReady(true);
+    }
+  };
+
+  const handleDownloadComplete = () => {
+    setShowDownloadModal(false);
+    setEngineReady(true);
+  };
 
   const loadModel = async () => {
     try {
@@ -63,6 +95,18 @@ function LLMChat() {
   const handleClear = () => {
     setMessages([]);
   };
+
+  if (!engineReady) {
+    return (
+      <EngineDownloadModal
+        visible={true}
+        engineId="llamacpp"
+        engineInfo={engineInfo}
+        onComplete={handleDownloadComplete}
+        onCancel={() => navigate('/?tab=llm')}
+      />
+    );
+  }
 
   return (
     <Layout className="llm-chat-layout">

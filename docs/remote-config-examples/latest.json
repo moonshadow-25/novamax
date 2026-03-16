@@ -1,0 +1,9 @@
+{
+  "version": "1.1.0",
+  "channel": "stable",
+  "release_date": "2026-03-15T00:00:00Z",
+  "release_notes": "修复若干问题，新增远程配置中心功能。",
+  "download_url": "https://cdn.novamax.com/releases/novamax-1.1.0-win.zip",
+  "checksum": "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  "min_version": "1.0.0"
+}

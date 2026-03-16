@@ -7,6 +7,7 @@ import ComfyUI from './pages/ComfyUI/ComfyUI';
 import TTS from './pages/TTS/TTS';
 import Whisper from './pages/Whisper/Whisper';
 import Settings from './pages/Settings/Settings';
+import GlobalSettings from './pages/GlobalSettings/GlobalSettings';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/tts/:modelId" element={<TTS />} />
           <Route path="/whisper/:modelId" element={<Whisper />} />
           <Route path="/settings/:modelId" element={<Settings />} />
+          <Route path="/global-settings" element={<GlobalSettings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

@@ -38,11 +38,19 @@ class ConfigManager {
         indextts: './external/indextts'
       },
       ports: {
+        llm_range: { start: 8080, end: 8089 },
         llamacpp_range: [8100, 8199],
         comfyui: 8188,
-        tts: 8200,
-        whisper: 8201
+        tts: 5000,
+        whisper: 5001
       },
+      update_settings: {
+        auto_check: true,
+        last_check: null,
+        channel: 'stable',
+        server_url: 'https://api.novamax.com'
+      },
+      installed_engines: {},
       favorites: []
     };
   }

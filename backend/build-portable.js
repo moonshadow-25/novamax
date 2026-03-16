@@ -9,15 +9,7 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const RELEASE_DIR = path.join(PROJECT_ROOT, 'release');
 
-// 打包选项
-const SKIP_EXTERNAL = process.env.SKIP_EXTERNAL === 'true';
-
-console.log('\n🚀 开始打包 NovaMax (便携版)...');
-if (SKIP_EXTERNAL) {
-  console.log('⚠️  精简模式：跳过 external 目录\n');
-} else {
-  console.log('📦 完整模式：包含所有外部工具\n');
-}
+console.log('\n🚀 开始打包 NovaMax (便携版)...\n');
 
 // 1. 清理旧的发布目录
 console.log('📁 清理发布目录...');
@@ -103,22 +95,29 @@ const frontendDest = path.join(RELEASE_DIR, 'frontend');
 copyDirectory(frontendDist, path.join(frontendDest, 'dist'));
 console.log('✅ 前端文件已复制');
 
-// 5. 复制外部工具（Node.js, Python, llamacpp 等）
-if (!SKIP_EXTERNAL) {
-  console.log('📋 复制外部工具...');
-  const externalSrc = path.join(PROJECT_ROOT, 'external');
-  const externalDest = path.join(RELEASE_DIR, 'external');
-  
-  if (fs.existsSync(externalSrc)) {
-    console.log('   复制 external 目录 (这可能需要几分钟)...');
-    copyDirectory(externalSrc, externalDest);
-    console.log('✅ 外部工具已复制 (Node.js, Python, llamacpp)');
+// 5. 复制外部工具（仅 node + python313，其余引擎按需下载）
+console.log('📋 复制外部工具...');
+const externalDest = path.join(RELEASE_DIR, 'external');
+for (const tool of ['node', 'python313']) {
+  const src = path.join(PROJECT_ROOT, 'external', tool);
+  if (fs.existsSync(src)) {
+    console.log(`   复制 external/${tool}...`);
+    copyDirectory(src, path.join(externalDest, tool));
   } else {
-    console.log('⚠️  external 目录不存在，跳过');
+    console.warn(`⚠️  external/${tool} 不存在，跳过`);
   }
+}
+console.log('✅ 外部工具已复制 (node, python313)');
+
+// 5b. 复制 ci/ 安装脚本（引擎安装时需要）
+console.log('📋 复制 ci/ 安装脚本...');
+const ciSrc = path.join(PROJECT_ROOT, 'ci');
+const ciDest = path.join(RELEASE_DIR, 'ci');
+if (fs.existsSync(ciSrc)) {
+  copyDirectory(ciSrc, ciDest);
+  console.log('✅ ci/ 已复制');
 } else {
-  console.log('⏭️  跳过外部工具（精简模式）');
-  console.log('   请配置 backend/config/external-paths.json 使用外部工具');
+  console.warn('⚠️  ci/ 目录不存在，跳过');
 }
 
 // 6. 复制配置文件模板
@@ -140,7 +139,7 @@ fs.mkdirSync(dataDest, { recursive: true });
 // 复制默认数据（如果存在）
 const dataSrc = path.join(PROJECT_ROOT, 'data');
 if (fs.existsSync(dataSrc)) {
-  const defaultFiles = ['models.json', 'config.json', 'presets.json', 'parameters.json'];
+  const defaultFiles = ['models.json', 'config.json', 'presets.json', 'parameters.json', 'engines.json', 'update.json'];
   defaultFiles.forEach(file => {
     const srcFile = path.join(dataSrc, file);
     if (fs.existsSync(srcFile)) {
@@ -158,6 +157,7 @@ console.log('📄 创建启动脚本...');
 
 // Windows 批处理启动脚本（使用英文避免编码问题）
 const startBat = `@echo off
+setlocal EnableDelayedExpansion
 title NovaMax
 cls
 
@@ -165,25 +165,31 @@ echo ========================================
 echo    NovaMax - AI Model Platform
 echo ========================================
 echo.
-echo Starting service...
-echo.
 
-cd /d "%~dp0"
+set "APP_DIR=%~dp0"
+set "APP_DIR=!APP_DIR:~0,-1!"
 set NODE_ENV=production
 
-external\\node\\node.exe backend\\src\\index.js
+:start
+echo Starting service...
+echo.
+cd /d "!APP_DIR!"
+"!APP_DIR!\\external\\node\\node.exe" "!APP_DIR!\\backend\\src\\index.js"
 
-if errorlevel 1 (
+if exist "!APP_DIR!\\data\\updates\\pending" (
     echo.
-    echo ========================================
-    echo Service failed - Check error messages
-    echo ========================================
-    pause
-) else (
-    echo.
-    echo Service stopped
-    pause
+    echo [NovaMax Updater] Applying update...
+    set /p STAGING=<"!APP_DIR!\\data\\updates\\pending"
+    robocopy "!STAGING!" "!APP_DIR!" /E /XD "data" /NFL /NDL /NJH /NJS /R:2 /W:1
+    del "!APP_DIR!\\data\\updates\\pending" 2>nul
+    rmdir /S /Q "!STAGING!" 2>nul
+    echo [NovaMax Updater] Done. Restarting...
+    goto start
 )
+
+echo.
+echo Service stopped
+pause
 `;
 fs.writeFileSync(path.join(RELEASE_DIR, 'NovaMax.bat'), startBat, 'utf8');
 
@@ -314,15 +320,7 @@ stats.forEach(stat => {
 
 const totalSize = stats.reduce((sum, s) => sum + s.size, 0);
 console.log(`   ${'总大小'.padEnd(25)} ${formatSize(totalSize)}`);
-console.log(`\n💡 打包模式：${SKIP_EXTERNAL ? '精简版（~20MB）' : '完整版（~340MB）'}`);
-
-if (SKIP_EXTERNAL) {
-  console.log('\n⚠️  后续步骤：');
-  console.log('   1. 编辑 release/backend/config/external-paths.json');
-  console.log('   2. 设置 python.enabled=true 并指定路径');
-  console.log('   3. 设置 llamacpp.enabled=true 并指定路径');
-  console.log('   详见 docs/EXTERNAL_TOOLS_CONFIG.md');
-}
+console.log(`\n💡 打包内容：node + python313 + ci脚本（其余引擎按需下载）`);
 
 console.log('\n✅ 测试运行: cd release && NovaMax.bat');
 console.log('');

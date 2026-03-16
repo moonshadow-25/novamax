@@ -94,13 +94,25 @@ export function generateSingleModelCommand(model, port) {
 
     // 获取命令行参数名
     const paramName = PARAM_MAPPING[key] || `--${key.replace(/_/g, '-')}`;
-    args.push(paramName, value.toString());
+
+    // 布尔标志处理
+    if (typeof value === 'boolean') {
+      if (value === true) {
+        args.push(paramName); // 只添加参数名，不添加值
+      }
+      // false 则跳过该参数
+    } else {
+      args.push(paramName, value.toString());
+    }
   }
 
   // 添加其他自定义参数（不在默认列表中的）
+  // 排除采样参数（这些应该在推理时传递，不在启动时设置）
+  const samplingParams = ['temperature', 'top_p', 'top_k', 'repeat_penalty', 'min_p', 'typical_p', 'tfs_z', 'mirostat', 'mirostat_tau', 'mirostat_eta'];
+
   for (const [key, value] of Object.entries(effectiveParams)) {
-    // 跳过内部字段和已处理的参数
-    if (key.startsWith('_') || key === 'version' || defaults.hasOwnProperty(key)) {
+    // 跳过内部字段、已处理的参数、采样参数
+    if (key.startsWith('_') || key === 'version' || defaults.hasOwnProperty(key) || samplingParams.includes(key)) {
       continue;
     }
 
@@ -112,7 +124,17 @@ export function generateSingleModelCommand(model, port) {
 
     // 获取命令行参数名
     const paramName = PARAM_MAPPING[key] || `--${key.replace(/_/g, '-')}`;
-    args.push(paramName, value.toString());
+
+    // 布尔标志处理
+    if (typeof value === 'boolean') {
+      if (value === true) {
+        args.push(paramName); // 只添加参数名，不添加值
+        console.log(`  添加布尔标志: ${paramName}`);
+      }
+      // false 则跳过该参数
+    } else {
+      args.push(paramName, value.toString());
+    }
   }
 
   // 多模态投影文件

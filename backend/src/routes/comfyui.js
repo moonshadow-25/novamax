@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { exec } from 'child_process';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import workflowAnalyzer from '../services/workflowAnalyzer.js';
@@ -10,6 +11,8 @@ import modelscopeParser from '../services/modelscopeParser.js';
 import openaiProxyService from '../services/openaiProxyService.js';
 import urlConverter from '../services/urlConverter.js';
 import comfyuiDownloader from '../services/comfyuiDownloader.js';
+import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
+import engineManager from '../services/engineManager.js';
 import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 
 const router = express.Router();
@@ -201,7 +204,7 @@ router.post('/comfyui/analyze-workflow', async (req, res) => {
  */
 router.post('/comfyui/confirm-workflow', async (req, res) => {
   try {
-    const { name, description, analysis, comfyui_config } = req.body;
+    const { name, description, analysis } = req.body;
 
     if (!name || !analysis) {
       return res.status(400).json({ error: 'Name and analysis required' });
@@ -214,11 +217,7 @@ router.post('/comfyui/confirm-workflow', async (req, res) => {
       workflow: analysis.workflow,
       required_models: analysis.required_models,
       parameter_mapping: analysis.parameter_mapping,
-      default_parameters: analysis.default_parameters,
-      comfyui_config: comfyui_config || {
-        port: 8188,
-        host: '127.0.0.1'
-      }
+      default_parameters: analysis.default_parameters
     };
 
     // 保存到comfyui.json
@@ -470,125 +469,192 @@ router.get('/comfyui/:id/models-status', async (req, res) => {
   }
 });
 
+// ==================== ComfyUI 实例管理 ====================
+
+/**
+ * 获取所有实例
+ * GET /api/comfyui/instances
+ */
+router.get('/comfyui/instances', async (req, res) => {
+  try {
+    const instances = await comfyuiInstanceManager.getInstances();
+    res.json({ success: true, instances });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 确保至少有一个实例（延迟创建）
+ * POST /api/comfyui/instances/ensure
+ */
+router.post('/comfyui/instances/ensure', (req, res) => {
+  try {
+    const instance = comfyuiInstanceManager.ensureDefaultInstance();
+    res.json({ success: true, instance });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 创建新实例
+ * POST /api/comfyui/instances
+ */
+router.post('/comfyui/instances', (req, res) => {
+  try {
+    const instance = comfyuiInstanceManager.createInstance(req.body);
+    res.json({ success: true, instance });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 更新实例配置
+ * PUT /api/comfyui/instances/:id
+ */
+router.put('/comfyui/instances/:id', (req, res) => {
+  try {
+    const instance = comfyuiInstanceManager.updateInstance(req.params.id, req.body);
+    res.json({ success: true, instance });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 删除实例
+ * DELETE /api/comfyui/instances/:id
+ */
+router.delete('/comfyui/instances/:id', (req, res) => {
+  try {
+    comfyuiInstanceManager.deleteInstance(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 启动实例
+ * POST /api/comfyui/instances/:id/start
+ */
+router.post('/comfyui/instances/:id/start', async (req, res) => {
+  try {
+    const result = await comfyuiInstanceManager.startInstance(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 停止实例
+ * POST /api/comfyui/instances/:id/stop
+ */
+router.post('/comfyui/instances/:id/stop', (req, res) => {
+  try {
+    const result = comfyuiInstanceManager.stopInstance(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 获取实例状态
+ * GET /api/comfyui/instances/:id/status
+ */
+router.get('/comfyui/instances/:id/status', (req, res) => {
+  try {
+    const status = comfyuiInstanceManager.getInstanceStatus(req.params.id);
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 打开实例对应的 ComfyUI 文件夹
+ * POST /api/comfyui/instances/:id/open-folder
+ */
+router.post('/comfyui/instances/:id/open-folder', (req, res) => {
+  try {
+    const instance = comfyuiInstanceManager.getInstance(req.params.id);
+    if (!instance) {
+      return res.status(404).json({ error: 'Instance not found' });
+    }
+
+    const enginePath = engineManager.getEnginePath('comfyui', instance.engine_version);
+    if (!enginePath) {
+      return res.status(404).json({ error: 'ComfyUI engine path not found' });
+    }
+
+    // 根据操作系统选择打开命令
+    const command = process.platform === 'win32'
+      ? `start "" "${enginePath}"`
+      : process.platform === 'darwin'
+      ? `open "${enginePath}"`
+      : `xdg-open "${enginePath}"`;
+
+    exec(command, (error) => {
+      if (error) {
+        console.error('Failed to open folder:', error);
+        return res.status(500).json({ error: 'Failed to open folder' });
+      }
+      res.json({ success: true });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== ComfyUI 工作流执行（纯转发）====================
+
 /**
  * 启动ComfyUI
  * POST /api/comfyui/:id/start
  */
-router.post('/comfyui/:id/start', async (req, res) => {
+/**
+ * 检查ComfyUI连接状态（纯转发）
+ * POST /api/comfyui/check
+ * Body: { host, port }
+ */
+router.post('/comfyui/check', async (req, res) => {
   try {
-    const model = modelManager.getById(req.params.id);
-
-    if (!model) {
-      return res.status(404).json({ error: 'Model not found' });
+    const { host, port } = req.body;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
     }
 
-    // 检查所有required_models是否已下载
-    const updatedModels = comfyuiModelManager.updateModelsStatus(model.required_models || []);
-    const missingModels = updatedModels.filter(m => !m.downloaded);
-
-    if (missingModels.length > 0) {
-      return res.status(400).json({
-        error: 'Some required models are missing',
-        missingModels: missingModels.map(m => ({
-          type: m.type,
-          filename: m.filename
-        }))
-      });
-    }
-
-    // 启动ComfyUI进程
-    const result = await processManager.startBackend(req.params.id);
-
-    // 更新模型状态
-    await modelManager.update(req.params.id, {
-      status: 'running'
-    });
-
-    res.json({
-      success: true,
-      port: result.port,
-      status: result.status
-    });
-  } catch (error) {
-    console.error('Start ComfyUI error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * 停止ComfyUI
- * POST /api/comfyui/:id/stop
- */
-router.post('/comfyui/:id/stop', async (req, res) => {
-  try {
-    const result = await processManager.stopBackend(req.params.id);
-
-    // 更新模型状态
-    await modelManager.update(req.params.id, {
-      status: 'stopped'
-    });
-
-    res.json({
-      success: true,
-      status: result.status
-    });
-  } catch (error) {
-    console.error('Stop ComfyUI error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * 获取ComfyUI状态
- * GET /api/comfyui/:id/status
- */
-router.get('/comfyui/:id/status', async (req, res) => {
-  try {
-    const status = processManager.getStatus(req.params.id);
-    res.json(status);
-  } catch (error) {
-    console.error('Get ComfyUI status error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * 检查ComfyUI连接状态
- * GET /api/comfyui/:id/check
- */
-router.get('/comfyui/:id/check', async (req, res) => {
-  try {
-    const model = modelManager.getById(req.params.id);
-    if (!model) {
-      return res.status(404).json({ error: 'Model not found' });
-    }
-
-    const { host, port } = model.comfyui_config || { host: '127.0.0.1', port: 8188 };
-    console.log(`Checking ComfyUI connection: ${host}:${port}`);
-    const result = await openaiProxyService.checkConnection(host, port);
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+    console.log(`Checking ComfyUI connection: ${connectHost}:${port}`);
+    const result = await openaiProxyService.checkConnection(connectHost, port);
     res.json({ success: true, connected: result.connected });
   } catch (error) {
-    console.error('ComfyUI connection check failed:', error.message, '| code:', error.code, '| response status:', error.response?.status);
+    console.error('ComfyUI connection check failed:', error.message);
     res.json({ success: true, connected: false, error: error.message });
   }
 });
 
 /**
- * 上传图片到ComfyUI（代理转发）
- * POST /api/comfyui/:id/upload-image
+ * 上传图片到ComfyUI（纯转发）
+ * POST /api/comfyui/upload-image
+ * Body: FormData with image file, host, port
  */
-router.post('/comfyui/:id/upload-image', upload.single('image'), async (req, res) => {
+router.post('/comfyui/upload-image', upload.single('image'), async (req, res) => {
   try {
-    const model = modelManager.getById(req.params.id);
-    if (!model) {
-      return res.status(404).json({ error: 'Model not found' });
-    }
-
     if (!req.file) {
       return res.status(400).json({ error: 'No image file provided' });
     }
 
-    const { host, port } = model.comfyui_config || { host: '127.0.0.1', port: 8188 };
+    const { host, port } = req.body;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
+
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
     // 转发到 ComfyUI /upload/image（使用原生 fetch + FormData，避免 axios 代理问题）
     const fileBuffer = fs.readFileSync(req.file.path);
@@ -597,7 +663,7 @@ router.post('/comfyui/:id/upload-image', upload.single('image'), async (req, res
     form.append('image', blob, req.file.originalname || 'upload.png');
     form.append('overwrite', 'true');
 
-    const response = await fetch(`http://${host}:${port}/upload/image`, {
+    const response = await fetch(`http://${connectHost}:${port}/upload/image`, {
       method: 'POST',
       body: form,
       headers: { 'User-Agent': 'Mozilla/5.0' },
@@ -621,6 +687,7 @@ router.post('/comfyui/:id/upload-image', upload.single('image'), async (req, res
 /**
  * 异步提交工作流（立即返回 promptId，不等待完成）
  * POST /api/comfyui/:id/run
+ * Body: { host, port, ...params }
  */
 router.post('/comfyui/:id/run', async (req, res) => {
   try {
@@ -629,10 +696,14 @@ router.post('/comfyui/:id/run', async (req, res) => {
       return res.status(404).json({ error: 'Model not found' });
     }
 
-    const { host, port } = model.comfyui_config || { host: '127.0.0.1', port: 8188 };
+    const { host, port, ...params } = req.body;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
+
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
     // 智能填充图像槽：用户提供的图像数少于工作流所需时，复用最后一张
-    const params = { ...req.body };
     const imageParamKeys = Object.entries(model.parameter_mapping?.inputs || {})
       .filter(([, def]) => def.type === 'image')
       .map(([key]) => key);
@@ -668,7 +739,8 @@ router.post('/comfyui/:id/run', async (req, res) => {
       params
     );
 
-    const promptId = await openaiProxyService.submitWorkflow(host, port, workflow);
+    console.log('[DEBUG] Submitting workflow to ComfyUI:', JSON.stringify(workflow).substring(0, 500));
+    const promptId = await openaiProxyService.submitWorkflow(connectHost, port, workflow);
     res.json({ success: true, promptId });
   } catch (error) {
     console.error('Run workflow error:', error);
@@ -698,18 +770,19 @@ router.post('/comfyui/:id/generate', async (req, res) => {
  * 获取生成进度
  * GET /api/comfyui/:id/progress/:taskId
  */
-router.get('/comfyui/:id/progress/:taskId', async (req, res) => {
+/**
+ * 获取生成进度（纯转发）
+ * GET /api/comfyui/progress/:taskId?host=xxx&port=xxx
+ */
+router.get('/comfyui/progress/:taskId', async (req, res) => {
   try {
-    const model = modelManager.getById(req.params.id);
-    const processStatus = processManager.getStatus(req.params.id);
-    const host = model?.comfyui_config?.host || '127.0.0.1';
-    const port = processStatus.running ? processStatus.port : (model?.comfyui_config?.port || 8188);
+    const { host, port } = req.query;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
 
-    const progress = await openaiProxyService.getProgress(
-      host,
-      port,
-      req.params.taskId
-    );
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+    const progress = await openaiProxyService.getProgress(connectHost, port, req.params.taskId);
 
     res.json({
       success: true,
@@ -722,38 +795,41 @@ router.get('/comfyui/:id/progress/:taskId', async (req, res) => {
 });
 
 /**
- * 获取生成结果
- * GET /api/comfyui/:id/result/:taskId
+ * 获取生成结果（纯转发）
+ * GET /api/comfyui/result/:taskId?host=xxx&port=xxx
  */
-router.get('/comfyui/:id/result/:taskId', async (req, res) => {
+router.get('/comfyui/result/:taskId', async (req, res) => {
   try {
-    const model = modelManager.getById(req.params.id);
-    const processStatus = processManager.getStatus(req.params.id);
-    const host = model?.comfyui_config?.host || '127.0.0.1';
-    const port = processStatus.running ? processStatus.port : (model?.comfyui_config?.port || 8188);
+    const { host, port } = req.query;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
 
-    // 使用pollResult获取最终结果（单次检查，非阻塞轮询）
-    const result = await openaiProxyService.pollResult(host, port, req.params.taskId);
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+    const result = await openaiProxyService.pollResult(connectHost, port, req.params.taskId);
 
-    // 提取输出文件，构造代理 URL（通过本后端转发，不直接暴露 ComfyUI 地址）
-    const modelId = req.params.id;
+    // 提取输出文件，构造代理 URL
     const images = [];
     if (result.outputs) {
       for (const output of Object.values(result.outputs)) {
         for (const img of (output.images || [])) {
-          const qs = img.subfolder ? `?subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type || 'output'}` : `?type=${img.type || 'output'}`;
-          images.push({ url: `/api/comfyui/${modelId}/view/${encodeURIComponent(img.filename)}${qs}`, filename: img.filename });
+          const qs = img.subfolder
+            ? `?subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type || 'output'}&host=${host}&port=${port}`
+            : `?type=${img.type || 'output'}&host=${host}&port=${port}`;
+          images.push({ url: `/api/comfyui/view/${encodeURIComponent(img.filename)}${qs}` });
         }
         for (const vid of (output.videos || [])) {
-          const qs = vid.subfolder ? `?subfolder=${encodeURIComponent(vid.subfolder)}&type=${vid.type || 'output'}` : `?type=${vid.type || 'output'}`;
-          images.push({ url: `/api/comfyui/${modelId}/view/${encodeURIComponent(vid.filename)}${qs}`, filename: vid.filename });
+          const qs = vid.subfolder
+            ? `?subfolder=${encodeURIComponent(vid.subfolder)}&type=${vid.type || 'output'}&host=${host}&port=${port}`
+            : `?type=${vid.type || 'output'}&host=${host}&port=${port}`;
+          images.push({ url: `/api/comfyui/view/${encodeURIComponent(vid.filename)}${qs}` });
         }
       }
     }
 
     res.json({
       success: true,
-      data: images.map(img => ({ url: img.url }))
+      data: images
     });
   } catch (error) {
     console.error('Get result error:', error);
@@ -762,18 +838,22 @@ router.get('/comfyui/:id/result/:taskId', async (req, res) => {
 });
 
 /**
- * 代理 ComfyUI 输出图片（通过 ComfyUI /view 接口）
- * GET /api/comfyui/:id/view/:filename
+ * 代理 ComfyUI 输出图片（纯转发）
+ * GET /api/comfyui/view/:filename?host=xxx&port=xxx&type=xxx&subfolder=xxx
  */
-router.get('/comfyui/:id/view/:filename', async (req, res) => {
+router.get('/comfyui/view/:filename', async (req, res) => {
   try {
-    const model = modelManager.getById(req.params.id);
-    const { host, port } = model?.comfyui_config || { host: '127.0.0.1', port: 8188 };
+    const { host, port } = req.query;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
+
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
     const { filename } = req.params;
     const subfolder = req.query.subfolder || '';
     const type = req.query.type || 'output';
 
-    const viewUrl = `http://${host}:${port}/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=${type}`;
+    const viewUrl = `http://${connectHost}:${port}/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=${type}`;
     const response = await fetch(viewUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(10000)

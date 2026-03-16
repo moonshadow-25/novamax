@@ -270,9 +270,19 @@ router.delete('/models/:id/files', async (req, res) => {
   }
 });
 
-// 删除模型（包括配置）
-router.delete('/models/:id', async (req, res) => {
+// 只删除卡片配置，不删除模型文件
+router.delete('/models/:id/config', async (req, res) => {
   try {
+    const success = await modelManager.delete(req.params.id);
+    if (!success) return res.status(404).json({ error: 'Model not found' });
+    res.json({ success: true, message: '卡片已删除，模型文件保留' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 删除模型（包括配置）
+router.delete('/models/:id', async (req, res) => {  try {
     const model = modelManager.getById(req.params.id);
     if (!model) {
       return res.status(404).json({ error: 'Model not found' });
@@ -326,6 +336,28 @@ router.get('/models/:id/scan-files', async (req, res) => {
   try {
     const downloadedFiles = await modelManager.scanDownloadedFiles(req.params.id);
     res.json({ downloadedFiles });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 恢复远程默认配置
+router.post('/models/:id/restore-defaults', async (req, res) => {
+  try {
+    const model = modelManager.getById(req.params.id);
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+    if (model.source !== 'remote') return res.status(400).json({ error: '仅远程模型支持恢复默认' });
+
+    const updates = {};
+    if (model.type === 'llm') {
+      updates.selected_quantization = null;
+    } else if (model.type === 'comfyui') {
+      updates.user_parameter_mapping = null;
+    }
+
+    const updated = await modelManager.update(req.params.id, updates);
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

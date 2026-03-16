@@ -10,7 +10,8 @@ import {
   PictureOutlined, DownOutlined, CloseCircleOutlined, PlusOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
-import { modelService, comfyuiService } from '../../services/api';
+import { modelService, comfyuiService, engineService } from '../../services/api';
+import EngineDownloadModal from '../../components/EngineDownloadModal/EngineDownloadModal';
 
 // 从 workflow.original 推导真实默认参数（兼容新旧模型）
 function deriveDefaults(model) {
@@ -64,12 +65,20 @@ function ComfyUI() {
   const [model, setModel] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 引擎检查相关状态
+  const [engineReady, setEngineReady] = useState(true); // ComfyUI 支持外部实例，不强制本地引擎
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [engineInfo, setEngineInfo] = useState(null);
+
+  // 实例选择
+  const [instances, setInstances] = useState([]);
+  const [selectedInstance, setSelectedInstance] = useState(null);
+  const [customMode, setCustomMode] = useState(false);
+  const [customHost, setCustomHost] = useState('127.0.0.1');
+  const [customPort, setCustomPort] = useState(8188);
+
   // 连接状态
   const [connected, setConnected] = useState(null); // null=checking, true, false
-  const [editingAddress, setEditingAddress] = useState(false);
-  const [editHost, setEditHost] = useState('');
-  const [editPort, setEditPort] = useState('');
-  const [savingConfig, setSavingConfig] = useState(false);
 
   // 参数值
   const [params, setParams] = useState({});
@@ -94,15 +103,44 @@ function ComfyUI() {
 
   // 加载模型
   useEffect(() => {
-    loadModel();
-  }, [modelId]);
+    // checkEngine(); // 注释掉：ComfyUI 支持外部实例，不强制要求本地引擎
+    loadInstances();
+  }, []);
 
-  // 检查连接（模型加载后）
+  // 加载实例列表
+  const loadInstances = async () => {
+    try {
+      // 先确保有实例（延迟创建）
+      await comfyuiService.ensureInstance();
+
+      const res = await comfyuiService.getInstances();
+      const instanceList = res.instances || [];
+      setInstances(instanceList);
+
+      // 默认选择第一个运行中的实例
+      const runningInstance = instanceList.find(i => i.status === 'running');
+      if (runningInstance) {
+        setSelectedInstance(runningInstance.id);
+      } else if (instanceList.length > 0) {
+        setSelectedInstance(instanceList[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load instances:', error);
+    }
+  };
+
   useEffect(() => {
-    if (model) {
+    if (engineReady) {
+      loadModel();
+    }
+  }, [modelId, engineReady]);
+
+  // 检查连接（实例选择后或自定义地址设置后）
+  useEffect(() => {
+    if (model && (selectedInstance || customMode)) {
       checkConnection();
     }
-  }, [model]);
+  }, [model, selectedInstance, customMode, customHost, customPort]);
 
   // 轮询生成进度
   useEffect(() => {
@@ -118,6 +156,26 @@ function ComfyUI() {
       }
     };
   }, [promptId, generating]);
+
+  const checkEngine = async () => {
+    try {
+      const result = await engineService.checkInstalled('comfyui');
+      if (!result.installed) {
+        setEngineInfo(result.engineInfo);
+        setShowDownloadModal(true);
+      } else {
+        setEngineReady(true);
+      }
+    } catch (error) {
+      console.error('Failed to check engine:', error);
+      setEngineReady(true);
+    }
+  };
+
+  const handleDownloadComplete = () => {
+    setShowDownloadModal(false);
+    setEngineReady(true);
+  };
 
   const loadModel = async () => {
     try {
@@ -148,50 +206,42 @@ function ComfyUI() {
   const checkConnection = async () => {
     setConnected(null);
     try {
-      const result = await comfyuiService.checkConnection(modelId);
+      const { host, port } = getCurrentAddress();
+      const result = await comfyuiService.checkConnection(host, port);
       setConnected(result.connected);
     } catch {
       setConnected(false);
     }
   };
 
-  const handleSaveAddress = async () => {
-    const port = parseInt(editPort, 10);
-    if (!editHost.trim() || !port || port < 1 || port > 65535) {
-      message.error('请输入有效的地址和端口');
-      return;
+  // 获取当前选中的地址
+  const getCurrentAddress = () => {
+    if (customMode) {
+      return { host: customHost, port: customPort };
     }
-
-    setSavingConfig(true);
-    try {
-      await comfyuiService.updateConfig(modelId, { host: editHost.trim(), port });
-      // Update local model state
-      setModel(prev => ({
-        ...prev,
-        comfyui_config: { host: editHost.trim(), port }
-      }));
-      setEditingAddress(false);
-      message.success('地址已保存');
-      // Re-check connection with new config
-      setTimeout(checkConnection, 200);
-    } catch (error) {
-      message.error('保存失败: ' + error.message);
-    } finally {
-      setSavingConfig(false);
+    const instance = instances.find(i => i.id === selectedInstance);
+    if (instance) {
+      const host = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host;
+      return { host, port: instance.port };
     }
+    return { host: '127.0.0.1', port: 8188 };
   };
 
-  const startEditAddress = () => {
-    const cfg = model?.comfyui_config || { host: '127.0.0.1', port: 8188 };
-    setEditHost(cfg.host);
-    setEditPort(String(cfg.port));
-    setEditingAddress(true);
+  const handleInstanceChange = (value) => {
+    if (value === 'custom') {
+      setCustomMode(true);
+    } else {
+      setCustomMode(false);
+      setSelectedInstance(value);
+    }
+    // 不需要手动调用 checkConnection，useEffect 会自动触发
   };
 
   const pollProgress = async () => {
     if (!promptId) return;
     try {
-      const result = await comfyuiService.getProgress(modelId, promptId);
+      const { host, port } = getCurrentAddress();
+      const result = await comfyuiService.getProgress(host, port, promptId);
       if (result.status === 'completed') {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -212,7 +262,8 @@ function ComfyUI() {
 
   const fetchResult = async () => {
     try {
-      const result = await comfyuiService.getResult(modelId, promptId);
+      const { host, port } = getCurrentAddress();
+      const result = await comfyuiService.getResult(host, port, promptId);
       if (result.data && result.data.length > 0) {
         setResults(result.data.map(item => item.url));
       }
@@ -257,16 +308,17 @@ function ComfyUI() {
       }
 
       // 处理所有图片上传（支持多图）
+      const { host, port } = getCurrentAddress();
       for (const [key, file] of Object.entries(imageFiles)) {
         if (file) {
           const fd = new FormData();
           fd.append('image', file);
-          const uploadResult = await comfyuiService.uploadImage(modelId, fd);
+          const uploadResult = await comfyuiService.uploadImage(host, port, fd);
           runParams[key] = uploadResult.filename;
         }
       }
 
-      const result = await comfyuiService.run(modelId, runParams);
+      const result = await comfyuiService.run(modelId, host, port, runParams);
       setPromptId(result.promptId);
     } catch (error) {
       setGenerating(false);
@@ -477,6 +529,18 @@ function ComfyUI() {
   const isPrimary = key => PRIMARY_KEYS.includes(key) || inputs[key]?.type === 'image';
   const isAdvanced = key => !isPrimary(key) && key !== 'height';
 
+  // if (!engineReady) {
+  //   return (
+  //     <EngineDownloadModal
+  //       visible={true}
+  //       engineId="comfyui"
+  //       engineInfo={engineInfo}
+  //       onComplete={handleDownloadComplete}
+  //       onCancel={() => navigate('/?tab=comfyui')}
+  //     />
+  //   );
+  // }
+
   if (loading) {
     return (
       <Layout style={{ minHeight: '100vh' }}>
@@ -498,7 +562,6 @@ function ComfyUI() {
     );
   }
 
-  const cfg = model.comfyui_config || { host: '127.0.0.1', port: 8188 };
   // 合并自动映射 + 用户自定义映射（用户定义优先，使表单字段同步更新）
   const inputs = {
     ...(model.parameter_mapping?.inputs || {}),
@@ -540,17 +603,20 @@ function ComfyUI() {
         borderBottom: '1px solid rgba(255,255,255,0.1)',
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'space-between',
         padding: '0 16px'
       }}>
-        <Button
-          type="text"
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/?tab=comfyui')}
-        />
-        <Title level={4} style={{ display: 'inline', marginLeft: 16, marginBottom: 0 }}>
-          ComfyUI — {model.name}
-        </Title>
-        <Tag color="blue" style={{ marginLeft: 12 }}>{workflowTypeLabels[workflowType] || workflowType}</Tag>
+        <Space>
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/?tab=comfyui')}
+          />
+          <Title level={4} style={{ display: 'inline', marginLeft: 16, marginBottom: 0 }}>
+            ComfyUI — {model.name}
+          </Title>
+          <Tag color="blue">{workflowTypeLabels[workflowType] || workflowType}</Tag>
+        </Space>
       </Header>
 
       <Content style={{ padding: 16 }}>
@@ -582,44 +648,44 @@ function ComfyUI() {
                 </Tooltip>
               </div>
 
-              {/* 地址显示/编辑 */}
-              {editingAddress ? (
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input
-                    value={editHost}
-                    onChange={e => setEditHost(e.target.value)}
-                    placeholder="127.0.0.1"
-                    style={{ flex: 2 }}
-                  />
-                  <Input
-                    value={editPort}
-                    onChange={e => setEditPort(e.target.value)}
-                    placeholder="8188"
-                    style={{ flex: 1 }}
-                    type="number"
-                  />
-                  <Button
-                    icon={<CheckOutlined />}
-                    type="primary"
-                    loading={savingConfig}
-                    onClick={handleSaveAddress}
-                  />
-                  <Button
-                    icon={<CloseOutlined />}
-                    onClick={() => setEditingAddress(false)}
-                  />
-                </Space.Compact>
-              ) : (
-                <Space>
-                  <Text code style={{ fontSize: 12 }}>{cfg.host}:{cfg.port}</Text>
-                  <Button
-                    size="small"
-                    icon={<EditOutlined />}
-                    type="text"
-                    onClick={startEditAddress}
-                  />
-                </Space>
-              )}
+              {/* 实例选择器 */}
+              <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                <Select
+                  value={customMode ? 'custom' : selectedInstance}
+                  onChange={handleInstanceChange}
+                  style={{ width: '100%' }}
+                  options={[
+                    ...instances.map(inst => ({
+                      label: `${inst.name} (${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}) ${inst.status === 'running' ? '●' : '○'}`,
+                      value: inst.id
+                    })),
+                    { label: '自定义地址...', value: 'custom' }
+                  ]}
+                />
+                {customMode && (
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      value={customHost}
+                      onChange={e => setCustomHost(e.target.value)}
+                      placeholder="127.0.0.1"
+                      style={{ flex: 2 }}
+                    />
+                    <InputNumber
+                      value={customPort}
+                      onChange={v => setCustomPort(v)}
+                      placeholder="8188"
+                      style={{ flex: 1 }}
+                      min={1}
+                      max={65535}
+                    />
+                    <Button
+                      icon={<CheckOutlined />}
+                      type="primary"
+                      onClick={checkConnection}
+                    />
+                  </Space.Compact>
+                )}
+              </Space>
             </Card>
 
             {/* 参数表单 */}
@@ -672,7 +738,7 @@ function ComfyUI() {
                 <Alert
                   type="warning"
                   message="ComfyUI 未连接"
-                  description={`请确保 ComfyUI 正在运行，地址为 ${cfg.host}:${cfg.port}`}
+                  description={`请确保 ComfyUI 正在运行，或在上方选择正确的实例地址`}
                   style={{ marginBottom: 12 }}
                 />
               )}

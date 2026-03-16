@@ -3,6 +3,7 @@ import fs from 'fs';
 import yaml from 'yaml';
 import { PROJECT_ROOT, DATA_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import configManager from './configManager.js';
+import engineManager from './engineManager.js';
 
 /**
  * ComfyUI运行器
@@ -16,13 +17,12 @@ class ComfyUIRunner {
    * @returns {Object} 命令对象 { command, args }
    */
   generateCommand(model, port) {
-    const externalPaths = configManager.get('external_paths');
-    const comfyuiPath = path.join(PROJECT_ROOT, externalPaths.comfyui || 'external/comfyui');
+    const comfyuiPath = engineManager.getEnginePath('comfyui');
 
     // ComfyUI配置
     const config = model.comfyui_config || {
       port: 8188,
-      host: '127.0.0.1'
+      host: '0.0.0.0'
     };
 
     // 生成extra_model_paths配置文件
@@ -32,7 +32,7 @@ class ComfyUIRunner {
     const args = [
       path.join(comfyuiPath, 'main.py'),
       '--port', port.toString(),
-      '--listen', config.host || '127.0.0.1'
+      '--listen', config.host || '0.0.0.0'
     ];
 
     // 如果有自定义模型路径配置，添加参数
@@ -40,8 +40,10 @@ class ComfyUIRunner {
       args.push('--extra-model-paths-config', configPath);
     }
 
+    const venvPython = path.join(comfyuiPath, 'venv', 'Scripts', 'python.exe');
+
     return {
-      command: 'python',
+      command: venvPython,
       args,
       cwd: comfyuiPath
     };
@@ -116,11 +118,9 @@ class ComfyUIRunner {
    * @returns {boolean} ComfyUI是否存在
    */
   checkComfyUIAvailable() {
-    const externalPaths = configManager.get('external_paths');
-    const comfyuiPath = path.join(PROJECT_ROOT, externalPaths.comfyui || 'external/comfyui');
-    const mainPyPath = path.join(comfyuiPath, 'main.py');
-
-    return fs.existsSync(mainPyPath);
+    const comfyuiPath = engineManager.getEnginePath('comfyui');
+    if (!comfyuiPath) return false;
+    return fs.existsSync(path.join(comfyuiPath, 'main.py'));
   }
 
   /**

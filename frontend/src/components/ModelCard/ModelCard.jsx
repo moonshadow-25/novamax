@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer } from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer, Spin, Popconfirm } from 'antd';
 import {
   PlayCircleOutlined,
   StopOutlined,
@@ -12,14 +12,16 @@ import {
   AppstoreOutlined,
   FileTextOutlined,
   StarFilled,
-  StarOutlined
+  StarOutlined,
+  UndoOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { backendService, modelService, downloadService } from '../../services/api';
+import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
 import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
+import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 import './ModelCard.css';
 
 const { Text } = Typography;
@@ -34,6 +36,20 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [pollInterval, setPollInterval] = useState(null);
   const [workflowModalVisible, setWorkflowModalVisible] = useState(false);
   const [comfyuiSettingsVisible, setComfyuiSettingsVisible] = useState(false);
+
+  // 名称编辑
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(model.name);
+
+  // ComfyUI 启动相关
+  const [comfyuiLaunchVisible, setComfyuiLaunchVisible] = useState(false);
+  const [comfyuiLaunching, setComfyuiLaunching] = useState(false);
+  const [comfyuiLaunchStatus, setComfyuiLaunchStatus] = useState('');
+  const launchPollRef = useRef(null);
+
+  // 引擎下载相关
+  const [showEngineModal, setShowEngineModal] = useState(false);
+  const [engineInfo, setEngineInfo] = useState(null);
 
   // 弹框打开时始终轮询，关闭时停止
   useEffect(() => {
@@ -93,8 +109,111 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     }
   };
 
+  // ComfyUI 运行入口：检查是否有运行中的实例
+  const handleComfyUIRun = async () => {
+    try {
+      const res = await comfyuiService.getInstances();
+      const instances = res.instances || [];
+
+      // 检查是否有运行中的实例
+      const runningInstance = instances.find(i => i.status === 'running');
+      if (runningInstance) {
+        // 有运行中的实例，直接进入
+        navigate(`/comfyui/${model.id}`);
+      } else {
+        // 没有运行中的实例，显示启动 Modal
+        setComfyuiLaunchVisible(true);
+      }
+    } catch (error) {
+      console.error('Failed to check instances:', error);
+      // 出错时直接进入（用户可以手动处理）
+      navigate(`/comfyui/${model.id}`);
+    }
+  };
+
+  const handleComfyUILaunch = async () => {
+    setComfyuiLaunching(true);
+    setComfyuiLaunchStatus('正在检查引擎...');
+
+    try {
+      // 先检查本地引擎是否安装
+      const engineResult = await engineService.checkInstalled('comfyui');
+      if (!engineResult.installed) {
+        setEngineInfo(engineResult.engineInfo);
+        setComfyuiLaunchVisible(false);
+        setComfyuiLaunching(false);
+        setShowEngineModal(true);
+        return;
+      }
+
+      await doLaunchInstance();
+    } catch (error) {
+      setComfyuiLaunchStatus(`启动失败: ${error.response?.data?.error || error.message}`);
+      setComfyuiLaunching(false);
+    }
+  };
+
+  // 实际启动实例的逻辑，引擎就绪后调用
+  const doLaunchInstance = async () => {
+    setComfyuiLaunchVisible(true);
+    setComfyuiLaunching(true);
+    setComfyuiLaunchStatus('正在启动 ComfyUI...');
+
+    try {
+      await comfyuiService.ensureInstance();
+      const res = await comfyuiService.getInstances();
+      const instances = res.instances || [];
+
+      if (instances.length === 0) {
+        throw new Error('无法创建 ComfyUI 实例');
+      }
+
+      const firstInstance = instances[0];
+      await comfyuiService.startInstance(firstInstance.id);
+
+      let attempts = 0;
+      setComfyuiLaunchStatus('等待 ComfyUI 就绪...');
+
+      launchPollRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const host = firstInstance.host === '0.0.0.0' ? '127.0.0.1' : firstInstance.host;
+          const result = await comfyuiService.checkConnection(host, firstInstance.port);
+          if (result.connected) {
+            clearInterval(launchPollRef.current);
+            setComfyuiLaunchVisible(false);
+            setComfyuiLaunching(false);
+            navigate(`/comfyui/${model.id}`);
+          }
+        } catch (err) {
+          console.error('Connection check failed:', err);
+        }
+
+        if (attempts >= 60) {
+          clearInterval(launchPollRef.current);
+          setComfyuiLaunchStatus('连接超时，ComfyUI 可能启动失败');
+          setComfyuiLaunching(false);
+        }
+      }, 1000);
+    } catch (error) {
+      setComfyuiLaunchStatus(`启动失败: ${error.response?.data?.error || error.message}`);
+      setComfyuiLaunching(false);
+    }
+  };
+
+  const handleComfyUILaunchCancel = () => {
+    if (launchPollRef.current) clearInterval(launchPollRef.current);
+    setComfyuiLaunchVisible(false);
+    setComfyuiLaunching(false);
+    setComfyuiLaunchStatus('');
+  };
+
   const handleDownload = async () => {
-    // 直接下载默认选择的量化版本
+    // 没有选中量化版本时，先打开选择器让用户选
+    if (!model.selected_quantization) {
+      handleManageQuantizations();
+      return;
+    }
     startDownload();
   };
 
@@ -295,6 +414,30 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     }
   };
 
+  const handleRestoreDefaults = async () => {
+    try {
+      await modelService.restoreDefaults(model.id);
+      message.success('已恢复默认');
+      onUpdate();
+    } catch (error) {
+      message.error('恢复失败');
+    }
+  };
+
+  const handleSaveName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed) { setNameValue(model.name); setEditingName(false); return; }
+    if (trimmed === model.name) { setEditingName(false); return; }
+    try {
+      await modelService.update(model.id, { name: trimmed });
+      onUpdate();
+    } catch (e) {
+      message.error('重命名失败');
+      setNameValue(model.name);
+    }
+    setEditingName(false);
+  };
+
   const isRunning = model.status === 'running';
   
   // 统一使用 model.downloaded_files 作为主要数据源（最可靠）
@@ -322,8 +465,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 场景2：选中了未下载版本且该版本已下载完成
   const canStart = (hasActiveFile && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted);
 
-  // 判断是否应该显示下载按钮：选中了未下载版本 且 不在下载中/已完成状态
-  const shouldDownload = hasUndownloadedSelection &&
+  // 判断是否应该显示下载按钮：
+  // 1. 选中了未下载版本 且 不在下载中/已完成状态
+  // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
+  const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization)) &&
                         !isDefaultDownloadCompleted &&
                         !isDownloadingDefault;
   
@@ -386,7 +531,26 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   return (
     <Card className="model-card" hoverable>
       <div className="model-header">
-        <h3 title={model.name}>{model.name}</h3>
+        {editingName ? (
+          <Input
+            size="small"
+            value={nameValue}
+            autoFocus
+            onChange={e => setNameValue(e.target.value)}
+            onBlur={handleSaveName}
+            onPressEnter={handleSaveName}
+            onKeyDown={e => { if (e.key === 'Escape') { setNameValue(model.name); setEditingName(false); } }}
+            style={{ flex: 1, marginRight: 8, fontWeight: 600, fontSize: 14 }}
+          />
+        ) : (
+          <h3
+            title={`${model.name}（点击重命名）`}
+            onClick={() => { setNameValue(model.name); setEditingName(true); }}
+            style={{ cursor: 'text' }}
+          >
+            {model.name}
+          </h3>
+        )}
         <Space size={4}>
           {modelSize > 0 && (
             <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
@@ -402,15 +566,25 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               title={isFavorited ? '取消收藏' : '收藏'}
             />
           )}
-          <Tag color={isRunning ? 'green' : 'default'} style={{ margin: 0 }}>
-            {isRunning ? '运行中' : '已停止'}
-          </Tag>
+          {model.type !== 'comfyui' && (
+            <Tag color={isRunning ? 'green' : 'default'} style={{ margin: 0 }}>
+              {isRunning ? '运行中' : '已停止'}
+            </Tag>
+          )}
           <Button
             size="small"
             icon={<SettingOutlined />}
             onClick={handleSettings}
             title="配置参数"
           />
+          {model.source === 'remote' && (
+            <Button
+              size="small"
+              icon={<UndoOutlined />}
+              onClick={handleRestoreDefaults}
+              title="恢复默认"
+            />
+          )}
         </Space>
       </div>
       {model.modelscope_id && (
@@ -545,7 +719,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
-            onClick={() => navigate(`/comfyui/${model.id}`)}
+            onClick={handleComfyUIRun}
             block
           >
             运行
@@ -557,19 +731,45 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           >
             管理工作流
           </Button>
-          {isRunning && (
-            <Button
-              danger
-              icon={<StopOutlined />}
-              onClick={handleStop}
-              loading={loading}
-              block
-            >
-              停止
-            </Button>
-          )}
         </Space>
       )}
+
+      {/* ComfyUI 启动确认 Modal */}
+      <Modal
+        title="启动 ComfyUI"
+        open={comfyuiLaunchVisible}
+        onCancel={comfyuiLaunching ? undefined : handleComfyUILaunchCancel}
+        closable={!comfyuiLaunching}
+        maskClosable={false}
+        footer={
+          comfyuiLaunching ? null : [
+            <Button
+              key="skip"
+              onClick={() => { handleComfyUILaunchCancel(); navigate(`/comfyui/${model.id}`); }}
+            >
+              直接进入
+            </Button>,
+            <Button key="launch" type="primary" onClick={handleComfyUILaunch}>
+              启动并进入
+            </Button>
+          ]
+        }
+      >
+        {comfyuiLaunching ? (
+          <Space direction="vertical" align="center" style={{ width: '100%', padding: '24px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>{comfyuiLaunchStatus}</div>
+          </Space>
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <div>未检测到 ComfyUI 正在运行。</div>
+            <div>点击<strong>启动并进入</strong>将自动启动默认实例，就绪后自动进入运行界面。</div>
+            <div style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
+              如果你已在其他端口运行了 ComfyUI，可点击"直接进入"后在运行页面选择实例。
+            </div>
+          </Space>
+        )}
+      </Modal>
 
       {/* ComfyUI工作流管理Modal */}
       <Modal
@@ -655,6 +855,27 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         open={comfyuiSettingsVisible}
         onClose={() => setComfyuiSettingsVisible(false)}
         destroyOnClose
+        extra={
+          <Popconfirm
+            title="删除卡片"
+            description="仅删除此卡片配置，模型文件不受影响。"
+            onConfirm={async () => {
+              try {
+                await modelService.deleteConfig(model.id);
+                message.success('卡片已删除');
+                setComfyuiSettingsVisible(false);
+                onUpdate();
+              } catch (e) {
+                message.error('删除失败');
+              }
+            }}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button danger icon={<DeleteOutlined />}>删除卡片</Button>
+          </Popconfirm>
+        }
       >
         <UserMappingPanel
           modelId={model.id}
@@ -668,6 +889,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       <ParametersDrawer
         visible={parametersVisible}
         modelId={model.id}
+        model={model}
         onClose={() => {
           setParametersVisible(false);
           onUpdate();
@@ -699,6 +921,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           }}
         />
       )}
+
+      {/* 引擎下载 Modal（启动并进入时引擎未安装） */}
+      <EngineDownloadModal
+        visible={showEngineModal}
+        engineId="comfyui"
+        engineInfo={engineInfo}
+        onComplete={() => {
+          setShowEngineModal(false);
+          doLaunchInstance();
+        }}
+        onCancel={() => setShowEngineModal(false)}
+      />
     </Card>
   );
 }

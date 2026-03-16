@@ -1,0 +1,258 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-03-15T00:00:00Z",
+  "models": {
+    "llm": [
+      {
+        "id": "unsloth_Qwen3-8B-GGUF",
+        "version": "1.0",
+        "name": "Qwen3-8B-GGUF",
+        "description": "Qwen3 8B 量化版本，适合消费级显卡。",
+        "modelscope_id": "unsloth/Qwen3-8B-GGUF",
+        "quantizations": [
+          {
+            "name": "Q4_K_M",
+            "label": "Q4_K_M - 5.20 GB",
+            "is_folder": false,
+            "category": "balanced",
+            "quality": 80,
+            "description": "常用推荐，适合大多数场景",
+            "recommended": true,
+            "file": {
+              "name": "Qwen3-8B-Q4_K_M.gguf",
+              "size": 5583457280,
+              "sha256": "abc123def456...",
+              "download_url": "https://www.modelscope.cn/models/unsloth/Qwen3-8B-GGUF/resolve/master/Qwen3-8B-Q4_K_M.gguf"
+            }
+          },
+          {
+            "name": "Q8_0",
+            "label": "Q8_0 - 8.99 GB",
+            "is_folder": false,
+            "category": "high",
+            "quality": 95,
+            "description": "几乎无损，推荐高质量场景",
+            "recommended": false,
+            "file": {
+              "name": "Qwen3-8B-Q8_0.gguf",
+              "size": 9651290112,
+              "sha256": "def456abc123...",
+              "download_url": "https://www.modelscope.cn/models/unsloth/Qwen3-8B-GGUF/resolve/master/Qwen3-8B-Q8_0.gguf"
+            }
+          }
+        ],
+        "parameter_mapping": null,
+        "default_parameters": {
+          "context_length": 32768,
+          "gpu_layers": -1,
+          "threads": 8,
+          "parallel": 2,
+          "batch": 512,
+          "ubatch": 512,
+          "temperature": 0.7,
+          "top_p": 0.9,
+          "top_k": 40,
+          "repeat_penalty": 1.1
+        }
+      },
+      {
+        "id": "unsloth_Qwen3-72B-GGUF",
+        "version": "1.0",
+        "name": "Qwen3-72B-GGUF",
+        "description": "Qwen3 72B 量化版本，高性能大模型。",
+        "modelscope_id": "unsloth/Qwen3-72B-GGUF",
+        "quantizations": [
+          {
+            "name": "Q4_K_M",
+            "label": "Q4_K_M - 文件夹",
+            "is_folder": true,
+            "folder_path": "Q4_K_M",
+            "category": "balanced",
+            "quality": 80,
+            "description": "常用推荐，适合大多数场景",
+            "recommended": true
+          },
+          {
+            "name": "Q5_K_M",
+            "label": "Q5_K_M - 文件夹",
+            "is_folder": true,
+            "folder_path": "Q5_K_M",
+            "category": "balanced",
+            "quality": 85,
+            "description": "推荐，质量与大小平衡",
+            "recommended": false
+          },
+          {
+            "name": "Q8_0",
+            "label": "Q8_0 - 文件夹",
+            "is_folder": true,
+            "folder_path": "Q8_0",
+            "category": "high",
+            "quality": 95,
+            "description": "几乎无损",
+            "recommended": false
+          }
+        ],
+        "parameter_mapping": null,
+        "default_parameters": {
+          "context_length": 32768,
+          "gpu_layers": -1,
+          "threads": 8,
+          "parallel": 2,
+          "batch": 512,
+          "ubatch": 512,
+          "temperature": 0.7,
+          "top_p": 0.9,
+          "top_k": 40,
+          "repeat_penalty": 1.1
+        }
+      }
+    ],
+    "comfyui": [
+      {
+        "id": "novamax_flux1-schnell",
+        "version": "1.0",
+        "name": "FLUX.1-schnell",
+        "description": "FLUX.1 schnell 文生图工作流，4步快速出图。",
+        "modelscope_id": "black-forest-labs/FLUX.1-schnell",
+        "workflow": {
+          "type": "text2img",
+          "llm_analysis": "FLUX.1 schnell 快速文生图工作流，支持文本提示词生成高质量图像",
+          "original": {
+            "6": {
+              "inputs": { "text": "a beautiful landscape", "clip": ["11", 0] },
+              "class_type": "CLIPTextEncode",
+              "_meta": { "title": "CLIP Text Encode (Positive Prompt)" }
+            },
+            "8": {
+              "inputs": { "samples": ["13", 0], "vae": ["10", 0] },
+              "class_type": "VAEDecode",
+              "_meta": { "title": "VAE Decode" }
+            },
+            "9": {
+              "inputs": { "filename_prefix": "flux-schnell", "images": ["8", 0] },
+              "class_type": "SaveImage",
+              "_meta": { "title": "Save Image" }
+            },
+            "10": {
+              "inputs": { "vae_name": "ae.safetensors" },
+              "class_type": "VAELoader",
+              "_meta": { "title": "Load VAE" }
+            },
+            "11": {
+              "inputs": { "clip_name1": "t5xxl_fp8_e4m3fn.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux" },
+              "class_type": "DualCLIPLoader",
+              "_meta": { "title": "DualCLIPLoader" }
+            },
+            "12": {
+              "inputs": { "unet_name": "flux1-schnell.safetensors", "weight_dtype": "default" },
+              "class_type": "UNETLoader",
+              "_meta": { "title": "Load Diffusion Model" }
+            },
+            "13": {
+              "inputs": { "noise": ["25", 0], "guider": ["22", 0], "sampler": ["16", 0], "sigmas": ["17", 0], "latent_image": ["27", 0] },
+              "class_type": "SamplerCustomAdvanced",
+              "_meta": { "title": "SamplerCustomAdvanced" }
+            },
+            "16": {
+              "inputs": { "sampler_name": "euler" },
+              "class_type": "KSamplerSelect",
+              "_meta": { "title": "KSamplerSelect" }
+            },
+            "17": {
+              "inputs": { "scheduler": "simple", "steps": 4, "denoise": 1, "model": ["12", 0] },
+              "class_type": "BasicScheduler",
+              "_meta": { "title": "BasicScheduler" }
+            },
+            "22": {
+              "inputs": { "model": ["12", 0], "conditioning": ["6", 0] },
+              "class_type": "BasicGuider",
+              "_meta": { "title": "BasicGuider" }
+            },
+            "25": {
+              "inputs": { "noise_seed": 42 },
+              "class_type": "RandomNoise",
+              "_meta": { "title": "RandomNoise" }
+            },
+            "27": {
+              "inputs": { "width": 1024, "height": 1024, "batch_size": 1 },
+              "class_type": "EmptySD3LatentImage",
+              "_meta": { "title": "EmptySD3LatentImage" }
+            }
+          }
+        },
+        "required_models": [
+          {
+            "type": "unet",
+            "filename": "flux1-schnell.safetensors",
+            "node_id": "12",
+            "field": "unet_name",
+            "downloaded": false,
+            "download_sources": {
+              "modelscope": "https://modelscope.cn/models/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+              "priority": ["modelscope"]
+            },
+            "has_url": true
+          },
+          {
+            "type": "vae",
+            "filename": "ae.safetensors",
+            "node_id": "10",
+            "field": "vae_name",
+            "downloaded": false,
+            "download_sources": {
+              "modelscope": "https://modelscope.cn/models/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
+              "priority": ["modelscope"]
+            },
+            "has_url": true
+          },
+          {
+            "type": "clip",
+            "filename": "t5xxl_fp8_e4m3fn.safetensors",
+            "node_id": "11",
+            "field": "clip_name1",
+            "downloaded": false,
+            "download_sources": {
+              "modelscope": "https://modelscope.cn/models/Comfy-Org/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+              "priority": ["modelscope"]
+            },
+            "has_url": true
+          },
+          {
+            "type": "clip",
+            "filename": "clip_l.safetensors",
+            "node_id": "11",
+            "field": "clip_name2",
+            "downloaded": false,
+            "download_sources": {
+              "modelscope": "https://modelscope.cn/models/Comfy-Org/flux_text_encoders/resolve/main/clip_l.safetensors",
+              "priority": ["modelscope"]
+            },
+            "has_url": true
+          }
+        ],
+        "parameter_mapping": {
+          "inputs": {
+            "prompt":     { "node_id": "6",  "field": "text",         "type": "string", "description": "正面提示词" },
+            "steps":      { "node_id": "17", "field": "steps",        "type": "number", "description": "采样步数" },
+            "seed":       { "node_id": "25", "field": "noise_seed",   "type": "number", "description": "随机种子（-1为随机）" },
+            "width":      { "node_id": "27", "field": "width",        "type": "number", "description": "图像宽度" },
+            "height":     { "node_id": "27", "field": "height",       "type": "number", "description": "图像高度" },
+            "batch_size": { "node_id": "27", "field": "batch_size",   "type": "number", "description": "批次大小" }
+          },
+          "outputs": {
+            "save_node_id": "9",
+            "filename_prefix": "flux-schnell"
+          }
+        },
+        "default_parameters": {
+          "width": 1024,
+          "height": 1024,
+          "steps": 4,
+          "seed": -1,
+          "batch_size": 1
+        }
+      }
+    ]
+  }
+}

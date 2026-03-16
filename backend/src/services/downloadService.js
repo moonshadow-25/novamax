@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { DOWNLOADS_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 import modelManager from './modelManager.js';
+import engineManager from './engineManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
 import { getPythonPath, getPythonScriptPath, getModelPath } from '../utils/pathHelper.js';
@@ -300,16 +301,29 @@ class DownloadService extends EventEmitter {
   }
 
   /**
-   * 获取所有下载任务
+   * 获取所有下载任务（包含模型和引擎）
    */
   getAllDownloads() {
     const allStates = downloadStateManager.getAllStates();
     return Object.values(allStates).map(state => {
-      const model = modelManager.getById(state.modelId);
-      return {
-        ...state,
-        modelName: model?.name || state.modelId
-      };
+      if (state.type === 'engine') {
+        // 引擎下载
+        const engine = engineManager.getEngine(state.engineId || state.id);
+        return {
+          ...state,
+          modelId: state.engineId || state.id, // 兼容前端
+          modelName: engine?.name || state.engineId || state.id,
+          type: 'engine'
+        };
+      } else {
+        // 模型下载
+        const model = modelManager.getById(state.modelId || state.id);
+        return {
+          ...state,
+          modelName: model?.name || state.modelId || state.id,
+          type: 'model'
+        };
+      }
     });
   }
 
