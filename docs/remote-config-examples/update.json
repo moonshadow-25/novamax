@@ -1,0 +1,6 @@
+{
+  "server_url": "https://www.firstarpc.com/download",
+  "models_path": "/novamax/models.json",
+  "engines_path": "/novamax/engines.json",
+  "update_path": "/novamax/latest.json"
+}
