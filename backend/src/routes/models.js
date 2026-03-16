@@ -299,26 +299,16 @@ router.delete('/models/:id', async (req, res) => {  try {
       fs.rmSync(downloadDir, { recursive: true, force: true });
     }
 
-    // ComfyUI: 清理 workflows 目录下匹配的工作流 JSON 文件
-    if (model.type === 'comfyui' && model.workflow?.original) {
+    // ComfyUI: 清理 workflows 目录下对应的工作流 JSON 文件
+    if (model.type === 'comfyui' && model.workflow_filename) {
       const workflowsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'workflows');
-      if (fs.existsSync(workflowsDir)) {
-        const workflowContent = JSON.stringify(model.workflow.original);
-        try {
-          const files = fs.readdirSync(workflowsDir);
-          for (const file of files) {
-            if (!file.endsWith('.json')) continue;
-            try {
-              const filePath = path.join(workflowsDir, file);
-              const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (JSON.stringify(parsed) === workflowContent) {
-                fs.unlinkSync(filePath);
-                console.log(`已删除工作流文件: ${file}`);
-              }
-            } catch {}
-          }
-        } catch {}
-      }
+      const filePath = path.join(workflowsDir, model.workflow_filename);
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`已删除工作流文件: ${model.workflow_filename}`);
+        }
+      } catch {}
     }
 
     // 删除配置

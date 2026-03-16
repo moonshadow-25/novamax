@@ -131,6 +131,7 @@ class DownloadStateManager {
    */
   deleteState(modelId, quantName) {
     this.states.delete(this._key(modelId, quantName));
+    eventBus.broadcast('download-progress', { modelId });
   }
 
   /**
@@ -162,7 +163,10 @@ class DownloadStateManager {
         speed: state.speed,
         startTime: state.startTime,
         downloadedBytes: state.downloadedBytes,
-        totalBytes: state.totalBytes
+        totalBytes: state.totalBytes,
+        // ComfyUI 扩展字段
+        comfyuiTaskId: state.comfyuiTaskId || null,
+        displayName: state.displayName || null
       };
     }
     return result;

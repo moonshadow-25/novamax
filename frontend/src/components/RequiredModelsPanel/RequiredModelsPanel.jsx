@@ -66,88 +66,107 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     }
   }, [modelId, requiredModels]);
 
-  // Polling effect — starts when there are active tasks, uses ref for latest state
+  // 轮询任务状态的核心逻辑
+  const pollTaskStatus = async () => {
+    const currentTasks = Object.entries(downloadingTasksRef.current);
+    if (currentTasks.length === 0) return;
+
+    const taskUpdates = {};
+    const toComplete = [];
+    const toCancelled = [];
+    const toFail = [];
+
+    await Promise.all(
+      currentTasks
+        .filter(([, { taskId }]) => taskId !== null)
+        .map(async ([filename, { taskId, progress }]) => {
+          try {
+            const response = await comfyuiService.getDownloadStatus(taskId);
+            if (!response.success) return;
+
+            const status = response.task?.status || 'not_found';
+
+            if (status === 'completed' || status === 'not_found') {
+              toComplete.push(filename);
+            } else if (status === 'failed') {
+              toFail.push({ filename, error: response.task?.error });
+            } else if (status === 'cancelled') {
+              toCancelled.push(filename);
+            } else if (status === 'paused') {
+              const t = response.task;
+              taskUpdates[filename] = {
+                taskId,
+                progress: t.progress ?? progress,
+                totalBytes: t.totalBytes ?? null,
+                downloadedBytes: t.downloadedBytes ?? null,
+                speed: 0,
+                paused: true
+              };
+            } else {
+              // pending or downloading — 更新进度、大小、速度
+              const t = response.task;
+              taskUpdates[filename] = {
+                taskId,
+                progress: t.progress ?? 0,
+                totalBytes: t.totalBytes ?? null,
+                downloadedBytes: t.downloadedBytes ?? null,
+                speed: t.speed ?? null,
+                paused: false
+              };
+            }
+          } catch (e) {
+            console.error('Poll error:', e);
+          }
+        })
+    );
+
+    const hasChanges =
+      toComplete.length > 0 ||
+      toCancelled.length > 0 ||
+      toFail.length > 0 ||
+      Object.keys(taskUpdates).length > 0;
+
+    if (hasChanges) {
+      setDownloadingTasks(prev => {
+        const next = { ...prev, ...taskUpdates };
+        toComplete.forEach(f => delete next[f]);
+        toCancelled.forEach(f => delete next[f]);
+        toFail.forEach(({ filename: f }) => delete next[f]);
+        return next;
+      });
+
+      toComplete.forEach(filename => message.success(`下载完成: ${filename}`));
+      // 取消操作是用户主动的，不需要弹提示
+      toFail.forEach(({ filename, error }) =>
+        message.error(`下载失败: ${filename}${error ? ' - ' + error : ''}`)
+      );
+
+      if (toComplete.length > 0 || toCancelled.length > 0 || toFail.length > 0) {
+        loadModelsStatus();
+      }
+    }
+  };
+
+  // Polling effect — starts when there are active tasks
   useEffect(() => {
     if (Object.keys(downloadingTasks).length === 0) return;
 
-    const intervalId = setInterval(async () => {
-      const currentTasks = Object.entries(downloadingTasksRef.current);
-      if (currentTasks.length === 0) return;
+    // 挂载时立即轮询一次，快速同步外部取消等状态
+    pollTaskStatus();
 
-      const taskUpdates = {};
-      const toComplete = [];
-      const toFail = [];
-
-      await Promise.all(
-        currentTasks
-          .filter(([, { taskId }]) => taskId !== null)
-          .map(async ([filename, { taskId, progress }]) => {
-            try {
-              const response = await comfyuiService.getDownloadStatus(taskId);
-              if (!response.success) return;
-
-              const status = response.task?.status || 'not_found';
-
-              if (status === 'completed' || status === 'not_found') {
-                toComplete.push(filename);
-              } else if (status === 'failed') {
-                toFail.push({ filename, error: response.task?.error });
-              } else if (status === 'cancelled') {
-                toComplete.push(filename);
-              } else if (status === 'paused') {
-                const t = response.task;
-                taskUpdates[filename] = {
-                  taskId,
-                  progress: t.progress ?? progress,
-                  totalBytes: t.totalBytes ?? null,
-                  downloadedBytes: t.downloadedBytes ?? null,
-                  speed: 0,
-                  paused: true
-                };
-              } else {
-                // pending or downloading — 更新进度、大小、速度
-                const t = response.task;
-                taskUpdates[filename] = {
-                  taskId,
-                  progress: t.progress ?? 0,
-                  totalBytes: t.totalBytes ?? null,
-                  downloadedBytes: t.downloadedBytes ?? null,
-                  speed: t.speed ?? null,
-                  paused: false
-                };
-              }
-            } catch (e) {
-              console.error('Poll error:', e);
-            }
-          })
-      );
-
-      const hasChanges =
-        toComplete.length > 0 ||
-        toFail.length > 0 ||
-        Object.keys(taskUpdates).length > 0;
-
-      if (hasChanges) {
-        setDownloadingTasks(prev => {
-          const next = { ...prev, ...taskUpdates };
-          toComplete.forEach(f => delete next[f]);
-          toFail.forEach(({ filename: f }) => delete next[f]);
-          return next;
-        });
-
-        toComplete.forEach(filename => message.success(`下载完成: ${filename}`));
-        toFail.forEach(({ filename, error }) =>
-          message.error(`下载失败: ${filename}${error ? ' - ' + error : ''}`)
-        );
-
-        if (toComplete.length > 0 || toFail.length > 0) {
-          loadModelsStatus();
-        }
-      }
-    }, 2000);
-
+    const intervalId = setInterval(pollTaskStatus, 2000);
     return () => clearInterval(intervalId);
   }, [downloadingTasks]);
+
+  // SSE 监听：下载中心取消/完成时立即刷新
+  useEffect(() => {
+    const es = new EventSource('/api/events');
+    es.addEventListener('download-progress', () => {
+      pollTaskStatus();
+      loadModelsStatus();
+    });
+    return () => es.close();
+  }, []);
 
   const loadModelsStatus = async () => {
     if (!modelId) return;

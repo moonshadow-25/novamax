@@ -221,14 +221,14 @@ function Home() {
             </Badge>
             <Button
               type="text"
-              icon={<SettingOutlined />}
-              onClick={() => navigate('/global-settings')}
-              title="全局设置"
+              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
+              onClick={toggleTheme}
             />
             <Button
               type="text"
-              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
-              onClick={toggleTheme}
+              icon={<SettingOutlined />}
+              onClick={() => navigate('/global-settings')}
+              title="全局设置"
             />
           </Space>
         </Space>

@@ -315,6 +315,15 @@ class DownloadService extends EventEmitter {
           modelName: engine?.name || state.engineId || state.id,
           type: 'engine'
         };
+      } else if (state.type === 'comfyui') {
+        // ComfyUI 模型下载
+        return {
+          ...state,
+          modelId: state.id,
+          modelName: state.displayName || state.targetQuantization,
+          type: 'comfyui',
+          comfyuiTaskId: state.comfyuiTaskId
+        };
       } else {
         // 模型下载
         const model = modelManager.getById(state.modelId || state.id);

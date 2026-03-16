@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Drawer, Progress, Button, Space, Tag, Empty, Typography, message } from 'antd';
 import { PauseCircleOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { downloadService } from '../../services/api';
+import { downloadService, comfyuiService } from '../../services/api';
 
 const { Text } = Typography;
 
@@ -55,27 +55,39 @@ function DownloadCenter({ visible, onClose }) {
     };
   }, [visible]);
 
-  const handlePause = async (modelId, quantName) => {
+  const handlePause = async (dl) => {
     try {
-      await downloadService.pause(modelId, quantName);
+      if (dl.type === 'comfyui') {
+        await comfyuiService.pauseDownload(dl.comfyuiTaskId);
+      } else {
+        await downloadService.pause(dl.modelId, dl.targetQuantization);
+      }
       loadDownloads();
     } catch (e) {
       message.error('暂停失败');
     }
   };
 
-  const handleResume = async (modelId, quantName) => {
+  const handleResume = async (dl) => {
     try {
-      await downloadService.resume(modelId, quantName);
+      if (dl.type === 'comfyui') {
+        await comfyuiService.resumeDownload(dl.comfyuiTaskId);
+      } else {
+        await downloadService.resume(dl.modelId, dl.targetQuantization);
+      }
       loadDownloads();
     } catch (e) {
       message.error('恢复失败');
     }
   };
 
-  const handleCancel = async (modelId, quantName) => {
+  const handleCancel = async (dl) => {
     try {
-      await downloadService.cancel(modelId, quantName);
+      if (dl.type === 'comfyui') {
+        await comfyuiService.cancelDownload(dl.comfyuiTaskId);
+      } else {
+        await downloadService.cancel(dl.modelId, dl.targetQuantization);
+      }
       loadDownloads();
     } catch (e) {
       message.error('取消失败');
@@ -117,10 +129,12 @@ function DownloadCenter({ visible, onClose }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <Text strong style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {dl.modelName}
+                    {dl.type === 'model' && <Tag color="blue" style={{ marginLeft: 8 }}>LLM</Tag>}
                     {dl.type === 'engine' && <Tag color="purple" style={{ marginLeft: 8 }}>引擎</Tag>}
+                    {dl.type === 'comfyui' && <Tag color="green" style={{ marginLeft: 8 }}>ComfyUI</Tag>}
                   </Text>
                   <Space size={4}>
-                    {dl.targetQuantization && (
+                    {dl.type !== 'comfyui' && dl.targetQuantization && (
                       <Tag color="blue" style={{ margin: 0 }}>{dl.targetQuantization}</Tag>
                     )}
                     <Tag color={st.color} style={{ margin: 0 }}>{st.label}</Tag>
@@ -149,7 +163,7 @@ function DownloadCenter({ visible, onClose }) {
                       <Button
                         size="small"
                         icon={<PauseCircleOutlined />}
-                        onClick={() => handlePause(dl.modelId, dl.targetQuantization)}
+                        onClick={() => handlePause(dl)}
                       >
                         暂停
                       </Button>
@@ -158,7 +172,7 @@ function DownloadCenter({ visible, onClose }) {
                       <Button
                         size="small"
                         icon={<PlayCircleOutlined />}
-                        onClick={() => handleResume(dl.modelId, dl.targetQuantization)}
+                        onClick={() => handleResume(dl)}
                       >
                         继续
                       </Button>
@@ -168,7 +182,7 @@ function DownloadCenter({ visible, onClose }) {
                         size="small"
                         danger
                         icon={<DeleteOutlined />}
-                        onClick={() => handleCancel(dl.modelId, dl.targetQuantization)}
+                        onClick={() => handleCancel(dl)}
                       >
                         取消
                       </Button>

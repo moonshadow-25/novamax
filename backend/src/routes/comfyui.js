@@ -142,21 +142,8 @@ router.post('/comfyui/upload-workflow', upload.fields([
       analysis.required_models
     );
 
-    // 保存工作流到workflows目录
-    const workflowId = Date.now().toString();
-    const workflowsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'workflows');
-    const workflowPath = path.join(workflowsDir, `${workflowId}.json`);
-
-    // 确保目录存在
-    if (!fs.existsSync(workflowsDir)) {
-      fs.mkdirSync(workflowsDir, { recursive: true });
-    }
-
-    fs.writeFileSync(workflowPath, JSON.stringify(apiWorkflow, null, 2));
-
     res.json({
       success: true,
-      workflow_id: workflowId,
       analysis,
       name: name || apiFile.originalname,
       description: description || '',
@@ -210,11 +197,27 @@ router.post('/comfyui/confirm-workflow', async (req, res) => {
       return res.status(400).json({ error: 'Name and analysis required' });
     }
 
+    // 确认时才保存工作流 JSON 到 workflows 目录
+    let workflowFilename = null;
+    if (analysis.workflow?.original) {
+      const workflowId = Date.now().toString();
+      const workflowsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'workflows');
+      if (!fs.existsSync(workflowsDir)) {
+        fs.mkdirSync(workflowsDir, { recursive: true });
+      }
+      workflowFilename = `${workflowId}.json`;
+      fs.writeFileSync(
+        path.join(workflowsDir, workflowFilename),
+        JSON.stringify(analysis.workflow.original, null, 2)
+      );
+    }
+
     // 创建模型配置
     const modelData = {
       name,
       description: description || analysis.workflow.llm_analysis,
       workflow: analysis.workflow,
+      workflow_filename: workflowFilename,
       required_models: analysis.required_models,
       parameter_mapping: analysis.parameter_mapping,
       default_parameters: analysis.default_parameters

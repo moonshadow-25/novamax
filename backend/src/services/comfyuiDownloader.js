@@ -6,8 +6,10 @@ import { randomUUID } from 'crypto';
 import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import urlConverter from './urlConverter.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
+import downloadStateManager from './downloadStateManager.js';
+import eventBus from './eventBus.js';
 
-const TASK_CLEANUP_MS = 10 * 60 * 1000; // 10 minutes
+const TASK_CLEANUP_MS = 5 * 1000; // 5 seconds - 完成/失败后快速清理
 
 /**
  * ComfyUI模型下载服务
@@ -35,6 +37,13 @@ class ComfyUIDownloader {
   startDownload(modelInfo, onComplete = null) {
     const taskId = randomUUID();
     const abortController = new AbortController();
+
+    // 注册到 downloadStateManager 以显示在下载中心
+    const stateId = `comfyui_${taskId}`;
+    const dsState = downloadStateManager.createState(stateId, modelInfo.filename, 'comfyui');
+    dsState.comfyuiTaskId = taskId;
+    dsState.displayName = `${modelInfo.filename}`;
+
     this.tasks.set(taskId, {
       taskId,
       filename: modelInfo.filename,
@@ -51,7 +60,8 @@ class ComfyUIDownloader {
       _abortController: abortController,
       _modelInfo: modelInfo,
       _onComplete: onComplete,
-      _process: null  // 当前运行的子进程引用
+      _process: null,  // 当前运行的子进程引用
+      _stateId: stateId  // 存储 stateId 用于后续更新
     });
 
     // 后台执行，不 await
@@ -76,6 +86,10 @@ class ComfyUIDownloader {
     }
     task.status = 'paused';
     task.speed = 0;
+
+    // 同步到 downloadStateManager
+    downloadStateManager.setState(task._stateId, 'paused', null, task.filename);
+
     return true;
   }
 
@@ -90,6 +104,10 @@ class ComfyUIDownloader {
     // 创建新的 AbortController
     task._abortController = new AbortController();
     task.status = 'downloading';
+
+    // 同步到 downloadStateManager
+    downloadStateManager.setState(task._stateId, 'downloading', null, task.filename);
+
     // 重新启动下载（各下载方法内部支持断点续传）
     this._runDownload(taskId, task._modelInfo, task._onComplete);
     return true;
@@ -107,16 +125,45 @@ class ComfyUIDownloader {
       try { task._process.kill('SIGTERM'); } catch {}
       task._process = null;
     }
-    // 清理临时文件
-    const targetPath = this._getTargetPath(task.type, task.filename);
-    const tempPath = targetPath + '.downloading';
-    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
     task.status = 'cancelled';
     task.speed = 0;
     task.progress = 0;
+
+    // 从 downloadStateManager 删除
+    downloadStateManager.deleteState(task._stateId, task.filename);
+
+    // 延迟清理临时文件（等待进程释放文件锁）
+    const targetPath = this._getTargetPath(task.type, task.filename);
+    this._cleanupTempFiles(targetPath);
+
     // 5秒后清理任务记录
     setTimeout(() => this.tasks.delete(taskId), 5000);
     return true;
+  }
+
+  /**
+   * 延迟重试清理临时文件（Windows 下进程退出需要时间释放文件锁）
+   */
+  _cleanupTempFiles(targetPath, retries = 5, delay = 1000) {
+    const tempPath = targetPath + '.part';
+    let attempt = 0;
+    const tryClean = () => {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+          console.log(`  ✓ 已删除临时文件: ${path.basename(tempPath)}`);
+        }
+      } catch (e) {
+        if (attempt < retries - 1) {
+          attempt++;
+          setTimeout(tryClean, delay);
+        } else {
+          console.error(`  ✗ 临时文件删除失败: ${path.basename(tempPath)} (${e.code})`);
+        }
+      }
+    };
+    // 首次延迟 500ms 等进程退出
+    setTimeout(tryClean, 500);
   }
 
   /**
@@ -140,6 +187,7 @@ class ComfyUIDownloader {
     if (!task) return;
 
     task.status = 'downloading';
+    downloadStateManager.setState(task._stateId, 'downloading', null, task.filename);
 
     try {
       const result = await this.download(modelInfo, (info) => {
@@ -149,6 +197,10 @@ class ComfyUIDownloader {
         if (info.totalBytes != null) t.totalBytes = info.totalBytes;
         if (info.downloadedBytes != null) t.downloadedBytes = info.downloadedBytes;
         if (info.speed != null) t.speed = info.speed;
+
+        // 同步进度到 downloadStateManager
+        downloadStateManager.updateProgress(t._stateId, info.progress, info.speed || 0, t.filename);
+        downloadStateManager.updateBytes(t._stateId, info.downloadedBytes || 0, info.totalBytes || 0, t.filename);
       }, task._abortController.signal);
 
       const t = this.tasks.get(taskId);
@@ -158,12 +210,14 @@ class ComfyUIDownloader {
           t.progress = 100;
           t.source = result.source;
           t.path = result.path;
+          downloadStateManager.setState(t._stateId, 'completed', null, t.filename);
         } else if (result.aborted) {
           // 被暂停或取消，不覆盖状态
           return;
         } else {
           t.status = 'failed';
           t.error = result.error;
+          downloadStateManager.setState(t._stateId, 'failed', result.error, t.filename);
         }
       }
 
@@ -175,6 +229,7 @@ class ComfyUIDownloader {
       if (t && t.status !== 'paused' && t.status !== 'cancelled') {
         t.status = 'failed';
         t.error = error.message;
+        downloadStateManager.setState(t._stateId, 'failed', error.message, t.filename);
         if (onComplete) {
           onComplete({ success: false, error: error.message });
         }
@@ -186,6 +241,7 @@ class ComfyUIDownloader {
     if (finalTask && (finalTask.status === 'completed' || finalTask.status === 'failed')) {
       setTimeout(() => {
         this.tasks.delete(taskId);
+        downloadStateManager.deleteState(finalTask._stateId, finalTask.filename);
       }, TASK_CLEANUP_MS);
     }
   }
@@ -350,7 +406,7 @@ class ComfyUIDownloader {
    * 使用 HTTP 直接下载，带进度/速度回调，支持 Range 断点续传
    */
   async _downloadWithHTTP(url, targetPath, onProgress, abortSignal = null) {
-    const tempPath = targetPath + '.downloading';
+    const tempPath = targetPath + '.part';
     try {
       console.log(`  HTTP 下载: ${url}`);
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -419,7 +475,7 @@ class ComfyUIDownloader {
       console.log(`  ✅ HTTP 下载成功`);
       return true;
     } catch (error) {
-      console.log(`  HTTP 下载失败: ${error.message}（.downloading 文件已保留，下次可续传）`);
+      console.log(`  HTTP 下载失败: ${error.message}（.part 文件已保留，下次可续传）`);
       // 不删除临时文件，保留供下次续传
       return false;
     }
