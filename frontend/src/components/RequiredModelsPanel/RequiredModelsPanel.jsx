@@ -44,6 +44,8 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     }
   });
   const downloadingTasksRef = useRef({});
+  const isFirstPollRef = useRef(true);
+  const pollingRef = useRef(false);
 
   // Keep ref in sync with state，同时持久化到 localStorage
   useEffect(() => {
@@ -68,6 +70,9 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
 
   // 轮询任务状态的核心逻辑
   const pollTaskStatus = async () => {
+    if (pollingRef.current) return; // 防止并发
+    pollingRef.current = true;
+    try {
     const currentTasks = Object.entries(downloadingTasksRef.current);
     if (currentTasks.length === 0) return;
 
@@ -135,15 +140,21 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         return next;
       });
 
-      toComplete.forEach(filename => message.success(`下载完成: ${filename}`));
-      // 取消操作是用户主动的，不需要弹提示
-      toFail.forEach(({ filename, error }) =>
-        message.error(`下载失败: ${filename}${error ? ' - ' + error : ''}`)
-      );
+      // 首次轮询不弹提示（从 localStorage 恢复的旧任务）
+      if (!isFirstPollRef.current) {
+        toComplete.forEach(filename => message.success(`下载完成: ${filename}`));
+        toFail.forEach(({ filename, error }) =>
+          message.error(`下载失败: ${filename}${error ? ' - ' + error : ''}`)
+        );
+      }
+      isFirstPollRef.current = false;
 
       if (toComplete.length > 0 || toCancelled.length > 0 || toFail.length > 0) {
         loadModelsStatus();
       }
+    }
+    } finally {
+      pollingRef.current = false;
     }
   };
 
