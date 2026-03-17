@@ -167,6 +167,10 @@ function Home() {
         setFavorites(data.favorites || []);
       } catch {}
     });
+    es.addEventListener('server-restarted', () => {
+      console.log('服务器重启，刷新页面...');
+      window.location.reload();
+    });
     return () => es.close();
   }, [loadModels]);
 

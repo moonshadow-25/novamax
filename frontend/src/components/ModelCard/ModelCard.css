@@ -67,6 +67,10 @@
   -webkit-box-orient: vertical;
 }
 
+.model-card-footer {
+  margin-top: auto;
+}
+
 .model-quantization {
   margin-bottom: 12px;
   min-height: 32px; /* 固定量化区域高度 */

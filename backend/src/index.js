@@ -138,11 +138,20 @@ init().then(() => {
     console.log(`URL: http://localhost:${PORT}`);
     console.log(`${'='.repeat(50)}\n`);
 
+    // 等待 2 秒，检测是否有已存在的浏览器页面连接
     setTimeout(() => {
-      open(`http://localhost:${PORT}`).catch(() => {
-        console.log(`Please open http://localhost:${PORT} in your browser`);
-      });
-    }, 1000);
+      if (eventBus.clients.size > 0) {
+        // 有客户端连接，说明浏览器已打开页面，发送 reload 事件
+        console.log('检测到已有浏览器页面，发送刷新信号...');
+        eventBus.broadcast('server-restarted', { action: 'reload' });
+      } else {
+        // 没有客户端连接，打开新浏览器窗口
+        console.log('未检测到浏览器页面，打开新窗口...');
+        open(`http://localhost:${PORT}`).catch(() => {
+          console.log(`Please open http://localhost:${PORT} in your browser`);
+        });
+      }
+    }, 2000);
   });
 }).catch(error => {
   console.error('Failed to initialize:', error);

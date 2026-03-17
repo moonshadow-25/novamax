@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, theme } from 'antd';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
 import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService } from '../../services/api';
@@ -150,10 +150,13 @@ const GlobalSettings = () => {
 
   const loadSystemInfo = async () => {
     try {
+      setSystemLoading(true);
       const data = await systemService.getInfo();
       setSystemInfo(data);
     } catch (e) {
       console.error('Failed to load system info:', e);
+    } finally {
+      setSystemLoading(false);
     }
   };
 
@@ -795,40 +798,57 @@ const GlobalSettings = () => {
 
     return (
       <Card title="运行状态">
-        {hw && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>CPU</div>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
-              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+        {systemLoading && !systemInfo ? (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+              {[1, 2, 3].map(i => (
+                <div key={i} style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                  <Skeleton active paragraph={{ rows: 2 }} />
+                </div>
+              ))}
             </div>
-            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存</div>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
-              <Progress percent={hw.memory.usagePercent} size="small"
-                strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
-                format={(p) => `${p}%`} />
-            </div>
-            <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>系统</div>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>
-              <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
+            <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16 }}>
+              <Skeleton active paragraph={{ rows: 4 }} />
             </div>
           </div>
+        ) : (
+          <>
+            {hw && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>CPU</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+                </div>
+                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
+                  <Progress percent={hw.memory.usagePercent} size="small"
+                    strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
+                    format={(p) => `${p}%`} />
+                </div>
+                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>系统</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
+                </div>
+              </div>
+            )}
+            <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
+                <Space>
+                  <Text strong>进程列表</Text>
+                  <Tag color={processes.length > 0 ? 'green' : 'default'}>{processes.length} 个进程</Tag>
+                </Space>
+                <Button type="text" size="small" icon={<ReloadOutlined spin={systemLoading} />}
+                  onClick={loadSystemInfo}>刷新</Button>
+              </div>
+              <Table columns={processColumns} dataSource={processes} rowKey="id"
+                size="small" pagination={false} scroll={{ y: 340 }}
+                locale={{ emptyText: <Empty description="暂无运行中的进程" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
+            </div>
+          </>
         )}
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
-            <Space>
-              <Text strong>进程列表</Text>
-              <Tag color={processes.length > 0 ? 'green' : 'default'}>{processes.length} 个进程</Tag>
-            </Space>
-            <Button type="text" size="small" icon={<ReloadOutlined spin={systemLoading} />}
-              onClick={() => { setSystemLoading(true); loadSystemInfo().finally(() => setSystemLoading(false)); }}>刷新</Button>
-          </div>
-          <Table columns={processColumns} dataSource={processes} rowKey="id"
-            size="small" pagination={false} scroll={{ y: 340 }}
-            locale={{ emptyText: <Empty description="暂无运行中的进程" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
-        </div>
       </Card>
     );
   };

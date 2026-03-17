@@ -471,8 +471,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
   // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
   const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization)) &&
-                        !isDefaultDownloadCompleted &&
-                        !isDownloadingDefault;
+      !isDefaultDownloadCompleted &&
+      !isDownloadingDefault;
   
   // 旧的下载状态判断（兼容）
   const isDownloaded = model.downloaded
@@ -596,6 +596,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       )}
       <p className="model-description">{model.description || '暂无描述'}</p>
 
+      <div className="model-card-footer">
       {/* 显示量化版本信息 */}
       {currentQuant && (
         <div className="model-quantization">
@@ -849,6 +850,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           )}
         </Space>
       )}
+      </div>
 
       {/* ComfyUI 参数映射设置 */}
       <Drawer
