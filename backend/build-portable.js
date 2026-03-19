@@ -270,6 +270,26 @@ pause
 `;
 fs.writeFileSync(path.join(RELEASE_DIR, 'Stop-NovaMax.bat'), stopBat, 'utf8');
 
+// 创建 Python 启动脚本
+const startPy = `import subprocess
+import os
+import sys
+
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    bat_path = os.path.join(script_dir, "NovaMax.bat")
+
+    if not os.path.exists(bat_path):
+        print(f"Error: NovaMax.bat not found at {bat_path}")
+        sys.exit(1)
+
+    subprocess.run(["cmd", "/c", bat_path], cwd=script_dir)
+
+if __name__ == "__main__":
+    main()
+`;
+fs.writeFileSync(path.join(RELEASE_DIR, 'start_novamax.py'), startPy, 'utf8');
+
 console.log('✅ 启动脚本已创建');
 
 // 9. 创建用户文档
