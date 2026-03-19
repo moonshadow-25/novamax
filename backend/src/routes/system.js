@@ -6,6 +6,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import processManager from '../services/processManager.js';
 import modelManager from '../services/modelManager.js';
+import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
+import logCollector from '../services/logCollector.js';
 import configManager from '../services/configManager.js';
 import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 
@@ -69,6 +71,13 @@ router.get('/system/info', async (req, res) => {
       return { ...p, memory };
     });
 
+    // ComfyUI 实例进程
+    const comfyuiProcesses = comfyuiInstanceManager.getRunningProcesses().map(p => {
+      const memory = p.pid ? (memMap.get(p.pid) || 0) : 0;
+      return { ...p, memory };
+    });
+    running.push(...comfyuiProcesses);
+
     // NovaMax 自身进程
     const selfMem = process.memoryUsage();
     running.unshift({
@@ -108,6 +117,19 @@ router.get('/system/info', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// ========== 全局日志 ==========
+
+router.get('/system/logs', (req, res) => {
+  const limit = parseInt(req.query.limit) || 200;
+  const level = req.query.level || 'all';
+  res.json({ logs: logCollector.getLogs(limit, level) });
+});
+
+router.delete('/system/logs', (req, res) => {
+  logCollector.clear();
+  res.json({ success: true });
 });
 
 // ========== 模型存储管理 ==========

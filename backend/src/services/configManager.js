@@ -41,8 +41,8 @@ class ConfigManager {
         llm_range: { start: 8080, end: 8089 },
         llamacpp_range: [8100, 8199],
         comfyui: 8188,
-        tts: 5000,
-        whisper: 5001
+        tts: 7863,
+        whisper: 18181
       },
       update_settings: {
         auto_check: true,

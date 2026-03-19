@@ -50,6 +50,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 引擎下载相关
   const [showEngineModal, setShowEngineModal] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
+  const [engineTarget, setEngineTarget] = useState('comfyui'); // 当前引擎目标
 
   // 弹框打开时始终轮询，关闭时停止
   useEffect(() => {
@@ -83,14 +84,39 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleStart = async () => {
     setLoading(true);
     try {
-      await backendService.start(model.id, 'single'); // 使用单模型模式
+      // LLM 模型启动前检查 llamacpp 引擎
+      if (model.type === 'llm') {
+        const engineResult = await engineService.checkInstalled('llamacpp');
+        if (!engineResult.installed) {
+          setEngineInfo(engineResult.engineInfo);
+          setEngineTarget('llamacpp');
+          setShowEngineModal(true);
+          setLoading(false);
+          return;
+        }
+      }
+      await doStartModel();
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
+      message.error(errorMsg);
+      console.error('模型启动失败:', error);
+      onUpdate();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doStartModel = async () => {
+    setLoading(true);
+    try {
+      await backendService.start(model.id, 'single');
       message.success('模型启动成功');
       onUpdate();
     } catch (error) {
       const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
       message.error(errorMsg);
       console.error('模型启动失败:', error);
-      onUpdate(); // 更新状态以显示错误
+      onUpdate();
     } finally {
       setLoading(false);
     }
@@ -140,6 +166,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       const engineResult = await engineService.checkInstalled('comfyui');
       if (!engineResult.installed) {
         setEngineInfo(engineResult.engineInfo);
+        setEngineTarget('comfyui');
         setComfyuiLaunchVisible(false);
         setComfyuiLaunching(false);
         setShowEngineModal(true);
@@ -927,14 +954,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         />
       )}
 
-      {/* 引擎下载 Modal（启动并进入时引擎未安装） */}
+      {/* 引擎下载 Modal（启动时引擎未安装） */}
       <EngineDownloadModal
         visible={showEngineModal}
-        engineId="comfyui"
+        engineId={engineTarget}
         engineInfo={engineInfo}
         onComplete={() => {
           setShowEngineModal(false);
-          doLaunchInstance();
+          if (engineTarget === 'llamacpp') {
+            doStartModel();
+          } else {
+            doLaunchInstance();
+          }
         }}
         onCancel={() => setShowEngineModal(false)}
       />

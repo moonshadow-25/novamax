@@ -112,13 +112,34 @@ export const comfyuiService = {
 };
 
 export const ttsService = {
-  generate: (modelId, data) => api.post(`/tts/${modelId}/generate`, data),
-  getVoices: (modelId) => api.get(`/tts/${modelId}/voices`)
+  speech: (data) => api.post('/tts/speech', data, { timeout: 300000, responseType: 'blob' }),
+  getVoices: () => api.get('/tts/voices'),
+  createVoice: (formData) => api.post('/tts/voices', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  autoRegisterVoices: () => api.post('/tts/voices/auto-register'),
+  getVoiceAudioUrl: (voiceId) => `/api/tts/voices/${voiceId}/audio`,
+  deleteVoice: (voiceId) => api.delete(`/tts/voices/${voiceId}`),
+  getHistory: () => api.get('/tts/history'),
+  getHistoryAudioUrl: (itemId) => `/api/tts/history/${itemId}/audio`,
+  deleteHistoryItem: (itemId) => api.delete(`/tts/history/${itemId}`),
+  clearHistory: () => api.delete('/tts/history'),
+  health: () => api.get('/tts/health')
 };
 
 export const whisperService = {
-  transcribe: (modelId, formData) => api.post(`/whisper/${modelId}/transcribe`, formData),
-  translate: (modelId, formData) => api.post(`/whisper/${modelId}/translate`, formData)
+  transcribe: (file, language, vad = true) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (language) fd.append('language', language);
+    fd.append('vad_filter', String(vad));
+    return api.post('/whisper/transcribe', fd, { timeout: 300000 });
+  },
+  translate: (file, language) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (language) fd.append('language', language);
+    return api.post('/whisper/translate', fd, { timeout: 300000 });
+  },
+  health: () => api.get('/whisper/health')
 };
 
 export const configService = {
@@ -155,6 +176,8 @@ export const updateService = {
 export const systemService = {
   getInfo: () => api.get('/system/info'),
   getStorage: () => api.get('/system/storage'),
+  getLogs: (limit = 200, level = 'all') => api.get(`/system/logs?limit=${limit}&level=${level}`),
+  clearLogs: () => api.delete('/system/logs'),
   openFolder: (dirPath) => api.post('/system/storage/open', { dirPath }),
   migrateStorage: (type, targetPath) => api.post('/system/storage/migrate', { type, targetPath }),
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),

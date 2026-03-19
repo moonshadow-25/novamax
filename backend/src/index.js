@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import open from 'open';
 
+// 尽早初始化日志收集器，拦截所有 console 输出
+import logCollector from './services/logCollector.js';
+
 import configManager from './services/configManager.js';
 import modelManager from './services/modelManager.js';
 import downloadService from './services/downloadService.js';
@@ -24,6 +27,8 @@ import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
 import enginesRouter from './routes/engines.js';
 import systemRouter from './routes/system.js';
+import whisperRouter from './routes/whisper.js';
+import ttsRouter from './routes/tts.js';
 import eventBus from './services/eventBus.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,6 +113,8 @@ app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
 app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
+app.use('/api', whisperRouter);
+app.use('/api', ttsRouter);
 
 // SSE 实时事件推送
 app.get('/api/events', (req, res) => {

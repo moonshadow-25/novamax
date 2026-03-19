@@ -156,28 +156,56 @@ class ComfyUIInstanceManager {
     }
 
     // 启动进程（不使用 shell，避免安全警告）
-    const process = spawn(venvPython, args, { cwd: enginePath });
+    const childProc = spawn(venvPython, args, {
+      cwd: enginePath,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }
+    });
+
+    const logs = [];
+    const MAX_LOGS = 200;
+    const pushLog = (line) => {
+      logs.push(line);
+      if (logs.length > MAX_LOGS) logs.shift();
+    };
 
     // 捕获输出
-    process.stdout.on('data', (data) => {
-      console.log(`[ComfyUI ${instanceId}] ${data.toString().trim()}`);
+    childProc.stdout.on('data', (data) => {
+      const line = data.toString().trim();
+      pushLog(line);
+      console.log(`[ComfyUI ${instanceId}] ${line}`);
     });
 
-    process.stderr.on('data', (data) => {
-      console.error(`[ComfyUI ${instanceId} ERROR] ${data.toString().trim()}`);
+    childProc.stderr.on('data', (data) => {
+      const line = data.toString().trim();
+      pushLog(`[ERROR] ${line}`);
+      console.error(`[ComfyUI ${instanceId} ERROR] ${line}`);
     });
 
-    process.on('exit', (code) => {
+    childProc.on('exit', (code) => {
       console.log(`ComfyUI instance ${instanceId} exited with code ${code}`);
-      this.processes.delete(instanceId);
+      const info = this.processes.get(instanceId);
+      if (info) {
+        if (code === 0) {
+          this.processes.delete(instanceId);
+        } else {
+          info.status = 'crashed';
+          info.exitCode = code;
+        }
+      }
     });
 
-    process.on('error', (err) => {
+    childProc.on('error', (err) => {
       console.error(`ComfyUI instance ${instanceId} spawn error:`, err);
-      this.processes.delete(instanceId);
+      const info = this.processes.get(instanceId);
+      if (info) {
+        info.status = 'crashed';
+        info.exitCode = -1;
+        info.exitTime = Date.now();
+        pushLog(`[SPAWN ERROR] ${err.message}`);
+      }
     });
 
-    this.processes.set(instanceId, { process, config, status: 'running' });
+    this.processes.set(instanceId, { process: childProc, config, status: 'running', startTime: Date.now(), logs });
 
     console.log(`ComfyUI instance ${instanceId} started: ${venvPython} ${args.join(' ')}`);
     return { success: true, port: config.port, host: config.host };
@@ -188,7 +216,18 @@ class ComfyUIInstanceManager {
    */
   stopInstance(instanceId) {
     const info = this.processes.get(instanceId);
-    if (!info || !info.process || info.process.killed) {
+    if (!info) {
+      return { success: true, message: 'Not running' };
+    }
+
+    // 已经退出的进程，直接清理记录
+    if (info.status === 'crashed' || info.status === 'stopped') {
+      this.processes.delete(instanceId);
+      return { success: true };
+    }
+
+    if (!info.process || info.process.killed) {
+      this.processes.delete(instanceId);
       return { success: true, message: 'Not running' };
     }
 
@@ -204,10 +243,14 @@ class ComfyUIInstanceManager {
    * 获取实例状态（通过连接检查）
    */
   async getInstanceStatus(instanceId, host, port) {
-    // 先检查进程是否存在
     const info = this.processes.get(instanceId);
-    if (!info || !info.process || info.process.killed) {
+    if (!info) {
       return 'stopped';
+    }
+
+    // 进程已退出（crashed / stopped）
+    if (info.status === 'crashed' || info.status === 'stopped') {
+      return info.status;
     }
 
     // 进程存在，检查端口是否真的在监听
@@ -221,8 +264,37 @@ class ComfyUIInstanceManager {
   }
 
   /**
-   * 初始化：确保有默认实例
+   * 获取所有运行中的 ComfyUI 进程（供系统信息 API 使用）
    */
+  getRunningProcesses() {
+    const running = [];
+    for (const [instanceId, info] of this.processes) {
+      // 包含 running / starting / crashed 状态
+      if (info.status === 'stopped') continue;
+      running.push({
+        id: `comfyui-${instanceId}`,
+        pid: info.process?.pid || null,
+        type: 'comfyui',
+        mode: 'instance',
+        port: info.config.port,
+        category: 'model',
+        name: `ComfyUI - ${info.config.name || instanceId}`,
+        startTime: info.startTime || null,
+        status: info.status,
+        exitCode: info.exitCode ?? null
+      });
+    }
+    return running;
+  }
+
+  /**
+   * 获取实例日志
+   */
+  getLogs(instanceId) {
+    const info = this.processes.get(instanceId);
+    return info?.logs || [];
+  }
+
   /**
    * 初始化：不再自动创建默认实例
    */

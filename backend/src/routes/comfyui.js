@@ -615,6 +615,19 @@ router.get('/comfyui/instances/:id/status', (req, res) => {
 });
 
 /**
+ * 获取实例日志
+ * GET /api/comfyui/instances/:id/logs
+ */
+router.get('/comfyui/instances/:id/logs', (req, res) => {
+  try {
+    const logs = comfyuiInstanceManager.getLogs(req.params.id);
+    res.json({ success: true, logs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * 打开实例对应的 ComfyUI 文件夹
  * POST /api/comfyui/instances/:id/open-folder
  */

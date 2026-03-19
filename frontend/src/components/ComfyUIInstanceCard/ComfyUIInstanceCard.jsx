@@ -61,7 +61,16 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
 
   const isRunning = instance.status === 'running';
   const isStarting = instance.status === 'starting';
+  const isCrashed = instance.status === 'crashed';
   const displayHost = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host;
+
+  const statusTag = isCrashed
+    ? <Tag color="red" style={{ margin: 0 }}>已崩溃</Tag>
+    : isRunning
+    ? <Tag color="green" style={{ margin: 0 }}>运行中</Tag>
+    : isStarting
+    ? <Tag color="orange" style={{ margin: 0 }}>启动中</Tag>
+    : <Tag style={{ margin: 0 }}>已停止</Tag>;
 
   return (
     <>
@@ -70,9 +79,7 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Space size={8}>
             <span style={{ fontWeight: 500, fontSize: 14 }}>{instance.name}</span>
-            <Tag color={isRunning ? 'green' : isStarting ? 'orange' : 'default'} style={{ margin: 0 }}>
-              {isRunning ? '运行中' : isStarting ? '启动中' : '已停止'}
-            </Tag>
+            {statusTag}
           </Space>
           <Button
             size="small"
@@ -106,6 +113,24 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
               >
                 停止
               </Button>
+            ) : isCrashed ? (
+              <Space size={4}>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlayCircleOutlined />}
+                  onClick={handleStart}
+                  loading={loading}
+                >
+                  重启
+                </Button>
+                <Button
+                  size="small"
+                  onClick={handleStop}
+                >
+                  清除
+                </Button>
+              </Space>
             ) : (
               <Button
                 type="primary"

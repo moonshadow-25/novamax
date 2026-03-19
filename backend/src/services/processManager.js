@@ -34,18 +34,22 @@ class ProcessManager {
       throw new Error('No available ports for LLM');
     }
 
+    const configPorts = configManager.get('ports') || {};
     const portMap = {
-      comfyui: DEFAULT_PORTS.COMFYUI,
-      tts: DEFAULT_PORTS.TTS,
-      whisper: DEFAULT_PORTS.WHISPER
+      comfyui: configPorts.comfyui || DEFAULT_PORTS.COMFYUI,
+      tts: configPorts.tts || DEFAULT_PORTS.TTS,
+      whisper: configPorts.whisper || DEFAULT_PORTS.WHISPER
     };
 
-    const port = portMap[type];
-    if (await this.isPortAvailable(port)) {
-      this.allocatedPorts.add(port);
-      return port;
+    const basePort = portMap[type];
+    // 尝试 basePort 及后续 10 个端口
+    for (let p = basePort; p < basePort + 10; p++) {
+      if (await this.isPortAvailable(p)) {
+        this.allocatedPorts.add(p);
+        return p;
+      }
     }
-    throw new Error(`Port ${port} is already in use`);
+    throw new Error(`No available port starting from ${basePort}`);
   }
 
   /**
@@ -98,7 +102,13 @@ class ProcessManager {
       console.log(`启动单模型: ${cmd.command} ${cmd.args.join(' ')}`);
 
       const actualVersion = model.engine_version || engineManager.getDefaultVersion('llamacpp');
+      if (!actualVersion) {
+        throw new Error('请先安装 llamacpp 引擎');
+      }
       const llamacppPath = engineManager.getEnginePath('llamacpp', actualVersion);
+      if (!llamacppPath) {
+        throw new Error(`llamacpp 引擎版本 ${actualVersion} 未找到`);
+      }
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
       // 构建环境变量（添加引擎目录和 ROCm 等依赖）
@@ -289,7 +299,13 @@ class ProcessManager {
 
       // 启动进程（路由模式使用默认最新版本）
       const defaultVersion = engineManager.getDefaultVersion('llamacpp');
+      if (!defaultVersion) {
+        throw new Error('请先安装 llamacpp 引擎');
+      }
       const llamacppPath = engineManager.getEnginePath('llamacpp', defaultVersion);
+      if (!llamacppPath) {
+        throw new Error(`llamacpp 引擎版本 ${defaultVersion} 未找到`);
+      }
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
       // 构建环境变量（添加 ROCm 等依赖）
@@ -492,26 +508,39 @@ class ProcessManager {
         });
       }
 
-      case 'tts':
+      case 'tts': {
+        const ttsPython = path.join(externalPaths.indextts, 'engine', 'python.exe');
         return spawn(
-          'python',
+          ttsPython,
           [
-            `${externalPaths.indextts}/server.py`,
-            '--port', port.toString(),
-            '--model', model.path
-          ],
-          { shell: true }
-        );
-
-      case 'whisper':
-        return spawn(
-          `${externalPaths.whispercpp}/server`,
-          [
-            '-m', model.path,
+            path.join(externalPaths.indextts, 'api', 'main.py'),
             '--port', port.toString()
           ],
+          { cwd: externalPaths.indextts }
+        );
+      }
+
+      case 'whisper': {
+        const whisperDir = path.dirname(model.path);
+        const vadModel = path.join(whisperDir, 'ggml-silero-v6.2.0.bin');
+        const args = [
+          '-m', model.path,
+          '--port', port.toString(),
+          '-t', '8',
+          '-l', 'auto',
+          '-pp', '-pr',
+          '--host', '0.0.0.0'
+        ];
+        // 如果 VAD 模型存在，添加 VAD 参数
+        if (fs.existsSync(vadModel)) {
+          args.push('--vad', '--vad-model', vadModel);
+        }
+        return spawn(
+          `${externalPaths.whispercpp}/whisper-server`,
+          args,
           { shell: true }
         );
+      }
 
       default:
         throw new Error(`Unknown model type: ${model.type}`);

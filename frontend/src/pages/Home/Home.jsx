@@ -241,7 +241,17 @@ function Home() {
         <div className="home-toolbar">
           <Tabs
             activeKey={activeTab}
-            onChange={(key) => { setActiveTab(key); }}
+            onChange={(key) => {
+              if (key === 'whisper') {
+                navigate('/whisper');
+                return;
+              }
+              if (key === 'tts') {
+                navigate('/tts');
+                return;
+              }
+              setActiveTab(key);
+            }}
             items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
             style={{ flex: 1 }}
           />

@@ -1,0 +1,211 @@
+.wh-layout { height: 100vh; display: flex; flex-direction: column; }
+
+.wh-header {
+  background: inherit;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(128,128,128,0.15));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wh-content { flex: 1; min-height: 0; overflow: hidden; }
+
+.wh-body {
+  display: flex;
+  height: 100%;
+}
+
+.wh-col {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ant-color-border-secondary, rgba(128,128,128,0.15));
+  min-height: 0;
+}
+
+.wh-left { width: 300px; flex-shrink: 0; }
+.wh-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.wh-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(128,128,128,0.15));
+}
+
+.wh-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary, #666);
+  margin-bottom: 10px;
+}
+
+/* ── 拖拽上传区 ── */
+.wh-drop-zone {
+  border: 2px dashed var(--ant-color-border, rgba(128,128,128,0.3));
+  border-radius: 8px;
+  padding: 20px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--ant-color-text-quaternary, #999);
+}
+
+.wh-drop-zone:hover {
+  border-color: var(--ant-color-primary, #1677ff);
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.wh-drop-zone.dragging {
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-primary-bg, rgba(22,119,255,0.06));
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.wh-drop-hint {
+  font-size: 11px;
+  margin-top: 4px;
+  opacity: 0.55;
+}
+
+/* ── 参数行 ── */
+.wh-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wh-param-row:last-child { margin-bottom: 0; }
+
+.wh-param-label {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #666);
+  white-space: nowrap;
+  min-width: 40px;
+}
+
+/* ── 历史列表 ── */
+.wh-history-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 12px 12px;
+  overflow: hidden;
+}
+
+.wh-history-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.wh-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+
+.wh-history-item:hover {
+  background: var(--ant-color-fill-quaternary, rgba(128,128,128,0.06));
+}
+
+.wh-history-item.active {
+  background: var(--ant-color-primary-bg, rgba(22,119,255,0.08));
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.wh-history-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wh-history-item-time {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary, #bbb);
+  flex-shrink: 0;
+}
+
+/* ── 右栏：音频信息条 ── */
+.wh-audio-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(128,128,128,0.15));
+  background: var(--ant-color-fill-quaternary, rgba(128,128,128,0.03));
+}
+
+.wh-audio-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.wh-audio-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wh-audio-size {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary, #999);
+  flex-shrink: 0;
+}
+
+.wh-audio-bar audio {
+  width: 100%;
+  height: 32px;
+}
+
+/* ── 右栏：结果头 ── */
+.wh-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(128,128,128,0.15));
+}
+
+.wh-result-header-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary, #666);
+}
+
+/* ── 右栏：结果内容 ── */
+.wh-result-area {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px 20px;
+}
+
+.wh-result-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ant-color-text, inherit);
+}
+
+.wh-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--ant-color-text-quaternary, #999);
+  font-size: 13px;
+}

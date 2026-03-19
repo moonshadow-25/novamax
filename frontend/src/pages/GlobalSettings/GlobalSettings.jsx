@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { configService, updateService, engineService, modelService, systemService, backendService } from '../../services/api';
+import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
 const { Text } = Typography;
@@ -57,6 +57,13 @@ const GlobalSettings = () => {
   const [pickingFolder, setPickingFolder] = useState(false);
   const [restoringType, setRestoringType] = useState(null);
 
+  // 日志相关
+  const [logEntries, setLogEntries] = useState([]);
+  const [logLevel, setLogLevel] = useState('all');
+  const [logAutoScroll, setLogAutoScroll] = useState(true);
+  const logContainerRef = useRef(null);
+  const logTimerRef = useRef(null);
+
   useEffect(() => {
     loadSettings();
     loadEngines();
@@ -86,6 +93,19 @@ const GlobalSettings = () => {
   useEffect(() => {
     if (selectedMenu === 'storage') loadStorage();
   }, [selectedMenu]);
+
+  // 日志定时刷新
+  useEffect(() => {
+    if (selectedMenu !== 'logs') {
+      if (logTimerRef.current) clearInterval(logTimerRef.current);
+      return;
+    }
+    loadLogs();
+    logTimerRef.current = setInterval(loadLogs, 2000);
+    return () => {
+      if (logTimerRef.current) clearInterval(logTimerRef.current);
+    };
+  }, [selectedMenu, logLevel]);
 
   // 有下载进行中时，每 2 秒轮询一次，防止 SSE 事件丢失
   useEffect(() => {
@@ -169,6 +189,44 @@ const GlobalSettings = () => {
     }
   };
 
+  const loadLogs = async () => {
+    try {
+      const data = await systemService.getLogs(500, logLevel);
+      setLogEntries(data.logs || []);
+      if (logAutoScroll && logContainerRef.current) {
+        setTimeout(() => {
+          const el = logContainerRef.current;
+          if (el) el.scrollTop = el.scrollHeight;
+        }, 50);
+      }
+    } catch (e) {
+      // 静默
+    }
+  };
+
+  const handleClearLogs = async () => {
+    try {
+      await systemService.clearLogs();
+      setLogEntries([]);
+      message.success('日志已清空');
+    } catch (e) {
+      message.error('清空失败');
+    }
+  };
+
+  const handleDownloadLogs = () => {
+    const text = logEntries.map(e =>
+      `${new Date(e.timestamp).toLocaleString('zh-CN', { hour12: false })} [${e.level.toUpperCase()}] ${e.message}`
+    ).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `novamax-logs-${new Date().toISOString().slice(0, 10)}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleOpenFolder = async (dirPath) => {
     try {
       await systemService.openFolder(dirPath);
@@ -220,6 +278,10 @@ const GlobalSettings = () => {
         for (const modelId of (proc.modelIds || [])) {
           await backendService.stop(modelId);
         }
+      } else if (proc.type === 'comfyui') {
+        // ComfyUI 实例 id 格式: comfyui-{instanceId}
+        const instanceId = proc.id.replace(/^comfyui-/, '');
+        await comfyuiService.stopInstance(instanceId);
       } else {
         await backendService.stop(proc.id);
       }
@@ -912,9 +974,63 @@ const GlobalSettings = () => {
     );
   };
 
+  const renderLogsContent = () => {
+    const levelColors = { info: '#1890ff', warn: '#faad14', error: '#ff4d4f' };
+    return (
+      <Card title="系统日志" extra={
+        <Space>
+          <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
+            <Option value="all">全部</Option>
+            <Option value="info">INFO</Option>
+            <Option value="warn">WARN</Option>
+            <Option value="error">ERROR</Option>
+          </Select>
+          <Checkbox checked={logAutoScroll} onChange={e => setLogAutoScroll(e.target.checked)}>
+            自动滚动
+          </Checkbox>
+          <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs}>刷新</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>下载</Button>
+          <Popconfirm title="确认清空所有日志？" onConfirm={handleClearLogs} okText="清空" cancelText="取消">
+            <Button size="small" danger icon={<DeleteOutlined />}>清空</Button>
+          </Popconfirm>
+        </Space>
+      }>
+        <div
+          ref={logContainerRef}
+          style={{
+            height: 'calc(100vh - 220px)',
+            overflow: 'auto',
+            background: '#1e1e1e',
+            borderRadius: 6,
+            padding: '12px 16px',
+            fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+            fontSize: 12,
+            lineHeight: 1.6
+          }}
+        >
+          {logEntries.length === 0 ? (
+            <div style={{ color: '#666', textAlign: 'center', paddingTop: 40 }}>暂无日志</div>
+          ) : (
+            logEntries.map((entry, i) => (
+              <div key={i} style={{ color: levelColors[entry.level] || '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                <span style={{ color: '#888' }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                {' '}
+                <span style={{ color: levelColors[entry.level], fontWeight: entry.level === 'error' ? 600 : 400 }}>
+                  [{entry.level.toUpperCase()}]
+                </span>
+                {' '}{entry.message}
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+    );
+  };
+
   const renderContent = () => {
     switch (selectedMenu) {
       case 'runtime': return renderRuntimeContent();
+      case 'logs':    return renderLogsContent();
       case 'engines': return renderEnginesContent();
       case 'storage': return renderStorageContent();
       case 'export':  return renderExportContent();
@@ -1078,6 +1194,7 @@ const GlobalSettings = () => {
             style={{ height: '100%', borderRight: 0 }}
             items={[
               { key: 'runtime', icon: <DashboardOutlined />, label: '运行状态' },
+              { key: 'logs',    icon: <FileTextOutlined />,  label: '系统日志' },
               { key: 'storage', icon: <DatabaseOutlined />, label: '模型存储' },
               { key: 'engines', icon: <AppstoreOutlined />, label: '引擎管理' },
               { key: 'export',  icon: <ExportOutlined />,   label: '导出配置' },

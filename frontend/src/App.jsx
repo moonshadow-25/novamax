@@ -18,7 +18,9 @@ function App() {
           <Route path="/llm/:modelId" element={<LLMChat />} />
           <Route path="/comfyui/:modelId" element={<ComfyUI />} />
           <Route path="/tts/:modelId" element={<TTS />} />
+          <Route path="/tts" element={<TTS />} />
           <Route path="/whisper/:modelId" element={<Whisper />} />
+          <Route path="/whisper" element={<Whisper />} />
           <Route path="/settings/:modelId" element={<Settings />} />
           <Route path="/global-settings" element={<GlobalSettings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
