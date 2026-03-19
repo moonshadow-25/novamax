@@ -116,24 +116,40 @@ class ProcessManager {
 
       const process = spawn(llamaServerPath, cmd.args, { env });
 
+      // 创建日志文件写入流
+      const logDir = path.join(PROJECT_ROOT, 'data', 'model_logs');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      const logFilePath = path.join(logDir, `model_${modelId}_runtime.log`);
+      const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+      const startTime = new Date().toISOString();
+      logStream.write(`=== 模型启动日志 ===\n`);
+      logStream.write(`模型: ${model.name} (${modelId})\n`);
+      logStream.write(`时间: ${startTime}\n`);
+      logStream.write(`端口: ${port}\n`);
+      logStream.write(`命令: ${llamaServerPath} ${cmd.args.join(' ')}\n`);
+      logStream.write(`${'='.repeat(50)}\n\n`);
+
       this.processes.set(modelId, {
         process,
         port,
         type: model.type,
         mode: 'single',
         logs: [],
-        startupFailed: false
+        startupFailed: false,
+        logStream
       });
 
       process.stdout.on('data', (data) => {
         const log = data.toString();
         this.processes.get(modelId).logs.push(log);
+        logStream.write(log);
         console.log(`[${modelId}] ${log}`);
       });
 
       process.stderr.on('data', (data) => {
         const log = data.toString();
         this.processes.get(modelId).logs.push(log);
+        logStream.write(log);
         console.error(`[${modelId}] ${log}`);
       });
 
@@ -148,6 +164,8 @@ class ProcessManager {
 
       process.on('exit', (code) => {
         console.log(`[${modelId}] Process exited with code ${code}`);
+        logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
+        logStream.end();
         this.cleanup(modelId);
       });
 
