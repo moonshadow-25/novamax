@@ -1,16 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { DATA_DIR, UPDATE_CONFIG_FILE } from '../config/constants.js';
+import { DATA_DIR, UPDATE_CONFIG_FILE, PROJECT_ROOT } from '../config/constants.js';
 import { writeJSON } from '../utils/fileHelper.js';
 import configManager from './configManager.js';
 import modelManager from './modelManager.js';
 import engineManager from './engineManager.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // 用户可自定义字段（同版本 sync 时保留）
 const USER_FIELDS = [
@@ -178,10 +173,10 @@ async function syncEngines() {
  */
 async function checkUpdate() {
   // 读取当前版本
-  const require = createRequire(import.meta.url);
   let currentVersion = '0.0.0';
   try {
-    const pkg = require(path.join(__dirname, '../../package.json'));
+    const pkgPath = path.join(PROJECT_ROOT, 'backend', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     currentVersion = pkg.version || '0.0.0';
   } catch (e) {
     console.warn('[remoteConfig] 无法读取 package.json 版本');

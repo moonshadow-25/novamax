@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { build as esbuildBuild } from 'esbuild';
+import { builtinModules } from 'module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,14 +58,59 @@ try {
   process.exit(1);
 }
 
-// 3. 复制后端代码和依赖
-console.log('📋 复制后端代码...');
+// 3. 使用 esbuild 打包后端代码
+console.log('🔨 开始打包后端 (esbuild)...');
 const backendDest = path.join(RELEASE_DIR, 'backend');
-fs.mkdirSync(backendDest, { recursive: true });
+const distDest = path.join(backendDest, 'dist');
+fs.mkdirSync(distDest, { recursive: true });
 
-// 复制源码
-const backendSrc = path.join(PROJECT_ROOT, 'backend/src');
-copyDirectory(backendSrc, path.join(backendDest, 'src'));
+try {
+  // 读取 package.json 获取所有依赖名（标记为 external）
+  const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'backend/package.json'), 'utf-8'));
+  const externalDeps = Object.keys(pkg.dependencies || {});
+
+  // esbuild JS API 打包：src/index.js -> dist/index.js
+  const banner = [
+    'import{fileURLToPath as __banner_fileURLToPath}from"url";',
+    'import{dirname as __banner_dirname}from"path";',
+    'const __filename=__banner_fileURLToPath(import.meta.url);',
+    'const __dirname=__banner_dirname(__filename);',
+  ].join('');
+
+  await esbuildBuild({
+    entryPoints: [path.join(PROJECT_ROOT, 'backend/src/index.js')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    minify: true,
+    treeShaking: true,
+    outfile: path.join(distDest, 'index.js'),
+    external: [
+      ...externalDeps,
+      ...builtinModules,
+      ...builtinModules.map(m => `node:${m}`),
+    ],
+    banner: { js: banner },
+  });
+
+  console.log('✅ 后端 esbuild 打包完成');
+} catch (error) {
+  console.error('❌ 后端打包失败:', error.message);
+  process.exit(1);
+}
+
+// 复制 Python 脚本到 dist/scripts/
+console.log('📋 复制 Python 脚本...');
+const scriptsDest = path.join(distDest, 'scripts');
+fs.mkdirSync(scriptsDest, { recursive: true });
+const pyScripts = ['modelscope_downloader.py', 'hf_downloader.py'];
+for (const script of pyScripts) {
+  const src = path.join(PROJECT_ROOT, 'backend/src/services', script);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(scriptsDest, script));
+  }
+}
+console.log('✅ Python 脚本已复制');
 
 // 复制 package.json 和 package-lock.json
 fs.copyFileSync(
@@ -83,8 +130,8 @@ console.log('📦 复制依赖包 (这可能需要几分钟)...');
 const nodeModulesSrc = path.join(PROJECT_ROOT, 'backend/node_modules');
 const nodeModulesDest = path.join(backendDest, 'node_modules');
 if (fs.existsSync(nodeModulesSrc)) {
-  copyDirectory(nodeModulesSrc, nodeModulesDest, ['pkg', '.cache', '.bin']);
-  console.log('✅ 后端代码已复制');
+  copyDirectory(nodeModulesSrc, nodeModulesDest, ['pkg', '.cache', '.bin', 'esbuild', '@esbuild']);
+  console.log('✅ 依赖包已复制');
 } else {
   console.log('⚠️  node_modules 不存在，跳过');
 }
@@ -174,7 +221,7 @@ set NODE_ENV=production
 echo Starting service...
 echo.
 cd /d "!APP_DIR!"
-"!APP_DIR!\\external\\node\\node.exe" "!APP_DIR!\\backend\\src\\index.js"
+"!APP_DIR!\\external\\node\\node.exe" "!APP_DIR!\\backend\\dist\\index.js"
 
 if exist "!APP_DIR!\\data\\updates\\pending" (
     echo.
@@ -266,7 +313,7 @@ const readme = `# NovaMax - AI 模型运行平台
 ## 🔧 常见问题
 
 ### 端口被占用
-如果提示端口 3001 被占用，编辑 \`backend/src/index.js\`，修改 PORT 变量。
+如果提示端口 3001 被占用，编辑 \`data/config.json\` 修改端口配置。
 
 ### 找不到 Python
 确保 \`external/python313/python.exe\` 文件存在。

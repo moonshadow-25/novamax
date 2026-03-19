@@ -2,6 +2,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const isProduction = process.env.NODE_ENV === 'production';
+
 // ============ 外部配置管理 ============
 
 let externalConfig = null;
@@ -14,30 +18,19 @@ function loadExternalConfig() {
     return externalConfig;
   }
 
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const configPath = path.join(__dirname, '..', 'config', 'external-paths.json');
-  
+  const configPath = path.join(getProjectRoot(), 'backend', 'config', 'external-paths.json');
+
   try {
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf-8');
       externalConfig = JSON.parse(content);
       console.log('✓ 已加载外部工具配置');
     } else {
-      // 如果配置文件不存在，使用默认配置
-      externalConfig = {
-        node: '',
-        python: '',
-        llamacpp: ''
-      };
+      externalConfig = { node: '', python: '', llamacpp: '' };
     }
   } catch (error) {
     console.error('⚠ 加载外部工具配置失败，使用默认配置:', error.message);
-    externalConfig = {
-      node: '',
-      python: '',
-      llamacpp: ''
-    };
+    externalConfig = { node: '', python: '', llamacpp: '' };
   }
 
   return externalConfig;
@@ -59,19 +52,21 @@ export function reloadExternalConfig() {
  * - 便携版: release 目录
  */
 export function getProjectRoot() {
-  // 检测便携版环境：backend/src/utils -> backend -> release
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  
-  // 向上查找，检查是否为便携版结构
-  const backendDir = path.resolve(__dirname, '../..');
+  // 生产环境 (bundle): backend/dist/index.js -> backend -> 项目根
+  // 开发环境: backend/src/utils/pathHelper.js -> utils -> src -> backend -> 项目根
+  let backendDir;
+  if (isProduction) {
+    backendDir = path.resolve(__dirname, '..');
+  } else {
+    backendDir = path.resolve(__dirname, '../..');
+  }
   const possibleReleaseDir = path.resolve(backendDir, '..');
-  
+
   // 如果 ../frontend/dist 存在，说明是便携版
   if (fs.existsSync(path.join(possibleReleaseDir, 'frontend/dist'))) {
     return possibleReleaseDir;
   }
-  
+
   // 否则是开发环境，继续向上一层到项目根目录
   return path.resolve(backendDir, '..');
 }
@@ -163,8 +158,12 @@ export function getLlamaCppPath() {
  * - 所有环境: backend/src/services/ 目录下的脚本
  */
 export function getPythonScriptPath(scriptName) {
-  const __filename = fileURLToPath(import.meta.url);
-  return path.join(path.dirname(__filename), '..', 'services', scriptName);
+  if (isProduction) {
+    // 生产环境: backend/dist/scripts/
+    return path.join(__dirname, 'scripts', scriptName);
+  }
+  // 开发环境: backend/src/services/
+  return path.join(__dirname, '..', 'services', scriptName);
 }
 
 /**

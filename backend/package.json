@@ -22,5 +22,8 @@
     "tree-kill": "^1.2.2",
     "ws": "^8.14.0",
     "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.4"
   }
 }

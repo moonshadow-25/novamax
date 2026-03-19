@@ -2,8 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 import open from 'open';
 
 // 尽早初始化日志收集器，拦截所有 console 输出
@@ -30,9 +28,6 @@ import systemRouter from './routes/system.js';
 import whisperRouter from './routes/whisper.js';
 import ttsRouter from './routes/tts.js';
 import eventBus from './services/eventBus.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
@@ -81,8 +76,8 @@ async function init() {
 
   // 写当前版本的 app .installed 标记
   try {
-    const _require = createRequire(import.meta.url);
-    const pkg = _require(path.join(__dirname, '../package.json'));
+    const pkgPath = path.join(PROJECT_ROOT, 'backend', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     const currentVersion = pkg.version || '0.0.0';
     const appMarkerDir = path.join(PROJECT_ROOT, 'external', 'app', currentVersion);
     fs.mkdirSync(appMarkerDir, { recursive: true });
