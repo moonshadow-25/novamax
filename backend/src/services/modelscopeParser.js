@@ -12,9 +12,9 @@ const QUANTIZATION_INFO = {
   'F32': { category: 'original', quality: 100, description: '单精度，无损', recommended: false },
   'Q8_0': { category: 'high', quality: 95, description: '几乎无损，推荐高质量场景', recommended: false },
   'Q6_K': { category: 'high', quality: 90, description: '高质量，平衡性能与大小', recommended: false },
-  'Q5_K_M': { category: 'balanced', quality: 85, description: '推荐，质量与大小平衡', recommended: true },
+  'Q5_K_M': { category: 'balanced', quality: 85, description: '推荐，质量与大小平衡', recommended: false },
   'Q5_K_S': { category: 'balanced', quality: 83, description: '高质量，较小体积', recommended: false },
-  'Q4_K_M': { category: 'balanced', quality: 80, description: '常用推荐，适合大多数场景', recommended: true },
+  'Q4_K_M': { category: 'balanced', quality: 80, description: '常用推荐，适合大多数场景', recommended: false },
   'Q4_K_S': { category: 'balanced', quality: 78, description: '常用，体积较小', recommended: false },
   'Q4_0': { category: 'balanced', quality: 75, description: '标准量化', recommended: false },
   'Q4_1': { category: 'balanced', quality: 76, description: '标准量化', recommended: false },
@@ -296,8 +296,8 @@ class ModelscopeParser {
     // 如果没有推荐的，自动选择 Q4_K_M 或 Q5_K_M
     const hasRecommended = quantizations.some(q => q.recommended);
     if (!hasRecommended && quantizations.length > 0) {
-      const q4km = quantizations.find(q => q.name === 'Q4_K_M');
-      const q5km = quantizations.find(q => q.name === 'Q5_K_M');
+      const q4km = quantizations.find(q => q.name.includes('Q4_K_M'));
+      const q5km = quantizations.find(q => q.name.includes('Q5_K_M'));
       if (q4km) q4km.recommended = true;
       else if (q5km) q5km.recommended = true;
       else quantizations[Math.floor(quantizations.length / 2)].recommended = true;

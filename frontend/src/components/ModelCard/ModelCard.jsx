@@ -581,9 +581,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </h3>
         )}
         <Space size={4}>
-          {modelSize > 0 && (
-            <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
-          )}
           {model.type === 'llm' && (
             <Button
               size="small"
@@ -595,17 +592,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               title={isFavorited ? '取消收藏' : '收藏'}
             />
           )}
-          {model.type !== 'comfyui' && (
-            <Tag color={isRunning ? 'green' : 'default'} style={{ margin: 0 }}>
-              {isRunning ? '运行中' : '已停止'}
-            </Tag>
-          )}
-          <Button
-            size="small"
-            icon={<SettingOutlined />}
-            onClick={handleSettings}
-            title="配置参数"
-          />
           {model.source === 'remote' && (
             <Button
               size="small"
@@ -614,30 +600,43 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               title="恢复默认"
             />
           )}
+          <Button
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={handleSettings}
+            title="配置参数"
+          />
         </Space>
       </div>
-      {model.modelscope_id && (
-        <div className="model-source" title={model.modelscope_id}>
-          {model.modelscope_id.split('/')[0]}
-        </div>
-      )}
+      <div className="model-meta">
+        {model.modelscope_id ? (
+          <span className="model-source" title={model.modelscope_id}>
+            {model.modelscope_id.split('/')[0]}
+          </span>
+        ) : <span />}
+      </div>
       <p className="model-description">{model.description || '暂无描述'}</p>
 
       <div className="model-card-footer">
-      {/* 显示量化版本信息 */}
-      {currentQuant && (
+      {/* 显示量化版本信息和模型大小 */}
+      {(currentQuant || modelSize > 0) && (
         <div className="model-quantization">
-          {model.quantizations && model.quantizations.length > 1 ? (
-            <Tag
-              color="blue"
-              style={{ cursor: 'pointer' }}
-              onClick={handleManageQuantizations}
-              title="点击切换量化版本"
-            >
-              {getQuantizationDisplayName(currentQuant.name)} <SwapOutlined />
-            </Tag>
-          ) : (
-            <Tag color="blue">{getQuantizationDisplayName(currentQuant.name)}</Tag>
+          {modelSize > 0 && (
+            <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
+          )}
+          {currentQuant && (
+            model.quantizations && model.quantizations.length > 1 ? (
+              <Tag
+                color="blue"
+                style={{ cursor: 'pointer' }}
+                onClick={handleManageQuantizations}
+                title="点击切换量化版本"
+              >
+                {getQuantizationDisplayName(currentQuant.name)} <SwapOutlined />
+              </Tag>
+            ) : (
+              <Tag color="blue">{getQuantizationDisplayName(currentQuant.name)}</Tag>
+            )
           )}
         </div>
       )}
@@ -857,14 +856,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           ) : (
             <>
               <Button
-                type="primary"
-                icon={<MessageOutlined />}
-                onClick={handleUse}
-                block
-              >
-                使用
-              </Button>
-              <Button
                 danger
                 icon={<StopOutlined />}
                 onClick={handleStop}
@@ -872,6 +863,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 block
               >
                 停止
+              </Button>
+              <Button
+                type="primary"
+                icon={<MessageOutlined />}
+                onClick={handleUse}
+                block
+              >
+                使用
               </Button>
             </>
           )}
@@ -944,6 +943,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           onResumeDownload={handleResumeDownload}
           onCancelDownload={handleCancelDownload}
           onDeleteQuantization={handleDeleteQuantization}
+          onStart={() => { setQuantizationSelectorVisible(false); handleStart(); }}
           onCancel={async () => {
             // 先刷新模型数据，等待完成
             await onUpdate();

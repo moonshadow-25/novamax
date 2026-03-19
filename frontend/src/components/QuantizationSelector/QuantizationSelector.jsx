@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Button, Space, Tag, Divider, Alert, Progress, Tooltip } from 'antd';
+import { Modal, Button, Space, Tag, Divider, Alert, Progress, Tooltip, Collapse } from 'antd';
 import {
   StarOutlined,
   CheckCircleFilled,
@@ -7,7 +7,8 @@ import {
   PlayCircleOutlined,
   PauseCircleOutlined,
   CloseCircleOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  CaretRightOutlined
 } from '@ant-design/icons';
 import './QuantizationSelector.css';
 
@@ -41,6 +42,7 @@ function QuantizationSelector({
   onResumeDownload,
   onCancelDownload,
   onDeleteQuantization,
+  onStart,
   onCancel
 }) {
   // 使用新的 downloadedFiles 或回退到旧的 downloadedQuantizations
@@ -108,8 +110,15 @@ function QuantizationSelector({
     return (orderMap[a] || 99) - (orderMap[b] || 99);
   });
 
-  // 获取推荐版本
-  const recommended = quantizations.find(q => q.recommended);
+  // 获取推荐版本（后端计算）
+  const recommended = quantizations.find(q => q.recommended) || null;
+
+  // 推荐版本的下载/状态信息
+  const recommendedItem = recommended ? allItems.find(i => i.name === recommended.name) : null;
+  const recommendedState = recommended ? downloadStates.find(s => s.targetQuantization === recommended.name) : null;
+  const recommendedDownloading = recommendedState?.status === 'downloading';
+  const recommendedPaused = recommendedState?.status === 'paused';
+  const recommendedDownloaded = recommendedItem?.isDownloaded;
 
   // 格式化字节数
   function formatBytes(bytes) {
@@ -306,31 +315,52 @@ function QuantizationSelector({
       width={800}
     >
       {recommended && (
-        <Alert
-          message={`推荐版本: ${recommended.label}`}
-          description={recommended.description}
-          type="info"
-          showIcon
-          icon={<StarOutlined />}
-          style={{ marginBottom: 16 }}
-        />
+        <div className="recommended-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <StarOutlined style={{ color: '#faad14', fontSize: 20 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>推荐版本: {recommended.label}</div>
+              <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{recommended.description}</div>
+            </div>
+            {recommendedDownloaded ? (
+              <CheckCircleFilled style={{ color: '#52c41a', fontSize: 20 }} />
+            ) : !recommendedDownloading && !recommendedPaused && (
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                size="small"
+                onClick={() => onDownload(recommended.name)}
+              >
+                下载
+              </Button>
+            )}
+            {recommendedDownloading && (
+              <span style={{ fontSize: 12, color: '#1890ff' }}>{(recommendedState?.progress || 0).toFixed(0)}% 下载中</span>
+            )}
+            {recommendedPaused && (
+              <span style={{ fontSize: 12, color: '#faad14' }}>已暂停</span>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="quantization-selector">
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          {sortedCategories.map((category) => (
-            <div key={category} className="quantization-category">
-              <div className="category-header">
-                <Tag color={CATEGORY_COLORS[category]}>
-                  {CATEGORY_LABELS[category] || category}
-                </Tag>
-              </div>
-              <Space direction="vertical" size="small" style={{ width: '100%', marginTop: 8 }}>
+        <Collapse
+          ghost
+          items={sortedCategories.map((category) => ({
+            key: category,
+            label: (
+              <Tag color={CATEGORY_COLORS[category]}>
+                {CATEGORY_LABELS[category] || category}
+              </Tag>
+            ),
+            children: (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
                 {groupedQuantizations[category].map(renderQuantizationItem)}
               </Space>
-            </div>
-          ))}
-        </Space>
+            )
+          }))}
+        />
       </div>
 
       <Divider />

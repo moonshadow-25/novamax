@@ -24,6 +24,45 @@ class ModelManager {
         await this.saveType(type);
       }
     }
+    // 重新计算所有模型的推荐量化版本
+    await this._recalcRecommendations();
+  }
+
+  async _recalcRecommendations() {
+    let changed = false;
+    for (const type of Object.keys(this.models)) {
+      for (const model of this.models[type]) {
+        const quants = model.quantizations;
+        if (!quants || quants.length === 0) continue;
+
+        // 清除旧推荐
+        quants.forEach(q => { q.recommended = false; });
+
+        // 优先 Q4_K_M，其次 Q5_K_M，否则取中间
+        const q4km = quants.find(q => q.name.includes('Q4_K_M'));
+        const q5km = quants.find(q => q.name.includes('Q5_K_M'));
+        if (q4km) q4km.recommended = true;
+        else if (q5km) q5km.recommended = true;
+        else quants[Math.floor(quants.length / 2)].recommended = true;
+
+        // 如果没有已下载文件且没有选中量化版本，默认选中推荐版本
+        const hasActiveFile = model.downloaded_files?.some(f => f.is_active);
+        if (!hasActiveFile && !model.selected_quantization) {
+          const rec = quants.find(q => q.recommended);
+          if (rec) {
+            model.selected_quantization = rec.name;
+            changed = true;
+          }
+        }
+
+        changed = true;
+      }
+    }
+    if (changed) {
+      for (const type of Object.keys(this.models)) {
+        await this.saveType(type);
+      }
+    }
   }
 
   async saveType(type) {
@@ -123,7 +162,7 @@ class ModelManager {
       !f.startsWith('mmproj')
     );
 
-    console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
+    // console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
 
     const existingFiles = model.downloaded_files || [];
 
@@ -182,7 +221,7 @@ class ModelManager {
     const ggufFiles = files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
     const downloadedQuantizations = [];
 
-    console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
+    // console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
 
     for (const fileName of ggufFiles) {
       // 从文件名中提取量化版本
@@ -202,7 +241,7 @@ class ModelManager {
           .replace(/^(Q\d+)_([KM])_$/, '$1_$2')          // Q4_K_ -> Q4_K
           .replace(/^(IQ\d+)([XSML]+)$/, '$1_$2');       // IQ3XXS -> IQ3_XXS
 
-        console.log(`  检测到文件 ${fileName} -> 量化版本: ${quantName}`);
+        // console.log(`  检测到文件 ${fileName} -> 量化版本: ${quantName}`);
 
         if (!downloadedQuantizations.includes(quantName)) {
           downloadedQuantizations.push(quantName);
@@ -212,7 +251,7 @@ class ModelManager {
       }
     }
 
-    console.log(`✓ 模型 ${model.id} 已下载的量化版本:`, downloadedQuantizations);
+    // console.log(`✓ 模型 ${model.id} 已下载的量化版本:`, downloadedQuantizations);
     return downloadedQuantizations;
   }
 

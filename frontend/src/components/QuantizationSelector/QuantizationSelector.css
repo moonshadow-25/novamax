@@ -4,6 +4,19 @@
   padding-right: 8px;
 }
 
+.recommended-banner {
+  padding: 12px 16px;
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+[data-theme='dark'] .recommended-banner {
+  background: #111d2c;
+  border-color: #15395b;
+}
+
 /* 自定义滚动条样式 */
 .quantization-selector::-webkit-scrollbar {
   width: 8px;

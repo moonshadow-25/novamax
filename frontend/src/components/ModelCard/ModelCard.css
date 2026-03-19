@@ -54,6 +54,18 @@
   text-overflow: ellipsis;
 }
 
+.model-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.model-meta .model-source {
+  margin-bottom: 0;
+}
+
 .model-description {
   color: rgba(0, 0, 0, 0.65);
   font-size: 14px;
