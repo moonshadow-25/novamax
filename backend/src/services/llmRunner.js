@@ -39,11 +39,8 @@ export function generateRouterCommand(type = 'llm', port = DEFAULT_PORTS.LLAMACP
  */
 const PARAM_MAPPING = {
   context_length: '--ctx-size',
-  gpu_layers: '--gpu-layers',
-  threads: '--threads',
   parallel: '--parallel',
-  batch: '-b',         // 修正：使用短参数
-  ubatch: '-ub',       // 修正：使用短参数
+  port: '--port',
   // 其他参数可以直接使用
 };
 
@@ -68,18 +65,14 @@ export function generateSingleModelCommand(model, port) {
   // 必需参数（始终包含）
   const args = [
     '-m', modelPath,
-    '--port', port.toString(),
     '--host', '0.0.0.0',
   ];
 
   // 默认参数值（当用户未设置时使用）
   const defaults = {
     context_length: 8192,
-    gpu_layers: -1,
-    threads: 8,
+    port: port || 1234,
     parallel: 2,
-    batch: 512,
-    ubatch: 512
   };
 
   // 动态添加参数

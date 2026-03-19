@@ -141,25 +141,17 @@ class ParameterService {
         type: 'number',
         label: '上下文长度',
         description: 'LLM 可以记住的 token 数量',
-        min: 512,
+        min: 0,
         max: 1048576,
         default: 8192
       },
-      gpu_layers: {
+      port: {
         type: 'number',
-        label: 'GPU 层数',
-        description: '-1=全部使用GPU, 0=仅CPU, >0=指定层数',
-        min: -1,
-        max: 1000,
-        default: -1
-      },
-      threads: {
-        type: 'number',
-        label: 'CPU 线程数',
-        description: 'CPU 推理使用的线程数',
+        label: 'Port',
+        description: '模型服务监听端口',
         min: 1,
-        max: 128,
-        default: 8
+        max: 65535,
+        default: 1234
       },
       parallel: {
         type: 'number',
@@ -168,22 +160,6 @@ class ParameterService {
         min: 1,
         max: 16,
         default: 2
-      },
-      batch: {
-        type: 'number',
-        label: 'Batch Size',
-        description: '批处理大小',
-        min: 1,
-        max: 2048,
-        default: 512
-      },
-      ubatch: {
-        type: 'number',
-        label: 'Micro Batch',
-        description: '微批处理大小',
-        min: 1,
-        max: 2048,
-        default: 512
       },
 
       // 采样参数

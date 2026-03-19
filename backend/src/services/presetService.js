@@ -113,20 +113,8 @@ class PresetService {
       if (params.context_length) {
         lines.push(`ctx-size = ${params.context_length}`);
       }
-      if (params.gpu_layers !== undefined) {
-        lines.push(`gpu-layers = ${params.gpu_layers}`);
-      }
-      if (params.threads) {
-        lines.push(`threads = ${params.threads}`);
-      }
       if (params.parallel) {
         lines.push(`parallel = ${params.parallel}`);
-      }
-      if (params.batch) {
-        lines.push(`batch = ${params.batch}`);
-      }
-      if (params.ubatch) {
-        lines.push(`ubatch = ${params.ubatch}`);
       }
       if (params.temperature) {
         lines.push(`temperature = ${params.temperature}`);
@@ -142,8 +130,8 @@ class PresetService {
       }
 
       // 自定义参数（所有其他非标准参数）
-      const standardKeys = ['context_length', 'gpu_layers', 'threads', 'parallel',
-                            'batch', 'ubatch', 'temperature', 'top_p', 'top_k', 'repeat_penalty'];
+      const standardKeys = ['context_length', 'port', 'parallel',
+                            'temperature', 'top_p', 'top_k', 'repeat_penalty'];
       Object.entries(params).forEach(([key, value]) => {
         if (!standardKeys.includes(key)) {
           lines.push(`${key} = ${value}`);

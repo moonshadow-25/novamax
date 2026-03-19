@@ -93,8 +93,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（与后端 parameterService 保持一致）
       const standardKeys = [
-        'context_length', 'gpu_layers', 'threads', 'parallel',
-        'batch', 'ubatch', 'temperature', 'top_p', 'top_k',
+        'context_length', 'port', 'parallel',
+        'temperature', 'top_p', 'top_k',
         'repeat_penalty', 'version'
       ];
 
@@ -110,6 +110,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           custom.push({ key, value: params[key] });
         }
       });
+
+      // 如果 port 没有值，填入默认值（Embedding 模型默认 1278，其他默认 1234）
+      if (formValues.port === undefined) {
+        const isEmbedding = /embedding/i.test(model?.name || model?.id || '');
+        formValues.port = isEmbedding ? 1278 : 1234;
+      }
 
       setCustomParams(custom);
       form.setFieldsValue(formValues);
@@ -134,8 +140,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（确保所有标准参数都被保存）
       const standardKeys = [
-        'context_length', 'gpu_layers', 'threads', 'parallel',
-        'batch', 'ubatch', 'temperature', 'top_p', 'top_k',
+        'context_length', 'port', 'parallel',
+        'temperature', 'top_p', 'top_k',
         'repeat_penalty'
       ];
 
@@ -390,7 +396,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
             <Collapse defaultActiveKey={[]} ghost>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
-                {['context_length', 'gpu_layers', 'threads', 'parallel', 'batch', 'ubatch']
+                {['context_length', 'parallel', 'port']
                   .filter(key => metadata[key])
                   .map(key => renderFormItem(key, metadata[key]))}
               </Panel>
