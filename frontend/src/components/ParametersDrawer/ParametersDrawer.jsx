@@ -93,7 +93,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（与后端 parameterService 保持一致）
       const standardKeys = [
-        'context_length', 'port', 'parallel',
+        'context_length', 'port', 'parallel', 'no-mmap',
         'temperature', 'top_p', 'top_k',
         'repeat_penalty', 'version'
       ];
@@ -110,6 +110,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           custom.push({ key, value: params[key] });
         }
       });
+
+      // 如果 no-mmap 没有值，填入默认值 true
+      if (formValues['no-mmap'] === undefined) {
+        formValues['no-mmap'] = 'true';
+      } else {
+        formValues['no-mmap'] = String(formValues['no-mmap']);
+      }
 
       // 如果 port 没有值，填入默认值（Embedding 模型默认 1278，其他默认 1234）
       if (formValues.port === undefined) {
@@ -140,7 +147,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（确保所有标准参数都被保存）
       const standardKeys = [
-        'context_length', 'port', 'parallel',
+        'context_length', 'port', 'parallel', 'no-mmap',
         'temperature', 'top_p', 'top_k',
         'repeat_penalty'
       ];
@@ -154,6 +161,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           allParams[key] = parameters[key];
         }
       });
+
+      // no-mmap 字符串转布尔值
+      if (allParams['no-mmap'] !== undefined) {
+        const v = String(allParams['no-mmap']).toLowerCase();
+        allParams['no-mmap'] = v !== 'false' && v !== '0' && v !== '';
+      }
 
       // 添加自定义参数
       customParams.forEach(({ key, value }) => {
@@ -262,13 +275,17 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           </Space>
         }
       >
-        <InputNumber
-          style={{ width: '100%' }}
-          min={meta.min}
-          max={meta.max}
-          step={meta.step || 1}
-          placeholder={`默认: ${meta.default}`}
-        />
+        {meta.type === 'boolean' ? (
+          <Input placeholder={`默认: ${meta.default}`} />
+        ) : (
+          <InputNumber
+            style={{ width: '100%' }}
+            min={meta.min}
+            max={meta.max}
+            step={meta.step || 1}
+            placeholder={`默认: ${meta.default}`}
+          />
+        )}
       </Form.Item>
     );
   };
@@ -396,7 +413,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
             <Collapse defaultActiveKey={[]} ghost>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
-                {['context_length', 'parallel', 'port']
+                {['context_length', 'parallel', 'no-mmap', 'port']
                   .filter(key => metadata[key])
                   .map(key => renderFormItem(key, metadata[key]))}
               </Panel>

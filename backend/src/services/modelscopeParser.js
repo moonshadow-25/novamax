@@ -388,12 +388,9 @@ class ModelscopeParser {
 
         parameters: {
           version: '1.0.0',
-          context_length: 131072,
-          gpu_layers: -1,
-          threads: 8,
+          context_length: 0,
           parallel: 2,
-          batch: 512,
-          ubatch: 512,
+          'no-mmap': true,
           temperature: 0.7,
           top_p: 0.9,
           top_k: 40,

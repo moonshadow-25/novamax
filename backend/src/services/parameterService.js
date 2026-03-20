@@ -106,8 +106,15 @@ class ParameterService {
       throw new Error('模型不存在');
     }
 
+    // 从 user_parameters 里移除
     const currentParams = model.user_parameters || {};
     const { [key]: removed, ...remainingParams } = currentParams;
+
+    // 同时从 parameters（默认参数）里移除，防止它通过 defaultParams 合并回来
+    if (model.parameters && key in model.parameters) {
+      const { [key]: _removed, ...remainingDefault } = model.parameters;
+      await modelManager.update(modelId, { parameters: remainingDefault });
+    }
 
     return this.saveUserParameters(modelId, remainingParams);
   }
@@ -147,7 +154,7 @@ class ParameterService {
       },
       port: {
         type: 'number',
-        label: 'Port',
+        label: '端口号',
         description: '模型服务监听端口',
         min: 1,
         max: 65535,
@@ -160,6 +167,12 @@ class ParameterService {
         min: 1,
         max: 16,
         default: 2
+      },
+      'no-mmap': {
+        type: 'boolean',
+        label: 'no-mmap',
+        description: '禁用内存映射，避免模型文件被映射到内存',
+        default: true
       },
 
       // 采样参数

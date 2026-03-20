@@ -7,6 +7,7 @@ import modelManager from './modelManager.js';
 import configManager from './configManager.js';
 import engineManager from './engineManager.js';
 import { generateRouterCommand, generateSingleModelCommand } from './llmRunner.js';
+import parameterService from './parameterService.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
 
@@ -23,6 +24,7 @@ class ProcessManager {
   }
 
   async allocatePort(type) {
+    // LLM 路由模式使用 llamacpp 端口范围
     if (type === 'llm') {
       const [start, end] = configManager.get('ports').llamacpp_range;
       for (let port = start; port <= end; port++) {
@@ -42,6 +44,9 @@ class ProcessManager {
     };
 
     const basePort = portMap[type];
+    if (!basePort) {
+      throw new Error(`Unknown port type: ${type}`);
+    }
     // 尝试 basePort 及后续 10 个端口
     for (let p = basePort; p < basePort + 10; p++) {
       if (await this.isPortAvailable(p)) {
@@ -92,7 +97,10 @@ class ProcessManager {
       throw new Error('路由模式正在运行，请先停止路由模式或使用路由模式启动');
     }
 
-    const port = await this.allocatePort(model.type);
+    // 从模型参数中读取端口（常规模型默认1234，由参数定义控制）
+    const effectiveParams = parameterService.getEffectiveParameters(model);
+    const port = effectiveParams.port || 1234;
+    this.allocatedPorts.add(port);
 
 
     try {
