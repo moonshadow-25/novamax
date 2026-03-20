@@ -13,7 +13,8 @@ import {
   FileTextOutlined,
   StarFilled,
   StarOutlined,
-  UndoOutlined
+  UndoOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
@@ -110,7 +111,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await backendService.start(model.id, 'single');
-      message.success('模型启动成功');
+      message.info('模型正在启动，请稍候...');
       onUpdate();
     } catch (error) {
       const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
@@ -468,6 +469,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
 
   const isRunning = model.status === 'running';
+  const isStarting = model.status === 'starting';
   
   // 统一使用 model.downloaded_files 作为主要数据源（最可靠）
   // realDownloadedFiles 只在弹窗打开时用于实时显示，关闭后应使用 model 数据
@@ -843,7 +845,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI） */}
       {canStart && model.type !== 'comfyui' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
-          {!isRunning ? (
+          {isStarting ? (
+            <Button
+              danger
+              icon={<LoadingOutlined />}
+              onClick={handleStop}
+              block
+              style={{ background: '#ff4d4f', borderColor: '#ff4d4f', color: '#fff' }}
+            >
+              中断启动
+            </Button>
+          ) : !isRunning ? (
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}

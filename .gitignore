@@ -10,6 +10,7 @@ dist/
 release/
 *.7z
 *.zip
+*.gz
 
 # Logs
 *.log
@@ -44,3 +45,4 @@ external/*
 *.tmp
 *.temp
 .claude/
+/47.116.221.35_id_ed25519

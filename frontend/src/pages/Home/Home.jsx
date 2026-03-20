@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined } from '@ant-design/icons';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService } from '../../services/api';
+import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
@@ -64,6 +64,9 @@ function Home() {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [currentInstance, setCurrentInstance] = useState(null);
 
+  // 应用更新
+  const [updateInfo, setUpdateInfo] = useState(null);
+
   useEffect(() => {
     configService.getFavorites().then(res => {
       setFavorites(res.favorites || []);
@@ -71,6 +74,11 @@ function Home() {
 
     // 启动时触发远程模型同步，完成后刷新列表
     remoteConfigService.sync().then(() => loadModels()).catch(() => {});
+
+    // 检查应用更新
+    updateService.check().then(res => {
+      if (res.hasUpdate) setUpdateInfo(res);
+    }).catch(() => {});
   }, []);
 
   // 加载 ComfyUI 实例列表
@@ -227,6 +235,7 @@ function Home() {
               type="text"
               icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
               onClick={toggleTheme}
+              title="切换主题"
             />
             <Button
               type="text"
@@ -237,6 +246,25 @@ function Home() {
           </Space>
         </Space>
       </Header>
+      {updateInfo && (
+        <div className="update-banner">
+          <div className="update-banner-content">
+            <GiftOutlined className="update-banner-icon" />
+            <span className="update-banner-text">
+              新版本 <strong>{updateInfo.latestVersion}</strong> 已发布，当前版本 {updateInfo.currentVersion}
+            </span>
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => navigate('/global-settings')}
+              className="update-banner-btn"
+            >
+              立即更新
+            </Button>
+          </div>
+          <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
+        </div>
+      )}
       <Content className="home-content">
         <div className="home-toolbar">
           <Tabs

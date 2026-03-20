@@ -159,13 +159,18 @@ class EngineDownloader {
 
     // 安装步骤
     if (engine.category === 'app') {
-      // App 更新：写 pending 文件，交给守护进程处理
+      // App 更新：写 pending 文件，然后自动重启
       const PENDING_FILE = path.join(DATA_DIR, 'updates', 'pending');
       fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
       fs.writeFileSync(PENDING_FILE, installPath, 'utf8');
-      console.log(`[engineDownloader] App update staged at ${installPath}, exiting...`);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      setTimeout(() => process.exit(0), 500);
+      // 通知前端进入重启状态
+      downloadStateManager.setState(engineId, 'restarting', null, version);
+      eventBus.broadcast('download-progress', { engineId, status: 'restarting' });
+      console.log(`[engineDownloader] App update ready, auto-restarting...`);
+      // 自动触发重启
+      const updateService = (await import('./updateService.js')).default;
+      await updateService.applyUpdate();
       return;
     }
 

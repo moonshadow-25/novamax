@@ -62,6 +62,71 @@
   margin-bottom: 12px;
 }
 
+/* 更新横幅 */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  animation: bannerSlideDown 0.4s ease-out;
+}
+
+@keyframes bannerSlideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.update-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-banner-icon {
+  font-size: 20px;
+  animation: bannerPulse 2s ease-in-out infinite;
+}
+
+@keyframes bannerPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.update-banner-text {
+  font-size: 14px;
+}
+
+.update-banner-text strong {
+  color: #ffd700;
+}
+
+.update-banner-btn.ant-btn-primary {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  font-weight: 500;
+  padding: 0 16px;
+}
+
+.update-banner-btn.ant-btn-primary:hover {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: #fff;
+}
+
+.update-banner-close {
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  padding: 4px;
+}
+
+.update-banner-close:hover {
+  opacity: 1;
+}
+
 /* 深色主题 */
 [data-theme='dark'] .home-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);

@@ -785,6 +785,51 @@ router.post('/comfyui/:id/run', async (req, res) => {
       }
     };
 
+    // 提交前检查所有必需模型文件是否存在
+    const rawModels = model.required_models || [];
+    if (rawModels.length > 0) {
+      // 用文件系统实际状态刷新 downloaded 标记
+      const requiredModels = comfyuiModelManager.updateModelsStatus(rawModels);
+      const missingModels = requiredModels.filter(m => !m.downloaded);
+
+      // 对缺失的模型，尝试从旧 local_path 链接/复制到当前目录
+      const stillMissing = [];
+      for (const rm of missingModels) {
+        // 找到原始记录中的 local_path
+        const original = rawModels.find(r => r.type === rm.type && r.filename === rm.filename);
+        const oldPath = original?.local_path;
+        if (oldPath && fs.existsSync(oldPath)) {
+          const targetDir = path.join(MODELS_RUN_DIR, 'comfyui', 'models', rm.type);
+          const targetPath = path.join(targetDir, rm.filename);
+          try {
+            fs.mkdirSync(targetDir, { recursive: true });
+            fs.symlinkSync(oldPath, targetPath, 'file');
+            console.log(`✓ 已为 ${rm.filename} 创建符号链接: ${oldPath} -> ${targetPath}`);
+          } catch {
+            try {
+              fs.copyFileSync(oldPath, targetPath);
+              console.log(`✓ 已复制 ${rm.filename}: ${oldPath} -> ${targetPath}`);
+            } catch (copyErr) {
+              console.error(`✗ 无法链接或复制 ${rm.filename}: ${copyErr.message}`);
+              stillMissing.push(rm);
+            }
+          }
+        } else {
+          stillMissing.push(rm);
+        }
+      }
+
+      if (stillMissing.length > 0) {
+        // 持久化更新后的状态，以便 UI 也显示正确
+        await modelManager.update(req.params.id, { required_models: requiredModels });
+        const details = stillMissing.map(m => `${m.filename} (${m.type})`).join(', ');
+        return res.status(400).json({
+          error: `以下模型文件缺失，请先下载: ${details}`,
+          missing_models: stillMissing.map(m => ({ type: m.type, filename: m.filename }))
+        });
+      }
+    }
+
     const workflow = await openaiProxyService.mapParametersToWorkflow(
       model.workflow.original,
       effectiveMapping,

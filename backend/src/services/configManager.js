@@ -15,6 +15,7 @@ class ConfigManager {
     await ensureDir(path.join(DOWNLOADS_DIR, 'COMFYUI'));
     await ensureDir(path.join(DOWNLOADS_DIR, 'TTS'));
     await ensureDir(path.join(DOWNLOADS_DIR, 'ASR'));
+    await ensureDir(path.join(DATA_DIR, 'logs'));
 
     this.config = await readJSON(CONFIG_FILE);
     if (!this.config) {

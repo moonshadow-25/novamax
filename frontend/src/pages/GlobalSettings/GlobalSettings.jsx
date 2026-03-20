@@ -21,7 +21,6 @@ const GlobalSettings = () => {
 
   // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState(null);
-  const [updateReady, setUpdateReady] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
   // 引擎相关状态
@@ -121,8 +120,16 @@ const GlobalSettings = () => {
   // 监听 app 下载状态变化
   useEffect(() => {
     if (!appDownloadState) return;
-    if (appDownloadState.status === 'completed') {
-      setUpdateReady(true);
+    if (appDownloadState.status === 'restarting') {
+      // 下载完成，后端自动重启中
+      setRestarting(true);
+      const poll = setInterval(async () => {
+        try {
+          await fetch('/api/health');
+          clearInterval(poll);
+          window.location.reload();
+        } catch {}
+      }, 2000);
     } else if (appDownloadState.status === 'failed') {
       message.error(`下载失败: ${appDownloadState.error || '未知错误'}`);
     }
@@ -416,22 +423,6 @@ const GlobalSettings = () => {
       // 进度由 engines.app.download_state 驱动，SSE + 轮询已在 useEffect 中处理
     } catch (err) {
       message.error('启动下载失败');
-    }
-  };
-
-  const handleApplyUpdate = async () => {
-    try {
-      await updateService.apply();
-      setRestarting(true);
-      const poll = setInterval(async () => {
-        try {
-          await fetch('/api/health');
-          clearInterval(poll);
-          window.location.reload();
-        } catch {}
-      }, 2000);
-    } catch (err) {
-      message.error('应用更新失败');
     }
   };
 
@@ -773,14 +764,9 @@ const GlobalSettings = () => {
                   {downloading && (
                     <Progress percent={downloadProgress} status="active" />
                   )}
-                  {!updateReady && !downloading && (
+                  {!downloading && (
                     <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownloadUpdate}>
                       下载更新
-                    </Button>
-                  )}
-                  {updateReady && (
-                    <Button type="primary" danger onClick={handleApplyUpdate}>
-                      重启以应用更新
                     </Button>
                   )}
                 </Space>

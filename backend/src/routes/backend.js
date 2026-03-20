@@ -1,6 +1,9 @@
 import express from 'express';
+import path from 'path';
+import { exec } from 'child_process';
 import processManager from '../services/processManager.js';
 import eventBus from '../services/eventBus.js';
+import { PROJECT_ROOT } from '../config/constants.js';
 
 const router = express.Router();
 
@@ -50,6 +53,30 @@ router.get('/backend/logs/:modelId', async (req, res) => {
   try {
     const logs = processManager.getLogs(req.params.modelId);
     res.json({ logs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 打开模型日志文件夹
+ * POST /api/backend/open-logs
+ */
+router.post('/backend/open-logs', (req, res) => {
+  try {
+    const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
+    const command = process.platform === 'win32'
+      ? `start "" "${logDir}"`
+      : process.platform === 'darwin'
+      ? `open "${logDir}"`
+      : `xdg-open "${logDir}"`;
+
+    exec(command, (error) => {
+      if (error) {
+        return res.status(500).json({ error: '打开文件夹失败' });
+      }
+      res.json({ success: true });
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -24,10 +24,11 @@ import {
   PlusOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
-  UndoOutlined
+  UndoOutlined,
+  FolderOpenOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
-import { engineService, modelService } from '../../services/api';
+import { engineService, modelService, backendService } from '../../services/api';
 import './ParametersDrawer.css';
 
 const { Panel } = Collapse;
@@ -475,6 +476,23 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 </Col>
               </Row>
             </div>
+
+            {/* 打开日志文件夹 */}
+            <Divider />
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={async () => {
+                try {
+                  await backendService.openLogsFolder();
+                  message.success('已打开日志文件夹');
+                } catch {
+                  message.error('打开失败');
+                }
+              }}
+              block
+            >
+              打开日志文件夹
+            </Button>
           </Form>
         </>
       )}

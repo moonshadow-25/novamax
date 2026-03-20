@@ -32,6 +32,9 @@ const directories = [
   'data/models_dir/comfyui',
   'data/models_dir/tts',
   'data/models_dir/whisper',
+
+  // logs 目录
+  'data/logs'
 ];
 
 const files = {
@@ -81,3 +84,4 @@ console.log('│  ├─ llm/');
 console.log('│  ├─ tts/');
 console.log('│  └─ whisper/');
 console.log('└─ presets/         # INI 预设配置（llama-server --models-preset）');
+console.log('└─ logs/            # 日志目录');

@@ -59,7 +59,8 @@ export const backendService = {
   startRouter: (type) => api.post(`/backend/start-router/${type}`),
   stop: (modelId) => api.post(`/backend/stop/${modelId}`),
   getStatus: (modelId) => api.get(`/backend/status/${modelId}`),
-  getLogs: (modelId) => api.get(`/backend/logs/${modelId}`)
+  getLogs: (modelId) => api.get(`/backend/logs/${modelId}`),
+  openLogsFolder: () => api.post('/backend/open-logs')
 };
 
 export const llmService = {

@@ -8,6 +8,7 @@ import configManager from './configManager.js';
 import engineManager from './engineManager.js';
 import { generateRouterCommand, generateSingleModelCommand } from './llmRunner.js';
 import parameterService from './parameterService.js';
+import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
 
@@ -97,9 +98,15 @@ class ProcessManager {
       throw new Error('路由模式正在运行，请先停止路由模式或使用路由模式启动');
     }
 
-    // 从模型参数中读取端口（常规模型默认1234，由参数定义控制）
+    // 从模型参数中读取端口
     const effectiveParams = parameterService.getEffectiveParameters(model);
-    const port = effectiveParams.port || 1234;
+    const isEmbedding = /embedding/i.test(model.name || model.id || '');
+    const port = effectiveParams.port || (isEmbedding ? 1278 : 1234);
+
+    // 检查端口是否已被占用
+    if (this.allocatedPorts.has(port)) {
+      throw new Error(`端口 ${port} 已被其他模型占用，请在模型参数中修改端口号`);
+    }
     this.allocatedPorts.add(port);
 
 
@@ -125,7 +132,7 @@ class ProcessManager {
       const process = spawn(llamaServerPath, cmd.args, { env });
 
       // 创建日志文件写入流
-      const logDir = path.join(PROJECT_ROOT, 'data', 'model_logs');
+      const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
       if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
       const logFilePath = path.join(logDir, `model_${modelId}_runtime.log`);
       const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
@@ -144,30 +151,46 @@ class ProcessManager {
         mode: 'single',
         logs: [],
         startupFailed: false,
+        ready: false,
         logStream
       });
 
       process.stdout.on('data', (data) => {
         const log = data.toString();
-        this.processes.get(modelId).logs.push(log);
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo) return;
+        processInfo.logs.push(log);
         logStream.write(log);
         console.log(`[${modelId}] ${log}`);
+
+        // 检测模型是否真正就绪
+        if (!processInfo.ready && (log.includes('server is listening') || log.includes('all slots are idle'))) {
+          processInfo.ready = true;
+          console.log(`[${modelId}] 模型已就绪`);
+          eventBus.broadcast('model-updated', { modelId });
+        }
       });
 
       process.stderr.on('data', (data) => {
         const log = data.toString();
-        this.processes.get(modelId).logs.push(log);
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo) return;
+        processInfo.logs.push(log);
         logStream.write(log);
         console.error(`[${modelId}] ${log}`);
+
+        // stderr 也可能包含就绪信号（llama.cpp 日志走 stderr）
+        if (!processInfo.ready && (log.includes('server is listening') || log.includes('all slots are idle'))) {
+          processInfo.ready = true;
+          console.log(`[${modelId}] 模型已就绪`);
+          eventBus.broadcast('model-updated', { modelId });
+        }
       });
 
       process.on('error', async (error) => {
         console.error(`[${modelId}] Process error: ${error.message}`);
-        const processInfo = this.processes.get(modelId);
-        if (processInfo) {
-          processInfo.startupFailed = true;
-        }
         this.cleanup(modelId);
+        eventBus.broadcast('model-updated', { modelId });
       });
 
       process.on('exit', (code) => {
@@ -175,34 +198,10 @@ class ProcessManager {
         logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
         logStream.end();
         this.cleanup(modelId);
+        eventBus.broadcast('model-updated', { modelId });
       });
 
-      // 等待进程稳定启动（避免立即崩溃）
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          const processInfo = this.processes.get(modelId);
-          if (processInfo?.startupFailed) {
-            reject(new Error('进程启动失败'));
-          } else {
-            resolve();
-          }
-        }, 2000);
-
-        process.on('error', () => {
-          clearTimeout(timeout);
-          reject(new Error('进程启动失败'));
-        });
-
-        process.on('exit', (code) => {
-          if (code !== 0) {
-            clearTimeout(timeout);
-            reject(new Error(`进程异常退出，退出码: ${code}`));
-          }
-        });
-      });
-
-
-      return { port, status: MODEL_STATUS.RUNNING, mode: 'single' };
+      return { port, status: MODEL_STATUS.STARTING, mode: 'single' };
     } catch (error) {
       this.allocatedPorts.delete(port);
       throw error;
@@ -613,6 +612,15 @@ class ProcessManager {
     const processInfo = this.processes.get(modelId);
     if (!processInfo) {
       return { running: false };
+    }
+
+    if (!processInfo.ready) {
+      return {
+        running: false,
+        starting: true,
+        port: processInfo.port,
+        type: processInfo.type
+      };
     }
 
     return {

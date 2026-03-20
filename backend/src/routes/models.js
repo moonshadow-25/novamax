@@ -21,7 +21,7 @@ router.get('/models', async (req, res) => {
 
       return {
         ...model,
-        status: processStatus.running ? 'running' : 'stopped',
+        status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,
@@ -49,7 +49,7 @@ router.get('/models/:id', async (req, res) => {
 
     const modelWithStatus = {
       ...model,
-      status: processStatus.running ? 'running' : 'stopped',
+      status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
       port: processStatus.port || null,
       download_states: downloadStates,
       download_status: primaryDownload?.status || null,
@@ -74,7 +74,7 @@ router.get('/models/type/:type', async (req, res) => {
 
       return {
         ...model,
-        status: processStatus.running ? 'running' : 'stopped',
+        status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,

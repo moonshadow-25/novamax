@@ -59,20 +59,28 @@ class OpenAIProxyService {
     // 深拷贝工作流
     const workflow = JSON.parse(JSON.stringify(workflowJson));
 
+    // 辅助方法：设置节点字段值，PrimitiveStringMultiline 同步 value/text
+    const setNodeField = (node_id, field, value) => {
+      const node = workflow[node_id];
+      if (!node) return;
+      node.inputs[field] = value;
+      // PrimitiveStringMultiline 节点有 value 和 text 两个字段，需要同步
+      if (node.class_type === 'PrimitiveStringMultiline') {
+        node.inputs.value = value;
+        node.inputs.text = value;
+      }
+    };
+
     // 映射prompt
     if (params.prompt && mapping.inputs.prompt) {
       const { node_id, field } = mapping.inputs.prompt;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.prompt;
-      }
+      setNodeField(node_id, field, params.prompt);
     }
 
     // 映射negative_prompt
     if (params.negative_prompt && mapping.inputs.negative_prompt) {
       const { node_id, field } = mapping.inputs.negative_prompt;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.negative_prompt;
-      }
+      setNodeField(node_id, field, params.negative_prompt);
     }
 
     // 映射size (例如: "1024x1024")
@@ -81,76 +89,57 @@ class OpenAIProxyService {
 
       if (mapping.inputs.width) {
         const { node_id, field } = mapping.inputs.width;
-        if (workflow[node_id]) {
-          workflow[node_id].inputs[field] = width;
-        }
+        setNodeField(node_id, field, width);
       }
 
       if (mapping.inputs.height) {
         const { node_id, field } = mapping.inputs.height;
-        if (workflow[node_id]) {
-          workflow[node_id].inputs[field] = height;
-        }
+        setNodeField(node_id, field, height);
       }
     }
 
     // 映射steps
     if (params.steps !== undefined && mapping.inputs.steps) {
       const { node_id, field } = mapping.inputs.steps;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.steps;
-      }
+      setNodeField(node_id, field, params.steps);
     }
 
     // 映射cfg_scale
     if (params.cfg_scale !== undefined && mapping.inputs.cfg_scale) {
       const { node_id, field } = mapping.inputs.cfg_scale;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.cfg_scale;
-      }
+      setNodeField(node_id, field, params.cfg_scale);
     }
 
     // 映射seed
     if (params.seed !== undefined && mapping.inputs.seed) {
       const { node_id, field } = mapping.inputs.seed;
-      if (workflow[node_id]) {
-        // -1表示随机种子，生成一个随机数
-        const seed = params.seed === -1 ? Math.floor(Math.random() * 1000000000) : params.seed;
-        workflow[node_id].inputs[field] = seed;
-      }
+      const seed = params.seed === -1 ? Math.floor(Math.random() * 1000000000) : params.seed;
+      setNodeField(node_id, field, seed);
     }
 
     // 映射sampler
     if (params.sampler && mapping.inputs.sampler) {
       const { node_id, field } = mapping.inputs.sampler;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.sampler;
-      }
+      setNodeField(node_id, field, params.sampler);
     }
 
     // 映射scheduler
     if (params.scheduler && mapping.inputs.scheduler) {
       const { node_id, field } = mapping.inputs.scheduler;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.scheduler;
-      }
+      setNodeField(node_id, field, params.scheduler);
     }
 
     // 映射batch_size
     if (params.n !== undefined && mapping.inputs.batch_size) {
       const { node_id, field } = mapping.inputs.batch_size;
-      if (workflow[node_id]) {
-        workflow[node_id].inputs[field] = params.n;
-      }
+      setNodeField(node_id, field, params.n);
     }
 
     // 映射所有 image 类型参数（image, image_2, image_mask 等）
     for (const [key, paramDef] of Object.entries(mapping.inputs)) {
       if (paramDef.type === 'image' && params[key]) {
         const { node_id, field } = paramDef;
-        if (workflow[node_id]) {
-          workflow[node_id].inputs[field] = params[key];
-        }
+        setNodeField(node_id, field, params[key]);
       }
     }
 
@@ -162,8 +151,8 @@ class OpenAIProxyService {
     for (const [key, paramDef] of Object.entries(mapping.inputs)) {
       if (paramDef.type === 'image') continue;
       if (STANDARD_KEYS.has(key)) continue;
-      if (params[key] !== undefined && workflow[paramDef.node_id]) {
-        workflow[paramDef.node_id].inputs[paramDef.field] = params[key];
+      if (params[key] !== undefined) {
+        setNodeField(paramDef.node_id, paramDef.field, params[key]);
       }
     }
 
