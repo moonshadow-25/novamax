@@ -83,7 +83,7 @@ class OpenAIProxyService {
       setNodeField(node_id, field, params.negative_prompt);
     }
 
-    // 映射size (例如: "1024x1024")
+    // 映射size (例如: "1024x1024") 或单独的 width/height
     if (params.size) {
       const [width, height] = params.size.split('x').map(Number);
 
@@ -95,6 +95,16 @@ class OpenAIProxyService {
       if (mapping.inputs.height) {
         const { node_id, field } = mapping.inputs.height;
         setNodeField(node_id, field, height);
+      }
+    } else {
+      // 前端直接传 width / height 数值
+      if (params.width !== undefined && mapping.inputs.width) {
+        const { node_id, field } = mapping.inputs.width;
+        setNodeField(node_id, field, params.width);
+      }
+      if (params.height !== undefined && mapping.inputs.height) {
+        const { node_id, field } = mapping.inputs.height;
+        setNodeField(node_id, field, params.height);
       }
     }
 
@@ -129,10 +139,11 @@ class OpenAIProxyService {
       setNodeField(node_id, field, params.scheduler);
     }
 
-    // 映射batch_size
-    if (params.n !== undefined && mapping.inputs.batch_size) {
+    // 映射batch_size（兼容 OpenAI 的 n 和前端直接传的 batch_size）
+    const batchSize = params.n ?? params.batch_size;
+    if (batchSize !== undefined && mapping.inputs.batch_size) {
       const { node_id, field } = mapping.inputs.batch_size;
-      setNodeField(node_id, field, params.n);
+      setNodeField(node_id, field, batchSize);
     }
 
     // 映射所有 image 类型参数（image, image_2, image_mask 等）
