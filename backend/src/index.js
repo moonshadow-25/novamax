@@ -11,6 +11,7 @@ import configManager from './services/configManager.js';
 import modelManager from './services/modelManager.js';
 import downloadService from './services/downloadService.js';
 import engineManager from './services/engineManager.js';
+import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
 import { PROJECT_ROOT } from './config/constants.js';
@@ -72,6 +73,23 @@ async function init() {
   // 同步所有模型的已下载量化版本
   await modelManager.syncAllDownloadedQuantizations();
 
+  // 自动启动标记了 auto_start 的 LLM 模型
+  const autoStartModels = modelManager.getAll().filter(
+    m => m.type === 'llm' && m.auto_start === true &&
+         (m.downloaded_files?.some(f => f.is_active) || m.downloaded)
+  );
+  if (autoStartModels.length > 0) {
+    console.log(`自动启动 ${autoStartModels.length} 个 LLM 模型...`);
+    for (const m of autoStartModels) {
+      try {
+        await processManager.startBackend(m.id, 'single');
+        console.log(`✓ 自动启动成功: ${m.name}`);
+      } catch (e) {
+        console.warn(`✗ 自动启动失败 [${m.name}]:`, e.message);
+      }
+    }
+  }
+
   console.log('Initialization complete');
 
   // 写当前版本的 app .installed 标记
@@ -132,6 +150,17 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+console.log("=".repeat(50));
+// 启动 Logo
+console.log(`
+  _   _                   __  __
+ | \\ | | _____   ____ _  |  \\/  | __ ___  __
+ |  \\| |/ _ \\ \\ / / _\` | | |\\/| |/ _\` \\ \\/ /
+ | |\\  | (_) \\ V / (_| | | |  | | (_| |>  <
+ |_| \\_|\\___/ \\_/ \\__,_| |_|  |_|\\__,_/_/\\_\\
+`);
+console.log("=".repeat(50));
 
 init().then(() => {
   app.listen(PORT, () => {

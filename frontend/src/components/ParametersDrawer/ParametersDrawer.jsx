@@ -16,6 +16,7 @@ import {
   Tooltip,
   Modal,
   Select,
+  Switch,
   message
 } from 'antd';
 import {
@@ -49,12 +50,47 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   const [engineVersions, setEngineVersions] = useState([]);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
 
+  // 自动启动 & 多机互连
+  const [autoStart, setAutoStart] = useState(false);
+  const [multiHost, setMultiHost] = useState(false);
+
   useEffect(() => {
     if (visible && modelId) {
       loadData();
       loadEngineVersions();
+      setAutoStart(!!model?.auto_start);
+      setMultiHost(!!model?.multi_host);
     }
   }, [visible, modelId]);
+
+  const handleAutoStartChange = async (checked) => {
+    try {
+      await modelService.update(modelId, { auto_start: checked });
+      setAutoStart(checked);
+      const modelName = model?.name || modelId;
+      // message.success(checked ? `已为「${modelName}」开启自动启动` : `已为「${modelName}」关闭自动启动`);
+    } catch (e) {
+      const data = e.response?.data;
+      if (e.response?.status === 409 && data?.error) {
+        Modal.error({
+          title: '操作失败',
+          content: data.error,
+          okText: '确定'
+        });
+      } else {
+        message.error('设置失败');
+      }
+    }
+  };
+
+  const handleMultiHostChange = async (checked) => {
+    try {
+      await modelService.update(modelId, { multi_host: checked });
+      setMultiHost(checked);
+    } catch (e) {
+      message.error('设置失败');
+    }
+  };
 
   const loadEngineVersions = async () => {
     // 只有 LLM 类型才需要引擎版本选择
@@ -299,6 +335,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         width={500}
         open={visible}
         onClose={onClose}
+        rootClassName="parameters-drawer"
         extra={
           <Space>
             {model?.source === 'remote' && (
@@ -411,7 +448,43 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               </>
             )}
 
-            <Collapse defaultActiveKey={[]} ghost>
+            {/* 自动启动 & 多机互连（仅 LLM） */}
+            {model?.type === 'llm' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                  <Space style={{ marginRight: 12 }}>
+                    <span>自动启动</span>
+                    <Tooltip title="后端启动时自动运行此模型">
+                      <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                    </Tooltip>
+                  </Space>
+                  <Switch
+                    checked={autoStart}
+                    onChange={handleAutoStartChange}
+                    checkedChildren="开"
+                    unCheckedChildren="关"
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                  <Space style={{ marginRight: 12 }}>
+                    <span>多机互连</span>
+                    <Tooltip title="允许局域网内其他设备通过本机 IP 访问（即将支持）">
+                      <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                    </Tooltip>
+                  </Space>
+                  <Switch
+                    checked={multiHost}
+                    onChange={handleMultiHostChange}
+                    checkedChildren="开"
+                    unCheckedChildren="关"
+                    disabled
+                  />
+                </div>
+                {/* <Divider style={{ margin: '4px 0 16px' }} /> */}
+              </>
+            )}
+
+            <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16 }}>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
                 {['context_length', 'parallel', 'no-mmap', 'port']

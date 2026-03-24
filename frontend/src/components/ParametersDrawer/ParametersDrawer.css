@@ -11,3 +11,12 @@
   margin-bottom: 12px;
   font-weight: 500;
 }
+
+.parameters-drawer .ant-drawer-body {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.parameters-drawer .ant-drawer-body::-webkit-scrollbar {
+  display: none;
+}

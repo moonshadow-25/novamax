@@ -4,6 +4,7 @@ import path from 'path';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
+import parameterService from '../services/parameterService.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
@@ -114,6 +115,30 @@ router.put('/models/:id', async (req, res) => {
   try {
     const updates = req.body;
     console.log('📝 更新模型请求:', req.params.id, updates);
+
+    // 开启自动启动时检查端口是否已被其他模型占用
+    if (updates.auto_start === true) {
+      const currentModel = modelManager.getById(req.params.id);
+      const isEmbedding = /embedding/i.test(currentModel?.name || currentModel?.id || '');
+      const currentParams = parameterService.getEffectiveParameters(currentModel);
+      const currentPort = currentParams.port || (isEmbedding ? 1278 : 1234);
+
+      const conflictModel = modelManager.getAll().find(m => {
+        if (m.id === req.params.id || !m.auto_start) return false;
+        if (m.type !== 'llm') return false;
+        const isEmb = /embedding/i.test(m.name || m.id || '');
+        const p = parameterService.getEffectiveParameters(m);
+        return (p.port || (isEmb ? 1278 : 1234)) === currentPort;
+      });
+
+      if (conflictModel) {
+        return res.status(409).json({
+          error: `端口冲突！模型 "${conflictModel.name}" 已启用自动启动并使用端口 ${currentPort}。\n\n请先更改当前模型的端口号，然后重试启用自动启动。`,
+          conflict_model: conflictModel.name,
+          port: currentPort
+        });
+      }
+    }
 
     // 如果更新了 selected_quantization，同步更新 files 字段
     if (updates.selected_quantization) {

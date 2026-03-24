@@ -60,6 +60,7 @@ const GlobalSettings = () => {
   const [logEntries, setLogEntries] = useState([]);
   const [logLevel, setLogLevel] = useState('all');
   const [logAutoScroll, setLogAutoScroll] = useState(true);
+  const logAutoScrollRef = useRef(true);
   const logContainerRef = useRef(null);
   const logTimerRef = useRef(null);
 
@@ -200,7 +201,7 @@ const GlobalSettings = () => {
     try {
       const data = await systemService.getLogs(500, logLevel);
       setLogEntries(data.logs || []);
-      if (logAutoScroll && logContainerRef.current) {
+      if (logAutoScrollRef.current && logContainerRef.current) {
         setTimeout(() => {
           const el = logContainerRef.current;
           if (el) el.scrollTop = el.scrollHeight;
@@ -971,9 +972,12 @@ const GlobalSettings = () => {
             <Option value="warn">WARN</Option>
             <Option value="error">ERROR</Option>
           </Select>
-          <Checkbox checked={logAutoScroll} onChange={e => setLogAutoScroll(e.target.checked)}>
+          <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
             自动滚动
           </Checkbox>
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={async () => {
+            try { await backendService.openLogsFolder(); } catch { message.error('打开失败'); }
+          }}>日志文件夹</Button>
           <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs}>刷新</Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>下载</Button>
           <Popconfirm title="确认清空所有日志？" onConfirm={handleClearLogs} okText="清空" cancelText="取消">

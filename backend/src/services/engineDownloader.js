@@ -148,14 +148,44 @@ class EngineDownloader {
 
     const filePath = path.join(downloadDir, path.basename(versionInfo.modelscope_file));
 
+    // 清理上次可能残留的不完整压缩包，确保每次都是全新下载
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`[engineDownloader] Removed stale archive before download: ${filePath}`);
+    }
+
     // 下载
-    await this._execDownload(engineId, version, engine.modelscope_repo, versionInfo.modelscope_file, downloadDir);
+    try {
+      await this._execDownload(engineId, version, engine.modelscope_repo, versionInfo.modelscope_file, downloadDir);
+    } catch (err) {
+      // 下载失败时清理不完整的压缩包
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`[engineDownloader] Cleaned up incomplete archive after download failure: ${filePath}`);
+      }
+      throw err;
+    }
+
+    // 验证文件是否存在且非空
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      throw new Error(`下载失败：文件不存在或大小为0，请重试`);
+    }
 
     // 解压
     const installPath = path.join(PROJECT_ROOT, 'external', engineId, version);
     downloadStateManager.setState(engineId, 'unpacking', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'unpacking' });
-    await this._extract(filePath, installPath);
+    try {
+      await this._extract(filePath, installPath);
+    } catch (err) {
+      // 解压失败时清理压缩包，确保下次重试能重新完整下载
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`[engineDownloader] Cleaned up archive after extraction failure: ${filePath}`);
+      }
+      throw err;
+    }
 
     // 安装步骤
     if (engine.category === 'app') {
