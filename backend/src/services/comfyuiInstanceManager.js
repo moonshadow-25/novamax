@@ -130,6 +130,7 @@ class ComfyUIInstanceManager {
   embeddings: embeddings
   gligen: gligen
   hypernetworks: hypernetworks
+  latent_upscale_models: latent_upscale_models
   loras: loras
   photomaker: photomaker
   style_models: style_models

@@ -231,12 +231,7 @@ function Home() {
                 title="下载中心"
               />
             </Badge>
-            <Button
-              type="text"
-              icon={theme === 'dark' ? <BulbFilled /> : <BulbOutlined />}
-              onClick={toggleTheme}
-              title="切换主题"
-            />
+            {/* 主题切换暂时隐藏 */}
             <Button
               type="text"
               icon={<SettingOutlined />}
@@ -270,12 +265,8 @@ function Home() {
           <Tabs
             activeKey={activeTab}
             onChange={(key) => {
-              if (key === 'whisper') {
-                navigate('/whisper');
-                return;
-              }
-              if (key === 'tts') {
-                navigate('/tts');
+              if (key === 'whisper' || key === 'tts') {
+                message.info('该功能正在开发中，敬请期待');
                 return;
               }
               setActiveTab(key);
@@ -295,23 +286,7 @@ function Home() {
           />
         </div>
 
-        {/* LLM Tab 显示启动全部按钮 */}
-        {activeTab === 'llm' && downloadedModels.length > 0 && (
-          <div style={{ marginBottom: 16, textAlign: 'center' }}>
-            <Button
-              type="primary"
-              size="large"
-              icon={<ThunderboltOutlined />}
-              onClick={handleStartRouter}
-              loading={routerLoading}
-            >
-              启动全部模型（路由模式）
-            </Button>
-            <div style={{ marginTop: 8, color: '#999', fontSize: '12px' }}>
-              一次性启动所有已下载的 LLM 模型，共享资源
-            </div>
-          </div>
-        )}
+        {/* LLM Tab 启动全部按钮 - 暂时隐藏 */}
 
         {/* ComfyUI Tab 实例管理（折叠面板）*/}
         {activeTab === 'comfyui' && (

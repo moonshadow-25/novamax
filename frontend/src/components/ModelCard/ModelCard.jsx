@@ -174,6 +174,22 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         return;
       }
 
+      // 检查所需模型是否全部下载
+      setComfyuiLaunchStatus('正在检查模型文件...');
+      try {
+        const res = await comfyuiService.getModelsStatus(model.id);
+        if (res.summary?.missing > 0) {
+          setComfyuiLaunchVisible(false);
+          setComfyuiLaunching(false);
+          message.warning(`还有 ${res.summary.missing} 个模型未下载，请先下载所需模型`);
+          onUpdate();
+          setWorkflowModalVisible(true);
+          return;
+        }
+      } catch (e) {
+        console.error('检查模型状态失败:', e);
+      }
+
       await doLaunchInstance();
     } catch (error) {
       setComfyuiLaunchStatus(`启动失败: ${error.response?.data?.error || error.message}`);
@@ -976,7 +992,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           if (engineTarget === 'llamacpp') {
             doStartModel();
           } else {
-            doLaunchInstance();
+            // 引擎就绪后重新走完整流程（会继续检测模型是否下载全）
+            handleComfyUILaunch();
           }
         }}
         onCancel={() => setShowEngineModal(false)}

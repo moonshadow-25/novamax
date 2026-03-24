@@ -127,6 +127,22 @@ class OpenAIProxyService {
       setNodeField(node_id, field, seed);
     }
 
+    // 将 seed 传播到所有 seed_N 变体（seed_2, seed_3 等）
+    // 多阶段采样工作流中多个 RandomNoise 节点都需要被设置 seed
+    {
+      const primarySeed = params.seed !== undefined ? params.seed : undefined;
+      for (const [key, paramDef] of Object.entries(mapping.inputs)) {
+        if (/^seed_\d+$/.test(key)) {
+          // 用户显式设置了该 seed 变体则使用用户值，否则沿用主 seed 逻辑
+          const seedVal = params[key] !== undefined ? params[key] : primarySeed;
+          if (seedVal !== undefined) {
+            const resolved = seedVal === -1 ? Math.floor(Math.random() * 1000000000) : seedVal;
+            setNodeField(paramDef.node_id, paramDef.field, resolved);
+          }
+        }
+      }
+    }
+
     // 映射sampler
     if (params.sampler && mapping.inputs.sampler) {
       const { node_id, field } = mapping.inputs.sampler;
@@ -154,13 +170,25 @@ class OpenAIProxyService {
       }
     }
 
+    // 映射所有 audio 类型参数（audio, audio_2 等）
+    for (const [key, paramDef] of Object.entries(mapping.inputs)) {
+      if (paramDef.type === 'audio' && params[key]) {
+        const { node_id, field } = paramDef;
+        setNodeField(node_id, field, params[key]);
+      }
+    }
+
     // 通用兜底：映射所有非标准参数（用户自定义映射、length 等）
     const STANDARD_KEYS = new Set([
       'prompt', 'negative_prompt', 'seed', 'sampler', 'scheduler',
       'steps', 'cfg_scale', 'batch_size', 'width', 'height'
     ]);
+    // seed_N 变体也视为标准参数（已在上面处理）
+    for (const key of Object.keys(mapping.inputs)) {
+      if (/^seed_\d+$/.test(key)) STANDARD_KEYS.add(key);
+    }
     for (const [key, paramDef] of Object.entries(mapping.inputs)) {
-      if (paramDef.type === 'image') continue;
+      if (paramDef.type === 'image' || paramDef.type === 'audio') continue;
       if (STANDARD_KEYS.has(key)) continue;
       if (params[key] !== undefined) {
         setNodeField(paramDef.node_id, paramDef.field, params[key]);

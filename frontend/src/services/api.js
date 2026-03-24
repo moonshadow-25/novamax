@@ -90,6 +90,13 @@ export const comfyuiService = {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
+  uploadAudio: (host, port, formData) => {
+    formData.append('host', host);
+    formData.append('port', port);
+    return api.post('/comfyui/upload-audio', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   run: (modelId, host, port, params) => api.post(`/comfyui/${modelId}/run`, { host, port, ...params }),
   getProgress: (host, port, taskId) => api.get(`/comfyui/progress/${taskId}?host=${host}&port=${port}`),
   getResult: (host, port, taskId) => api.get(`/comfyui/result/${taskId}?host=${host}&port=${port}`),

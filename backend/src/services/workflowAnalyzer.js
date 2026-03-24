@@ -86,6 +86,7 @@ class WorkflowAnalyzer {
    */
   extractRequiredModels(nodes) {
     const models = [];
+    const seen = new Set(); // 去重：type/filename
 
     // Loader节点 → { type: ComfyUI目录名, field: 输入字段名 }
     const loaderMapping = {
@@ -107,6 +108,9 @@ class WorkflowAnalyzer {
 
     const pushModel = (type, filename, node_id, field) => {
       if (filename && typeof filename === 'string') {
+        const key = `${type}/${filename}`;
+        if (seen.has(key)) return; // 跳过重复
+        seen.add(key);
         models.push({ type, filename, node_id, field, downloaded: false, local_path: null });
       }
     };
@@ -125,11 +129,12 @@ class WorkflowAnalyzer {
           pushModel('text_encoders', node.inputs.clip_name2, node.id, 'clip_name2');
           pushModel('text_encoders', node.inputs.clip_name3, node.id, 'clip_name3');
         }
-        // LTXAVTextEncoderLoader：text_encoder → text_encoders，ckpt_name → checkpoints
-        if (node.class_type === 'LTXAVTextEncoderLoader') {
-          pushModel('text_encoders', node.inputs.text_encoder, node.id, 'text_encoder');
-          pushModel('checkpoints',   node.inputs.ckpt_name,    node.id, 'ckpt_name');
-        }
+      }
+
+      // LTXAVTextEncoderLoader：text_encoder → text_encoders，ckpt_name → checkpoints
+      if (node.class_type === 'LTXAVTextEncoderLoader') {
+        pushModel('text_encoders', node.inputs.text_encoder, node.id, 'text_encoder');
+        pushModel('checkpoints',   node.inputs.ckpt_name,    node.id, 'ckpt_name');
       }
     }
 
@@ -248,6 +253,29 @@ class WorkflowAnalyzer {
       return { value: undefined, node_id: null, field: null };
     };
 
+    // 辅助函数：追踪 conditioning 连接，找到源 CLIPTextEncode 节点
+    // 输入是某个节点的 positive/negative 输入值（可能是 [node_id, slot] 数组）
+    // 返回源 CLIPTextEncode 节点的 id，或 null
+    const traceConditioningSource = (inputVal, depth = 0) => {
+      if (depth > 10) return null; // 防止无限循环
+      if (!Array.isArray(inputVal)) return null;
+      const [refId] = inputVal;
+      const refNode = workflowJson[refId];
+      if (!refNode) return null;
+      // 如果直接是 CLIPTextEncode 且 text 是字符串，返回该节点 id
+      if (refNode.class_type === 'CLIPTextEncode' && typeof refNode.inputs?.text === 'string') {
+        return refId;
+      }
+      // 如果是中间 conditioning 节点（如 LTXVConditioning、ConditioningCombine），继续向上追踪
+      for (const field of ['conditioning', 'conditioning_1', 'positive', 'cond']) {
+        if (Array.isArray(refNode.inputs?.[field])) {
+          const result = traceConditioningSource(refNode.inputs[field], depth + 1);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+
     // prompt
     if (promptNode) {
       mapping.inputs.prompt = { node_id: promptNode.id, field: 'text', type: 'string', description: '正面提示词',
@@ -256,6 +284,34 @@ class WorkflowAnalyzer {
     if (negativePromptNode) {
       mapping.inputs.negative_prompt = { node_id: negativePromptNode.id, field: 'text', type: 'string', description: '负面提示词',
         default_value: scalarVal(negativePromptNode.inputs.text) ?? '' };
+    }
+
+    // ── 后处理：通过 conditioning 连接修正 positive/negative prompt 分配 ──
+    // JSON 对象的 key 迭代顺序不确定，可能导致正/负面提示词被颠倒
+    // 通过追踪 conditioning 节点的 positive/negative 输入来确定真正的对应关系
+    if (mapping.inputs.prompt && mapping.inputs.negative_prompt) {
+      for (const node of nodes) {
+        const inp = node.inputs;
+        if (Array.isArray(inp?.positive) && Array.isArray(inp?.negative)) {
+          const posSourceId = traceConditioningSource(inp.positive);
+          const negSourceId = traceConditioningSource(inp.negative);
+          if (posSourceId && negSourceId && posSourceId !== negSourceId) {
+            const currentPosId = mapping.inputs.prompt.node_id;
+            const currentNegId = mapping.inputs.negative_prompt.node_id;
+            // 如果追踪到的正面源与当前映射的负面节点一致，说明搞反了 → 交换
+            if (posSourceId === currentNegId && negSourceId === currentPosId) {
+              console.log(`[WorkflowAnalyzer] 正/负面提示词映射已交换: positive→${posSourceId}, negative→${negSourceId}`);
+              const temp = mapping.inputs.prompt;
+              mapping.inputs.prompt = mapping.inputs.negative_prompt;
+              mapping.inputs.negative_prompt = temp;
+              // 更新描述
+              mapping.inputs.prompt.description = '正面提示词';
+              mapping.inputs.negative_prompt.description = '负面提示词';
+            }
+          }
+          break; // 找到一个即可
+        }
+      }
     }
 
     // 采样器参数
@@ -287,6 +343,25 @@ class WorkflowAnalyzer {
         default_value: -1 };
     }
 
+    // 映射额外的 RandomNoise seed 节点 (seed_2, seed_3, ...)
+    // 多个 RandomNoise 节点常见于多阶段采样工作流（如 LTX2 的两阶段去噪）
+    {
+      const primarySeedNodeId = mapping.inputs.seed?.node_id;
+      let extraSeedIdx = 2;
+      for (const node of nodes) {
+        if (node.class_type === 'RandomNoise' && node.id !== primarySeedNodeId) {
+          mapping.inputs[`seed_${extraSeedIdx}`] = {
+            node_id: node.id,
+            field: 'noise_seed',
+            type: 'number',
+            description: `Seed${extraSeedIdx}`,
+            default_value: -1
+          };
+          extraSeedIdx++;
+        }
+      }
+    }
+
     // 图像尺寸（静态潜在节点）
     if (emptyLatentNode) {
       if (emptyLatentNode.inputs.width !== undefined) {
@@ -313,6 +388,50 @@ class WorkflowAnalyzer {
         mapping.inputs.height = { node_id: videoLengthNode.id, field: 'height', type: 'number', description: '视频高度',
           default_value: scalarVal(videoLengthNode.inputs.height) };
       }
+
+      // 当 width/height 是连接引用（default_value 为 undefined）时，
+      // 尝试从 ResizeImageMaskNode 或 EmptyImage 等节点获取实际可控的宽高值
+      const widthUndefined = mapping.inputs.width && mapping.inputs.width.default_value === undefined;
+      const heightUndefined = mapping.inputs.height && mapping.inputs.height.default_value === undefined;
+      if (widthUndefined || heightUndefined) {
+        for (const node of nodes) {
+          // ResizeImageMaskNode: resize_type.width / resize_type.height
+          if (node.class_type === 'ResizeImageMaskNode') {
+            const rw = scalarVal(node.inputs['resize_type.width']) ?? scalarVal(node.inputs.width);
+            const rh = scalarVal(node.inputs['resize_type.height']) ?? scalarVal(node.inputs.height);
+            if (rw !== undefined && rh !== undefined) {
+              if (widthUndefined) {
+                mapping.inputs.width = { node_id: node.id,
+                  field: node.inputs['resize_type.width'] !== undefined ? 'resize_type.width' : 'width',
+                  type: 'number', description: '视频宽度', default_value: rw };
+              }
+              if (heightUndefined) {
+                mapping.inputs.height = { node_id: node.id,
+                  field: node.inputs['resize_type.height'] !== undefined ? 'resize_type.height' : 'height',
+                  type: 'number', description: '视频高度', default_value: rh };
+              }
+              console.log(`[WorkflowAnalyzer] 视频宽高已从 ${node.class_type}(${node.id}) 获取: ${rw}x${rh}`);
+              break;
+            }
+          }
+          // EmptyImage 节点也可能有直接的 width/height
+          if (node.class_type === 'EmptyImage') {
+            const ew = scalarVal(node.inputs.width);
+            const eh = scalarVal(node.inputs.height);
+            if (ew !== undefined && eh !== undefined) {
+              if (widthUndefined) {
+                mapping.inputs.width = { node_id: node.id, field: 'width', type: 'number', description: '视频宽度', default_value: ew };
+              }
+              if (heightUndefined) {
+                mapping.inputs.height = { node_id: node.id, field: 'height', type: 'number', description: '视频高度', default_value: eh };
+              }
+              console.log(`[WorkflowAnalyzer] 视频宽高已从 EmptyImage(${node.id}) 获取: ${ew}x${eh}`);
+              break;
+            }
+          }
+        }
+      }
+
       if (videoLengthNode.inputs.length !== undefined) {
         const lengthRef = resolveRef(videoLengthNode.inputs.length);
         mapping.inputs.length = {
@@ -342,6 +461,14 @@ class WorkflowAnalyzer {
       const key = i === 0 ? 'image' : (isMask ? 'image_mask' : `image_${i + 1}`);
       const desc = i === 0 ? '输入图像' : (isMask ? '遮罩图像' : `输入图像 ${i + 1}`);
       mapping.inputs[key] = { node_id: node.id, field: 'image', type: 'image', description: desc };
+    });
+
+    // 音频输入参数（audio2video 工作流）—— 支持多个 LoadAudio 节点
+    const audioNodes = nodes.filter(n => n.class_type === 'LoadAudio');
+    audioNodes.forEach((node, i) => {
+      const key = i === 0 ? 'audio' : `audio_${i + 1}`;
+      const desc = i === 0 ? '输入音频' : `输入音频 ${i + 1}`;
+      mapping.inputs[key] = { node_id: node.id, field: 'audio', type: 'audio', description: desc };
     });
 
     return mapping;

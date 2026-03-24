@@ -84,6 +84,7 @@ function ComfyUI() {
   const [params, setParams] = useState({});
   const [imageFiles, setImageFiles] = useState({}); // { paramKey: File }
   const [imagePreviews, setImagePreviews] = useState({}); // { paramKey: dataURL }
+  const [audioFiles, setAudioFiles] = useState({}); // { paramKey: File }
   const [batchFileList, setBatchFileList] = useState([]);
 
   // 尺寸选择
@@ -318,6 +319,16 @@ function ComfyUI() {
         }
       }
 
+      // 处理所有音频上传
+      for (const [key, file] of Object.entries(audioFiles)) {
+        if (file) {
+          const fd = new FormData();
+          fd.append('audio', file);
+          const uploadResult = await comfyuiService.uploadAudio(host, port, fd);
+          runParams[key] = uploadResult.filename;
+        }
+      }
+
       const result = await comfyuiService.run(modelId, host, port, runParams);
       setPromptId(result.promptId);
     } catch (error) {
@@ -337,6 +348,15 @@ function ComfyUI() {
     const reader = new FileReader();
     reader.onload = e => setImagePreviews(prev => ({ ...prev, [key]: e.target.result }));
     reader.readAsDataURL(file);
+  };
+
+  const handleAudioChange = (key, info) => {
+    if (info.fileList.length === 0) {
+      setAudioFiles(prev => { const n = { ...prev }; delete n[key]; return n; });
+      return;
+    }
+    const file = info.fileList[info.fileList.length - 1].originFileObj;
+    setAudioFiles(prev => ({ ...prev, [key]: file }));
   };
 
   const removeImage = (key) => {
@@ -474,6 +494,25 @@ function ComfyUI() {
     </Form.Item>
   );
 
+  const renderAudioField = (key, paramDef) => (
+    <Form.Item key={key} label={paramDef.description || key}>
+      <Upload
+        beforeUpload={() => false}
+        onChange={info => handleAudioChange(key, info)}
+        accept="audio/*"
+        maxCount={1}
+        showUploadList={false}
+      >
+        <Button icon={<UploadOutlined />}>{audioFiles[key] ? '重新选择' : '选择音频'}</Button>
+      </Upload>
+      {audioFiles[key] && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+          已选择: {audioFiles[key].name}
+        </div>
+      )}
+    </Form.Item>
+  );
+
   const renderSizeField = () => (
     <Form.Item key="size" label="尺寸">
       <Space direction="vertical" style={{ width: '100%' }}>
@@ -494,15 +533,16 @@ function ComfyUI() {
   const renderField = (key, paramDef) => {
     const { type, description, field } = paramDef;
     if (type === 'image') return renderImageField(key, paramDef);
+    if (type === 'audio') return renderAudioField(key, paramDef);
     if (key === 'height') return null;
     if (key === 'width') return renderSizeField();
-    if (key === 'seed') return (
-      <Form.Item key={key} label="Seed" name={key}>
+    if (key === 'seed' || /^seed_\d+$/.test(key)) return (
+      <Form.Item key={key} label={description || key} name={key}>
         <Space.Compact style={{ width: '100%' }}>
           <Form.Item name={key} noStyle>
             <InputNumber style={{ flex: 1 }} min={-1} placeholder="-1 为随机" />
           </Form.Item>
-          <Button onClick={() => form.setFieldValue('seed', -1)}>随机</Button>
+          <Button onClick={() => form.setFieldValue(key, -1)}>随机</Button>
         </Space.Compact>
       </Form.Item>
     );
@@ -526,7 +566,7 @@ function ComfyUI() {
 
   // 主要参数（表面展示）
   const PRIMARY_KEYS = ['prompt', 'negative_prompt', 'width', 'steps'];
-  const isPrimary = key => PRIMARY_KEYS.includes(key) || inputs[key]?.type === 'image';
+  const isPrimary = key => PRIMARY_KEYS.includes(key) || inputs[key]?.type === 'image' || inputs[key]?.type === 'audio';
   const isAdvanced = key => !isPrimary(key) && key !== 'height';
 
   // if (!engineReady) {
@@ -584,9 +624,11 @@ function ComfyUI() {
       if (b === 'image_mask') return -1;
       return a.localeCompare(b, undefined, { numeric: true });
     });
+  const audioKeys = Object.keys(inputs).filter(k => inputs[k].type === 'audio').sort();
   const paramOrder = [
     'prompt', 'negative_prompt',
     ...imageKeys,
+    ...audioKeys,
     'width', 'height', 'steps', 'cfg_scale', 'seed', 'sampler', 'scheduler', 'batch_size', 'length'
   ];
   const allKeys = [

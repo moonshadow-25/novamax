@@ -31,20 +31,43 @@ const upload = multer({
 });
 
 /**
+ * 收集完整工作流中所有节点（包括 subgraph/group node 嵌套的子节点）
+ * @param {Object} fullWorkflow - 完整工作流JSON
+ * @returns {Array} 所有节点的扁平数组
+ */
+function collectAllNodes(fullWorkflow) {
+  const allNodes = [...(fullWorkflow.nodes || [])];
+
+  // ComfyUI Group Node: 子节点嵌套在 definitions.subgraphs[].nodes 中
+  const subgraphs = fullWorkflow.definitions?.subgraphs;
+  if (Array.isArray(subgraphs)) {
+    for (const sg of subgraphs) {
+      if (Array.isArray(sg.nodes)) {
+        allNodes.push(...sg.nodes);
+      }
+    }
+  } else if (subgraphs && typeof subgraphs === 'object') {
+    for (const sg of Object.values(subgraphs)) {
+      if (Array.isArray(sg.nodes)) {
+        allNodes.push(...sg.nodes);
+      }
+    }
+  }
+
+  return allNodes;
+}
+
+/**
  * 从完整工作流中提取模型URL映射
  * @param {Object} fullWorkflow - 完整工作流JSON
  * @returns {Object} 文件名到URL的映射
  */
 function extractURLsFromFullWorkflow(fullWorkflow) {
   const urlMap = {};
+  const allNodes = collectAllNodes(fullWorkflow);
 
-  if (!fullWorkflow.nodes || !Array.isArray(fullWorkflow.nodes)) {
-    return urlMap;
-  }
-
-  // URL信息存放在 MarkdownNote 节点的 widgets_values[0] Markdown 文本中
-  // 格式: [filename.safetensors](https://...)
-  fullWorkflow.nodes.forEach(node => {
+  // 1. 从 MarkdownNote 节点提取 URL
+  allNodes.forEach(node => {
     if (node.type === 'MarkdownNote' && Array.isArray(node.widgets_values) && node.widgets_values[0]) {
       const markdown = node.widgets_values[0];
       const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
@@ -63,8 +86,51 @@ function extractURLsFromFullWorkflow(fullWorkflow) {
     }
   });
 
+  // 2. 从 Loader 节点的 properties.models 提取 URL（更可靠）
+  allNodes.forEach(node => {
+    if (node.properties?.models && Array.isArray(node.properties.models)) {
+      for (const m of node.properties.models) {
+        if (m.name && m.url) {
+          urlMap[m.name] = { url: m.url, directory: m.directory, node_type: node.type };
+        }
+      }
+    }
+  });
+
   console.log(`从完整工作流提取到 ${Object.keys(urlMap).length} 个模型URL`);
   return urlMap;
+}
+
+/**
+ * 从完整工作流的 Loader 节点中提取所有模型（包括被 mute/bypass 的）
+ * @param {Object} fullWorkflow - 完整工作流JSON
+ * @returns {Array} 模型列表 [{ type, filename, url }]
+ */
+function extractModelsFromFullWorkflow(fullWorkflow) {
+  const models = [];
+  const seen = new Set();
+  const allNodes = collectAllNodes(fullWorkflow);
+
+  allNodes.forEach(node => {
+    if (node.properties?.models && Array.isArray(node.properties.models)) {
+      for (const m of node.properties.models) {
+        if (m.name && m.directory) {
+          const key = `${m.directory}/${m.name}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          models.push({
+            type: m.directory,
+            filename: m.name,
+            url: m.url || null,
+            node_type: node.type
+          });
+        }
+      }
+    }
+  });
+
+  console.log(`从完整工作流节点提取到 ${models.length} 个模型`);
+  return models;
 }
 
 /**
@@ -112,6 +178,26 @@ router.post('/comfyui/upload-workflow', upload.fields([
     // 如果有完整工作流，提取URL信息并补充到required_models
     if (fullWorkflow) {
       const urlMap = extractURLsFromFullWorkflow(fullWorkflow);
+
+      // 从完整工作流节点中提取所有模型（包括被 mute/bypass 的节点）
+      // 合并到 API 工作流解析出的列表中
+      const fullModels = extractModelsFromFullWorkflow(fullWorkflow);
+      const existingKeys = new Set(analysis.required_models.map(m => `${m.type}/${m.filename}`));
+      for (const fm of fullModels) {
+        const key = `${fm.type}/${fm.filename}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          analysis.required_models.push({
+            type: fm.type,
+            filename: fm.filename,
+            node_id: null,
+            field: null,
+            downloaded: false,
+            local_path: null
+          });
+          console.log(`从完整工作流补充模型: ${fm.filename} (${fm.type})`);
+        }
+      }
 
       analysis.required_models = analysis.required_models.map(model => {
         const urlInfo = urlMap[model.filename];
@@ -732,6 +818,54 @@ router.post('/comfyui/upload-image', upload.single('image'), async (req, res) =>
       try { fs.unlinkSync(req.file.path); } catch {}
     }
     console.error('Upload image error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 上传音频到ComfyUI（使用 /upload/image 接口）
+ * POST /api/comfyui/upload-audio
+ * Body: FormData with audio file, host, port
+ */
+router.post('/comfyui/upload-audio', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const { host, port } = req.body;
+    if (!host || !port) {
+      return res.status(400).json({ error: 'host and port are required' });
+    }
+
+    const connectHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+
+    // ComfyUI 没有专门的音频上传接口，使用 /upload/image 接口
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const blob = new Blob([fileBuffer], { type: req.file.mimetype || 'audio/mpeg' });
+    const form = new FormData();
+    form.append('image', blob, req.file.originalname || 'upload.mp3');
+    form.append('overwrite', 'true');
+    form.append('type', 'input');
+
+    const response = await fetch(`http://${connectHost}:${port}/upload/image`, {
+      method: 'POST',
+      body: form,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(30000)
+    });
+
+    // 清理临时文件
+    fs.unlinkSync(req.file.path);
+
+    const data = await response.json();
+    console.log('[Upload Audio] Response:', data);
+    res.json({ success: true, filename: data.name || data.filename });
+  } catch (error) {
+    if (req.file) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+    console.error('Upload audio error:', error);
     res.status(500).json({ error: error.message });
   }
 });
