@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
 import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
@@ -13,10 +13,14 @@ const { Text } = Typography;
  */
 const GlobalSettings = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { token } = theme.useToken();
   const [form] = Form.useForm();
   const [checking, setChecking] = useState(false);
-  const [selectedMenu, setSelectedMenu] = useState('runtime');
+  const [selectedMenu, setSelectedMenu] = useState(() => {
+    const menu = new URLSearchParams(location.search).get('menu');
+    return menu || 'runtime';
+  });
 
   // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState(null);

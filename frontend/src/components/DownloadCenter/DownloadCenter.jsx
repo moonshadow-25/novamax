@@ -19,6 +19,23 @@ const formatSize = (bytes) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
 };
 
+const summarizeDownloadError = (raw = '') => {
+  const text = String(raw || '').replace(/\uFFFD+/g, '').replace(/\r/g, '').trim();
+  if (!text) return '下载失败';
+  const lower = text.toLowerCase();
+  if (lower.includes('chunkedencodingerror') || lower.includes('incompleteread') || lower.includes('connection broken')) {
+    return '下载中断，网络连接不稳定';
+  }
+  if (lower.includes('timed out') || lower.includes('timeout')) {
+    return '下载超时，请稍后重试';
+  }
+  if (lower.includes('404')) return '下载地址不存在（404）';
+  if (lower.includes('403')) return '下载地址无权限访问（403）';
+  if (lower.includes('no space left on device')) return '磁盘空间不足';
+  const firstLine = text.split('\n').map(s => s.trim()).find(Boolean) || text;
+  return firstLine.length > 100 ? `${firstLine.slice(0, 100)}...` : firstLine;
+};
+
 const statusMap = {
   downloading: { color: 'processing', label: '下载中' },
   unpacking: { color: 'processing', label: '解压中' },
@@ -155,7 +172,7 @@ function DownloadCenter({ visible, onClose }) {
                         {dl.speed > 0 && ` - ${formatSpeed(dl.speed)}`}
                       </>
                     )}
-                    {dl.status === 'failed' && dl.error}
+                    {dl.status === 'failed' && summarizeDownloadError(dl.error)}
                   </Text>
 
                   <Space size={4}>

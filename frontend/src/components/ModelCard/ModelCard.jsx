@@ -14,7 +14,8 @@ import {
   StarFilled,
   StarOutlined,
   UndoOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  CloseCircleOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
@@ -26,6 +27,42 @@ import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 import './ModelCard.css';
 
 const { Text } = Typography;
+
+const normalizeErrorText = (raw = '') => String(raw)
+  .replace(/\uFFFD+/g, '')
+  .replace(/\r/g, '')
+  .trim();
+
+const summarizeDownloadError = (raw = '') => {
+  const text = normalizeErrorText(raw);
+  if (!text) return '未知错误';
+
+  const lower = text.toLowerCase();
+  if (lower.includes('chunkedencodingerror') || lower.includes('incompleteread') || lower.includes('connection broken')) {
+    return '下载中断，网络连接不稳定';
+  }
+  if (lower.includes('timed out') || lower.includes('timeout')) {
+    return '下载超时，请稍后重试';
+  }
+  if (lower.includes('404')) {
+    return '下载地址不存在（404）';
+  }
+  if (lower.includes('403')) {
+    return '下载地址无权限访问（403）';
+  }
+  if (lower.includes('no space left on device')) {
+    return '磁盘空间不足';
+  }
+
+  const firstLine = text
+    .split('\n')
+    .map(line => line.trim())
+    .find(line => line && !line.startsWith('File "') && !line.startsWith('Traceback')) || text;
+
+  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}...` : firstLine;
+};
+
+const getApiErrorMessage = (error) => error?.response?.data?.error || error?.message || '';
 
 function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const navigate = useNavigate();
@@ -271,7 +308,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       onUpdate();
     } catch (error) {
       console.error('下载失败:', error);
-      message.error(error.response?.data?.error || '下载失败');
+      message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
     } finally {
       setLoading(false);
     }
@@ -303,7 +340,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       message.success(`开始下载 ${quantizationName} 版本`);
       onUpdate();
     } catch (error) {
-      message.error(error.response?.data?.error || '下载失败');
+      message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
     } finally {
       setLoading(false);
     }
@@ -507,6 +544,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const isDefaultDownloadCompleted = downloadStatus === 'completed' &&
                                      model.downloading_quantization === model.selected_quantization;
 
+  // 默认版本下载失败（必须是默认量化版本）
+  const isDefaultDownloadFailed = downloadStatus === 'failed' &&
+                                  model.downloading_quantization === model.selected_quantization;
+
   // 判断是否可以启动：
   // 场景1：有active文件（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
@@ -517,7 +558,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
   const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization)) &&
       !isDefaultDownloadCompleted &&
-      !isDownloadingDefault;
+      !isDownloadingDefault &&
+      !isDefaultDownloadFailed;
   
   // 旧的下载状态判断（兼容）
   const isDownloaded = model.downloaded
@@ -737,13 +779,22 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       )}
 
       {/* 下载失败状态 - 只有当下载的是选中的默认版本时才显示 */}
-      {downloadStatus === 'failed' && hasUndownloadedSelection && 
-       model.downloading_quantization === model.selected_quantization && 
+      {downloadStatus === 'failed' && hasUndownloadedSelection &&
+       model.downloading_quantization === model.selected_quantization &&
        model.type === 'llm' && (
         <div className="download-progress" style={{ marginTop: 16 }}>
-          <Progress percent={Math.floor(downloadProgress)} status="exception" />
+          <Progress
+            percent={Math.floor(downloadProgress)}
+            status="exception"
+            format={() => (
+              <CloseCircleOutlined
+                style={{ color: '#ff4d4f', cursor: 'pointer' }}
+                onClick={() => handleCancelDownload(model.downloading_quantization)}
+              />
+            )}
+          />
           <div style={{ marginTop: 8, color: '#ff4d4f', fontSize: '12px' }}>
-            下载失败: {model.download_error || '未知错误'}
+            下载失败：{summarizeDownloadError(model.download_error)}
           </div>
           <Space style={{ width: '100%', marginTop: 8 }}>
             <Button
@@ -752,9 +803,16 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               onClick={() => handleResumeDownload(model.downloading_quantization)}
               loading={loading}
               size="small"
-              block
             >
               重试
+            </Button>
+            <Button
+              danger
+              onClick={() => handleCancelDownload(model.downloading_quantization)}
+              loading={loading}
+              size="small"
+            >
+              取消下载
             </Button>
           </Space>
         </div>

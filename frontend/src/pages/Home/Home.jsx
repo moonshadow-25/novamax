@@ -251,7 +251,7 @@ function Home() {
             <Button
               type="primary"
               size="small"
-              onClick={() => navigate('/global-settings')}
+              onClick={() => navigate('/global-settings?menu=update')}
               className="update-banner-btn"
             >
               立即更新
