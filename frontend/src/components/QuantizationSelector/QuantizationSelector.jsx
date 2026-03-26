@@ -35,6 +35,7 @@ function QuantizationSelector({
   downloadedQuantizations,
   downloadedFiles,
   downloadStates = [],
+  activeFileOk = true,
   onDownload,
   onSwitch,
   onSwitchFile,
@@ -56,8 +57,10 @@ function QuantizationSelector({
       // 查找匹配的文件
       const matchedFile = files.find(f => f.matched_preset === preset.name);
       const isDownloadedOld = oldQuants.includes(preset.name);
-      const isDownloaded = !!matchedFile || isDownloadedOld;
-      const isActive = matchedFile?.is_active || false;
+      // 若该预设是当前激活版本且文件不完整，视为未下载以显示下载按钮
+      const isIncomplete = preset.name === currentSelection && activeFileOk === false;
+      const isActive = (matchedFile?.is_active === true) && !isIncomplete;
+      const isDownloaded = (!!matchedFile || isDownloadedOld) && !isIncomplete;
 
       return {
         type: 'preset',
@@ -212,7 +215,7 @@ function QuantizationSelector({
             )}
 
             {/* 下载按钮 - 仅未下载的预设时显示 */}
-            {!item.isDownloaded && !isDownloading && !isPaused && !isCompleted && item.type === 'preset' && (
+            {!item.isDownloaded && !isDownloading && !isPaused && !isCompleted && !isFailed && item.type === 'preset' && (
               <Button
                 type="primary"
                 icon={<DownloadOutlined />}
@@ -249,6 +252,14 @@ function QuantizationSelector({
               <Space size="small">
                 <span style={{ fontSize: 12, color: '#ff4d4f' }}>失败</span>
                 <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeDownload(item.name)}>重试</Button>
+                <Button
+                  size="small"
+                  danger
+                  icon={<CloseCircleOutlined />}
+                  onClick={() => onCancelDownload(item.name)}
+                >
+                  取消
+                </Button>
               </Space>
             )}
 

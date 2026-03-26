@@ -166,13 +166,21 @@ class ParameterService {
         description: '同时处理的请求数量',
         min: 1,
         max: 16,
-        default: 2
+        default: 1
       },
       'no-mmap': {
         type: 'boolean',
         label: 'no-mmap',
         description: '禁用内存映射，避免模型文件被映射到内存',
         default: true
+      },
+      'n-gpu-layers': {
+        type: 'number',
+        label: 'n-gpu-layers',
+        description: '加载到 GPU 的层数',
+        min: -1,
+        max: 9999,
+        default: 100
       },
 
       // 采样参数

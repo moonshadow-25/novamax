@@ -389,7 +389,7 @@ class ModelscopeParser {
         parameters: {
           version: '1.0.0',
           context_length: 0,
-          parallel: 2,
+          parallel: 1,
           'no-mmap': true,
           temperature: 0.7,
           top_p: 0.9,

@@ -130,7 +130,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（与后端 parameterService 保持一致）
       const standardKeys = [
-        'context_length', 'port', 'parallel', 'no-mmap',
+        'context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
         'temperature', 'top_p', 'top_k',
         'repeat_penalty', 'version'
       ];
@@ -161,6 +161,11 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         formValues.port = isEmbedding ? 1278 : 1234;
       }
 
+      // 如果 n-gpu-layers 没有值，填入默认值 100
+      if (formValues['n-gpu-layers'] === undefined) {
+        formValues['n-gpu-layers'] = 100;
+      }
+
       setCustomParams(custom);
       form.setFieldsValue(formValues);
     } catch (error) {
@@ -184,7 +189,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       // 标准参数键（确保所有标准参数都被保存）
       const standardKeys = [
-        'context_length', 'port', 'parallel', 'no-mmap',
+        'context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
         'temperature', 'top_p', 'top_k',
         'repeat_penalty'
       ];
@@ -465,7 +470,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     unCheckedChildren="关"
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                {/* <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                   <Space style={{ marginRight: 12 }}>
                     <span>多机互连</span>
                     <Tooltip title="允许局域网内其他设备通过本机 IP 访问（即将支持）">
@@ -479,7 +484,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     unCheckedChildren="关"
                     disabled
                   />
-                </div>
+                </div> */}
                 {/* <Divider style={{ margin: '4px 0 16px' }} /> */}
               </>
             )}
@@ -487,7 +492,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
             <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16 }}>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
-                {['context_length', 'parallel', 'no-mmap', 'port']
+                {['context_length', 'parallel', 'no-mmap', 'n-gpu-layers', 'port']
                   .filter(key => metadata[key])
                   .map(key => renderFormItem(key, metadata[key]))}
               </Panel>

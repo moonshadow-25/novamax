@@ -58,7 +58,7 @@ class PresetService {
       lines.push('ctx-size = 8192');
       lines.push('gpu-layers = -1');
       lines.push('threads = 8');
-      lines.push('parallel = 2');
+      lines.push('parallel = 1');
       lines.push('batch = 512');
       lines.push('ubatch = 512');
       lines.push('flash-attn = auto');

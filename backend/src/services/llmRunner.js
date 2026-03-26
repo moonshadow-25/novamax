@@ -72,7 +72,7 @@ export function generateSingleModelCommand(model, port) {
   const defaults = {
     context_length: 8192,
     port: port || 1234,
-    parallel: 2,
+    parallel: 1,
   };
 
   // 动态添加参数

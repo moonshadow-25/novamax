@@ -8,6 +8,7 @@ import configManager from './configManager.js';
 import engineManager from './engineManager.js';
 import { generateRouterCommand, generateSingleModelCommand } from './llmRunner.js';
 import parameterService from './parameterService.js';
+import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
@@ -109,6 +110,11 @@ class ProcessManager {
     }
     this.allocatedPorts.add(port);
 
+    // 启动前校验激活文件完整性（纯 stat 调用，< 1ms，避免文件残缺时 llama-server 启动后报晦涩错误）
+    if (!checkActiveFileIntegrity(model)) {
+      this.allocatedPorts.delete(port);
+      throw new Error('模型文件不完整或已被删除，请重新下载');
+    }
 
     try {
       // 使用单模型命令

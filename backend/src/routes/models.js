@@ -8,29 +8,75 @@ import parameterService from '../services/parameterService.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
+import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 
 const router = express.Router();
+
+/**
+ * 修复 downloaded_files 为空的已下载模型（遗留数据问题）
+ * 扫描磁盘重建文件记录，后台写入 DB，返回修复后的模型对象用于当次响应
+ */
+async function repairDownloadedFiles(model) {
+  if (!model.downloaded || (model.downloaded_files && model.downloaded_files.length > 0)) {
+    return model;
+  }
+  try {
+    const scannedFiles = await modelManager.scanDownloadedFiles(model.id);
+    if (scannedFiles.length === 0) return model;
+
+    // 根据 selected_quantization 确定激活文件，否则激活第一个
+    const selectedQuant = model.selected_quantization;
+    const targetFile = selectedQuant
+      ? scannedFiles.find(f => f.matched_preset === selectedQuant)
+      : null;
+    const fileToActivate = targetFile || scannedFiles[0];
+    fileToActivate.is_active = true;
+
+    const downloadedQuantizations = [...new Set(scannedFiles.map(f => f.matched_preset).filter(Boolean))];
+    const updates = {
+      downloaded_files: scannedFiles,
+      downloaded_quantizations: downloadedQuantizations,
+    };
+    // 激活文件与 selected_quantization 匹配时，清除 selected_quantization
+    if (selectedQuant && fileToActivate.matched_preset === selectedQuant) {
+      updates.selected_quantization = null;
+    }
+
+    console.log(`[repair] 重建 ${model.id} 的 downloaded_files（${scannedFiles.length} 个文件）`);
+    // 后台写入 DB，不阻塞当次响应
+    modelManager.update(model.id, updates).then(() => {
+      eventBus.broadcast('model-updated', { modelId: model.id });
+    }).catch(e => console.error('[repair] DB 更新失败:', e));
+
+    return { ...model, ...updates };
+  } catch (e) {
+    console.error('[repair] 扫描失败:', e);
+    return model;
+  }
+}
 
 router.get('/models', async (req, res) => {
   try {
     const models = modelManager.getAll();
 
-    const modelsWithStatus = models.map(model => {
-      const processStatus = processManager.getStatus(model.id);
-      const downloadStates = downloadStateManager.getStatesByModel(model.id);
+    const modelsWithStatus = await Promise.all(models.map(async model => {
+      const m = await repairDownloadedFiles(model);
+      const processStatus = processManager.getStatus(m.id);
+      const downloadStates = downloadStateManager.getStatesByModel(m.id);
       const primaryDownload = downloadStates[0] || null;
 
       return {
-        ...model,
+        ...m,
         status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,
         download_progress: primaryDownload?.progress || 0,
         download_error: primaryDownload?.error || null,
-        downloading_quantization: primaryDownload?.targetQuantization || null
+        downloading_quantization: primaryDownload?.targetQuantization || null,
+        active_file_ok: checkActiveFileIntegrity(m)
       };
-    });
+    }));
     res.json({ models: modelsWithStatus });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -44,19 +90,21 @@ router.get('/models/:id', async (req, res) => {
       return res.status(404).json({ error: 'Model not found' });
     }
 
-    const processStatus = processManager.getStatus(model.id);
-    const downloadStates = downloadStateManager.getStatesByModel(model.id);
+    const m = await repairDownloadedFiles(model);
+    const processStatus = processManager.getStatus(m.id);
+    const downloadStates = downloadStateManager.getStatesByModel(m.id);
     const primaryDownload = downloadStates[0] || null;
 
     const modelWithStatus = {
-      ...model,
+      ...m,
       status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
       port: processStatus.port || null,
       download_states: downloadStates,
       download_status: primaryDownload?.status || null,
       download_progress: primaryDownload?.progress || 0,
       download_error: primaryDownload?.error || null,
-      downloading_quantization: primaryDownload?.targetQuantization || null
+      downloading_quantization: primaryDownload?.targetQuantization || null,
+      active_file_ok: checkActiveFileIntegrity(m)
     };
     res.json(modelWithStatus);
   } catch (error) {
@@ -68,22 +116,24 @@ router.get('/models/type/:type', async (req, res) => {
   try {
     const models = modelManager.getByType(req.params.type);
 
-    const modelsWithStatus = models.map(model => {
-      const processStatus = processManager.getStatus(model.id);
-      const downloadStates = downloadStateManager.getStatesByModel(model.id);
+    const modelsWithStatus = await Promise.all(models.map(async model => {
+      const m = await repairDownloadedFiles(model);
+      const processStatus = processManager.getStatus(m.id);
+      const downloadStates = downloadStateManager.getStatesByModel(m.id);
       const primaryDownload = downloadStates[0] || null;
 
       return {
-        ...model,
+        ...m,
         status: processStatus.running ? 'running' : processStatus.starting ? 'starting' : 'stopped',
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,
         download_progress: primaryDownload?.progress || 0,
         download_error: primaryDownload?.error || null,
-        downloading_quantization: primaryDownload?.targetQuantization || null
+        downloading_quantization: primaryDownload?.targetQuantization || null,
+        active_file_ok: checkActiveFileIntegrity(m)
       };
-    });
+    }));
     res.json({ models: modelsWithStatus });
   } catch (error) {
     res.status(500).json({ error: error.message });

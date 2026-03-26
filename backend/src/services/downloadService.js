@@ -10,6 +10,7 @@ import engineManager from './engineManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
 import { getPythonPath, getPythonScriptPath, getModelPath } from '../utils/pathHelper.js';
+import { isQuantizationIncomplete } from '../utils/fileIntegrity.js';
 
 const PYTHON_PATH = getPythonPath();
 const DOWNLOADER_SCRIPT = getPythonScriptPath('modelscope_downloader.py');
@@ -74,7 +75,26 @@ class DownloadService extends EventEmitter {
       const downloadedQuants = model.downloaded_quantizations || [];
 
       if (targetQuantization && downloadedQuants.includes(targetQuantization)) {
-        throw new Error(`量化版本 ${targetQuantization} 已下载`);
+        // 验证文件完整性，防止部分下载后被误判为已完成
+        const modelDir = getModelPath(MODELS_RUN_DIR, model);
+        const quantInfo = model.quantizations.find(q => q.name === targetQuantization);
+        const incomplete = isQuantizationIncomplete(modelDir, quantInfo, model);
+
+        if (incomplete) {
+          // 文件不完整，清除已下载记录，允许重新下载
+          console.warn(`[download] ${targetQuantization} 文件不完整，清除记录重新下载`);
+          const cleanedFiles = (model.downloaded_files || []).filter(
+            f => f.matched_preset !== targetQuantization
+          );
+          const cleanedQuants = downloadedQuants.filter(q => q !== targetQuantization);
+          await modelManager.update(modelId, {
+            downloaded_files: cleanedFiles,
+            downloaded_quantizations: cleanedQuants,
+            downloaded: cleanedFiles.some(f => f.is_active) || cleanedQuants.length > 0
+          });
+        } else {
+          throw new Error(`量化版本 ${targetQuantization} 已下载`);
+        }
       }
     } else {
       // 没有量化版本，检查整体下载状态

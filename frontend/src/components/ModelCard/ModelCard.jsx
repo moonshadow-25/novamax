@@ -290,6 +290,24 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const handleDownload = async () => {
+    // 文件不完整时：直接重新下载激活文件对应的量化版本
+    if (hasActiveFile && !model.active_file_ok) {
+      const activeFile = downloadedFiles.find(f => f.is_active);
+      const quantName = activeFile?.matched_preset;
+      if (quantName) {
+        setLoading(true);
+        try {
+          await downloadService.start(model.id, quantName);
+          message.success('开始重新下载');
+        } catch (error) {
+          message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
+        } finally {
+          setLoading(false);
+          onUpdate(); // 无论成功/失败都刷新，确保 active_file_ok 状态与磁盘同步
+        }
+        return;
+      }
+    }
     // 没有选中量化版本时，先打开选择器让用户选
     if (!model.selected_quantization) {
       handleManageQuantizations();
@@ -528,7 +546,15 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // realDownloadedFiles 只在弹窗打开时用于实时显示，关闭后应使用 model 数据
   const downloadedFiles = model.downloaded_files || [];
   const hasActiveFile = downloadedFiles.some(f => f.is_active);
-  
+  // 激活文件磁盘完整性（由后端校验文件是否存在且大小匹配）
+  const activeFileOk = hasActiveFile && model.active_file_ok === true;
+  // 激活文件对应的量化版本名称（用于重新下载判断）
+  const activeQuantName = hasActiveFile ? (downloadedFiles.find(f => f.is_active)?.matched_preset ?? null) : null;
+  // 文件不完整时，是否正在对该激活版本执行重新下载操作（进行中 / 暂停 / 失败）
+  const isRedownloadingActive = !model.active_file_ok &&
+    activeQuantName !== null &&
+    model.downloading_quantization === activeQuantName;
+
   // 检查是否选择了未下载的量化版本（与active文件互斥）
   const hasUndownloadedSelection = model.selected_quantization && !hasActiveFile;
   
@@ -549,17 +575,19 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                                   model.downloading_quantization === model.selected_quantization;
 
   // 判断是否可以启动：
-  // 场景1：有active文件（已下载的默认版本）且不在下载默认版本
+  // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (hasActiveFile && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted);
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted);
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
   // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
-  const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization)) &&
+  // 3. 或者有active文件但文件不完整（需要重新下载）
+  const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization) || (hasActiveFile && !model.active_file_ok)) &&
       !isDefaultDownloadCompleted &&
       !isDownloadingDefault &&
-      !isDefaultDownloadFailed;
+      !isDefaultDownloadFailed &&
+      !isRedownloadingActive;
   
   // 旧的下载状态判断（兼容）
   const isDownloaded = model.downloaded
@@ -717,10 +745,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* 下载中状态 - 只有当下载的是选中的默认版本时才显示 */}
-      {downloadStatus === 'downloading' && hasUndownloadedSelection && 
-       model.downloading_quantization === model.selected_quantization && 
-       model.type === 'llm' && (
+      {/* 下载中状态 - 只有当下载的是选中的默认版本或重新下载不完整激活文件时才显示 */}
+      {downloadStatus === 'downloading' && model.type === 'llm' &&
+       ((hasUndownloadedSelection && model.downloading_quantization === model.selected_quantization) || isRedownloadingActive) && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="active" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -747,10 +774,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </div>
       )}
 
-      {/* 下载暂停状态 - 只有当下载的是选中的默认版本时才显示 */}
-      {downloadStatus === 'paused' && hasUndownloadedSelection && 
-       model.downloading_quantization === model.selected_quantization && 
-       model.type === 'llm' && (
+      {/* 下载暂停状态 - 只有当下载的是选中的默认版本或重新下载不完整激活文件时才显示 */}
+      {downloadStatus === 'paused' && model.type === 'llm' &&
+       ((hasUndownloadedSelection && model.downloading_quantization === model.selected_quantization) || isRedownloadingActive) && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="normal" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
@@ -778,10 +804,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </div>
       )}
 
-      {/* 下载失败状态 - 只有当下载的是选中的默认版本时才显示 */}
-      {downloadStatus === 'failed' && hasUndownloadedSelection &&
-       model.downloading_quantization === model.selected_quantization &&
-       model.type === 'llm' && (
+      {/* 下载失败状态 - 只有当下载的是选中的默认版本或重新下载不完整激活文件时才显示 */}
+      {downloadStatus === 'failed' && model.type === 'llm' &&
+       ((hasUndownloadedSelection && model.downloading_quantization === model.selected_quantization) || isRedownloadingActive) && (
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress
             percent={Math.floor(downloadProgress)}
@@ -1023,6 +1048,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           downloadedQuantizations={realDownloadedQuantizations}
           downloadedFiles={realDownloadedFiles}
           downloadStates={model.download_states || []}
+          activeFileOk={model.active_file_ok}
           onDownload={handleDownloadQuantization}
           onSwitch={handleSwitchQuantization}
           onSwitchFile={handleSwitchToFile}
