@@ -391,6 +391,7 @@ class ModelscopeParser {
           context_length: 0,
           parallel: 1,
           'no-mmap': true,
+          'n-gpu-layers': 100,
           temperature: 0.7,
           top_p: 0.9,
           top_k: 40,

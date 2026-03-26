@@ -17,7 +17,7 @@ const router = express.Router();
  * 扫描磁盘重建文件记录，后台写入 DB，返回修复后的模型对象用于当次响应
  */
 async function repairDownloadedFiles(model) {
-  if (!model.downloaded || (model.downloaded_files && model.downloaded_files.length > 0)) {
+  if (model.downloaded_files && model.downloaded_files.length > 0) {
     return model;
   }
   try {
@@ -33,9 +33,12 @@ async function repairDownloadedFiles(model) {
     fileToActivate.is_active = true;
 
     const downloadedQuantizations = [...new Set(scannedFiles.map(f => f.matched_preset).filter(Boolean))];
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
     const updates = {
       downloaded_files: scannedFiles,
       downloaded_quantizations: downloadedQuantizations,
+      downloaded: true,
+      local_path: modelDir,
     };
     // 激活文件与 selected_quantization 匹配时，清除 selected_quantization
     if (selectedQuant && fileToActivate.matched_preset === selectedQuant) {
@@ -60,7 +63,15 @@ router.get('/models', async (req, res) => {
     const models = modelManager.getAll();
 
     const modelsWithStatus = await Promise.all(models.map(async model => {
-      const m = await repairDownloadedFiles(model);
+      let m = await repairDownloadedFiles(model);
+
+      // 修复 local_path 为 null 但已有下载文件的存量数据
+      if (!m.local_path && m.downloaded_files && m.downloaded_files.length > 0) {
+        const modelDir = getModelPath(MODELS_RUN_DIR, m);
+        m = { ...m, local_path: modelDir };
+        modelManager.update(m.id, { local_path: modelDir }).catch(e => console.error('[repair] local_path 更新失败:', e));
+      }
+
       const processStatus = processManager.getStatus(m.id);
       const downloadStates = downloadStateManager.getStatesByModel(m.id);
       const primaryDownload = downloadStates[0] || null;

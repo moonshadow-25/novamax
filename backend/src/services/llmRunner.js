@@ -73,6 +73,8 @@ export function generateSingleModelCommand(model, port) {
     context_length: 8192,
     port: port || 1234,
     parallel: 1,
+    'no-mmap': true,
+    'n-gpu-layers': 100
   };
 
   // 动态添加参数

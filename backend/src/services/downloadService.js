@@ -90,7 +90,8 @@ class DownloadService extends EventEmitter {
           await modelManager.update(modelId, {
             downloaded_files: cleanedFiles,
             downloaded_quantizations: cleanedQuants,
-            downloaded: cleanedFiles.some(f => f.is_active) || cleanedQuants.length > 0
+            downloaded: cleanedFiles.some(f => f.is_active) || cleanedQuants.length > 0,
+            selected_quantization: targetQuantization
           });
         } else {
           throw new Error(`量化版本 ${targetQuantization} 已下载`);
