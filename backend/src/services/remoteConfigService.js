@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
-import { DATA_DIR, UPDATE_CONFIG_FILE, PROJECT_ROOT } from '../config/constants.js';
+import { DATA_DIR, PROJECT_ROOT } from '../config/constants.js';
 import { writeJSON } from '../utils/fileHelper.js';
 import configManager from './configManager.js';
 import modelManager from './modelManager.js';
@@ -33,17 +33,11 @@ function mapRemoteToLocal(remoteFields) {
   return local;
 }
 
-function getUpdateConfig() {
-  try {
-    const raw = fs.readFileSync(UPDATE_CONFIG_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
 
 function getServerUrl() {
-  return getUpdateConfig().server_url || 'https://api.novamax.com';
+  const channel = getChannel(); // stable | beta | dev
+  const channelKey = `REMOTE_SERVER_URL_${channel.toUpperCase()}`;
+  return process.env[channelKey] || process.env.REMOTE_SERVER_URL_STABLE || 'https://www.firstarpc.com/download/novamax/';
 }
 
 function getChannel() {
@@ -71,8 +65,8 @@ function compareVersions(a, b) {
  */
 async function syncModels() {
   const serverUrl = getServerUrl();
-  const { models_path = '/configs/models.json' } = getUpdateConfig();
-  const url = `${serverUrl}${models_path}`;
+  const modelsPath = process.env.REMOTE_MODELS_PATH || 'models.json';
+  const url = `${serverUrl}${modelsPath}`;
 
   let remoteData;
   try {
@@ -143,8 +137,8 @@ async function syncModels() {
  */
 async function syncEngines() {
   const serverUrl = getServerUrl();
-  const { engines_path = '/configs/engines.json' } = getUpdateConfig();
-  const url = `${serverUrl}${engines_path}`;
+  const enginesPath = process.env.REMOTE_ENGINES_PATH || 'engines.json';
+  const url = `${serverUrl}${enginesPath}`;
 
   let remoteData;
   try {
@@ -182,8 +176,11 @@ async function checkUpdate() {
     console.warn('[remoteConfig] 无法读取 package.json 版本');
   }
 
-  // 确保引擎配置最新
-  await syncEngines();
+  // 确保引擎配置最新，失败则直接返回错误
+  const synced = await syncEngines();
+  if (!synced) {
+    return { hasUpdate: false, currentVersion, error: '无法连接更新服务器' };
+  }
 
   const appEngine = engineManager.getEngine('app');
   if (!appEngine?.versions?.length) {

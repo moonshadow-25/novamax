@@ -293,14 +293,14 @@ class ModelscopeParser {
     // 按质量排序
     quantizations.sort((a, b) => b.quality - a.quality);
 
-    // 如果没有推荐的，自动选择 Q4_K_M 或 Q5_K_M
+    // 如果没有推荐的，按优先级自动选择
+    // 优先级：Q4_K_M > Q5_K_M > 其他(quantizations偶数取上中，奇数取中位)
     const hasRecommended = quantizations.some(q => q.recommended);
     if (!hasRecommended && quantizations.length > 0) {
       const q4km = quantizations.find(q => q.name.includes('Q4_K_M'));
       const q5km = quantizations.find(q => q.name.includes('Q5_K_M'));
-      if (q4km) q4km.recommended = true;
-      else if (q5km) q5km.recommended = true;
-      else quantizations[Math.floor(quantizations.length / 2)].recommended = true;
+      const picked = q4km || q5km || quantizations[Math.floor((quantizations.length - 1) / 2)];
+      picked.recommended = true;
     }
 
     return quantizations;

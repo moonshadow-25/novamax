@@ -31,7 +31,7 @@ import ttsRouter from './routes/tts.js';
 import eventBus from './services/eventBus.js';
 
 const app = express();
-const PORT = 3001;
+const PORT = parseInt(process.env.PORT) || 3001;
 
 app.use(cors());
 app.use(express.json());

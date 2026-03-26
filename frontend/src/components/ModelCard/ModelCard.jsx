@@ -878,17 +878,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               onClick={handleStart}
               loading={loading}
               block
+              style={{ background: '#4caf50', borderColor: '#4caf50' }}
             >
               启动
             </Button>
           ) : (
-            <>
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Button
                 danger
                 icon={<StopOutlined />}
                 onClick={handleStop}
                 loading={loading}
-                block
+                style={{ background: '#ff4d4f', borderColor: '#ff4d4f', color: '#fff', flex: 1 }}
               >
                 停止
               </Button>
@@ -896,11 +897,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 type="primary"
                 icon={<MessageOutlined />}
                 onClick={handleUse}
-                block
+                style={{ background: 'linear-gradient(135deg, #69c0ff, #1890ff)', borderColor: '#40a9ff', flex: 1 }}
               >
                 使用
               </Button>
-            </>
+            </div>
           )}
         </Space>
       )}

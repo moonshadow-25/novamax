@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 const { Header, Content, Sider } = Layout;
@@ -15,7 +15,6 @@ const GlobalSettings = () => {
   const navigate = useNavigate();
   const { token } = theme.useToken();
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState('runtime');
 
@@ -377,32 +376,15 @@ const GlobalSettings = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleSave = async () => {
-    try {
-      setLoading(true);
-      const values = await form.validateFields();
-
-      // 保存更新设置
-      await configService.setUpdateSettings({
-        auto_check: values.auto_check,
-        channel: values.channel,
-        server_url: values.server_url,
-        last_check: null
-      });
-
-      message.success('设置已保存');
-    } catch (error) {
-      message.error('保存设置失败');
-      console.error('Failed to save settings:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleCheckUpdate = async () => {
     try {
       setChecking(true);
       const result = await updateService.check();
+      if (result.error) {
+        message.error(result.error);
+        setUpdateInfo(null);
+        return;
+      }
       setUpdateInfo(result);
       if (result.hasUpdate) {
         message.info(`发现新版本: ${result.latestVersion}`);
@@ -411,6 +393,7 @@ const GlobalSettings = () => {
       }
     } catch (error) {
       message.error('检查更新失败');
+      setUpdateInfo(null);
       console.error('Failed to check update:', error);
     } finally {
       setChecking(false);
@@ -715,41 +698,46 @@ const GlobalSettings = () => {
   const renderUpdateContent = () => (
     <Card title="更新设置">
       <Form form={form} layout="vertical">
-        <Form.Item
-          label="自动检查更新"
-          name="auto_check"
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-
-        <Form.Item
-          label="更新通道"
-          name="channel"
-          rules={[{ required: true }]}
-        >
-          <Select style={{ width: 200 }}>
-            <Option value="stable">稳定版</Option>
-            <Option value="beta">测试版</Option>
-            <Option value="dev">开发版</Option>
-          </Select>
-        </Form.Item>
-
-        <Form.Item>
+        <Form.Item name="auto_check" valuePropName="checked">
           <Space>
-            <Button onClick={handleCheckUpdate} loading={checking}>
-              检查更新
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              loading={loading}
-            >
-              保存设置
-            </Button>
+            <span>自动检查更新</span>
+            <Switch onChange={async (val) => {
+              await configService.setUpdateSettings({
+                auto_check: val,
+                channel: form.getFieldValue('channel'),
+                last_check: null
+              });
+            }} />
           </Space>
         </Form.Item>
+
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+          <Form.Item
+            label="更新通道"
+            name="channel"
+            rules={[{ required: true }]}
+            style={{ marginBottom: 0 }}
+          >
+            <Select
+              style={{ width: 160 }}
+              onChange={async (val) => {
+                await configService.setUpdateSettings({
+                  auto_check: form.getFieldValue('auto_check'),
+                  channel: val,
+                  last_check: null
+                });
+                handleCheckUpdate();
+              }}
+            >
+              <Option value="stable">稳定版</Option>
+              <Option value="beta">测试版</Option>
+              <Option value="dev">开发版</Option>
+            </Select>
+          </Form.Item>
+          <Button onClick={handleCheckUpdate} loading={checking}>
+            检查更新
+          </Button>
+        </div>
       </Form>
 
       {updateInfo && (
