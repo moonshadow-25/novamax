@@ -187,20 +187,40 @@ class EngineManager {
   }
 
   /**
-   * 卸载指定版本
+   * 卸载指定版本（同时处理正常版本和残损版本）
    */
   async uninstall(engineId, version) {
+    // 先查已安装版本，找不到再查残损版本
     const installed = this.getInstalledVersions(engineId);
-    const versionInfo = installed.find(v => v.version === version);
+    let versionInfo = installed.find(v => v.version === version);
 
     if (!versionInfo) {
-      throw new Error('Version not installed');
+      const broken = this.getBrokenVersions(engineId);
+      versionInfo = broken.find(v => v.version === version);
     }
 
-    // 删除文件目录
-    if (fs.existsSync(versionInfo.path)) {
+    if (!versionInfo) {
+      throw new Error('版本不存在');
+    }
+
+    if (!fs.existsSync(versionInfo.path)) {
+      return; // 目录已不存在，视为成功
+    }
+
+    // 先删除 .installed 标记，确保无论后续是否成功目录都被标记为残损
+    const marker = path.join(versionInfo.path, '.installed');
+    if (fs.existsSync(marker)) {
+      fs.unlinkSync(marker);
+    }
+
+    try {
       fs.rmSync(versionInfo.path, { recursive: true, force: true });
       console.log(`Uninstalled ${engineId} version ${version}`);
+    } catch (err) {
+      if (err.code === 'EPERM' || err.code === 'EBUSY') {
+        throw new Error('部分文件正被系统占用，请停止所有相关模型后重试，或重启后再卸载');
+      }
+      throw err;
     }
   }
 

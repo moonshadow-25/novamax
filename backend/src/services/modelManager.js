@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { readJSON, writeJSON, generateId } from '../utils/fileHelper.js';
-import { MODELS_DIR, MODELS_RUN_DIR, MODEL_STATUS } from '../config/constants.js';
+import Database from 'better-sqlite3';
+import { generateId } from '../utils/fileHelper.js';
+import { DB_PATH, MODELS_RUN_DIR, MODEL_STATUS } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
 
 class ModelManager {
@@ -12,40 +13,78 @@ class ModelManager {
       tts: [],
       whisper: []
     };
+    this.db = null;
+
+    // 预编译 SQL 语句（init 后设置）
+    this._stmtUpdate = null;
+    this._stmtInsert = null;
+    this._stmtDelete = null;
   }
 
   async init() {
-    for (const type of Object.keys(this.models)) {
-      const filePath = path.join(MODELS_DIR, `${type}.json`);
-      const data = await readJSON(filePath);
-      if (data) {
-        this.models[type] = data.models || [];
-      } else {
-        await this.saveType(type);
+    // 确保数据目录存在
+    const dataDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    this.db = new Database(DB_PATH);
+
+    // WAL 模式 + 建表
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE IF NOT EXISTS models (
+        id         TEXT PRIMARY KEY,
+        type       TEXT NOT NULL,
+        data       TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_models_type ON models(type);
+    `);
+
+    // 预编译常用语句
+    this._stmtUpdate = this.db.prepare('UPDATE models SET data = ?, updated_at = ? WHERE id = ?');
+    this._stmtInsert = this.db.prepare('INSERT INTO models (id, type, data, updated_at) VALUES (?, ?, ?, ?)');
+    this._stmtDelete = this.db.prepare('DELETE FROM models WHERE id = ?');
+
+    // 加载所有数据到内存
+    this._loadFromDB();
+
+    // 重新计算推荐量化版本
+    await this._recalcRecommendations();
+  }
+
+  _loadFromDB() {
+    const rows = this.db.prepare('SELECT id, type, data FROM models ORDER BY rowid').all();
+    this.models = { llm: [], comfyui: [], tts: [], whisper: [] };
+    for (const row of rows) {
+      try {
+        const model = JSON.parse(row.data);
+        if (this.models[row.type]) {
+          this.models[row.type].push(model);
+        }
+      } catch (e) {
+        console.error(`[DB] 解析模型数据失败 id=${row.id}:`, e.message);
       }
     }
-    // 重新计算所有模型的推荐量化版本
-    await this._recalcRecommendations();
   }
 
   async _recalcRecommendations() {
     let changed = false;
+
     for (const type of Object.keys(this.models)) {
       for (const model of this.models[type]) {
         const quants = model.quantizations;
         if (!quants || quants.length === 0) continue;
 
-        // 清除旧推荐
         quants.forEach(q => { q.recommended = false; });
 
-        // 优先 Q4_K_M，其次 Q5_K_M，否则取中间
         const q4km = quants.find(q => q.name.includes('Q4_K_M'));
         const q5km = quants.find(q => q.name.includes('Q5_K_M'));
         if (q4km) q4km.recommended = true;
         else if (q5km) q5km.recommended = true;
         else quants[Math.floor(quants.length / 2)].recommended = true;
 
-        // 如果没有已下载文件且没有选中量化版本，默认选中推荐版本
         const hasActiveFile = model.downloaded_files?.some(f => f.is_active);
         if (!hasActiveFile && !model.selected_quantization) {
           const rec = quants.find(q => q.recommended);
@@ -58,16 +97,16 @@ class ModelManager {
         changed = true;
       }
     }
-    if (changed) {
-      for (const type of Object.keys(this.models)) {
-        await this.saveType(type);
-      }
-    }
-  }
 
-  async saveType(type) {
-    const filePath = path.join(MODELS_DIR, `${type}.json`);
-    await writeJSON(filePath, { models: this.models[type] });
+    if (changed) {
+      const saveAll = this.db.transaction(() => {
+        for (const model of this.getAll()) {
+          model.updated_at = model.updated_at || new Date().toISOString();
+          this._stmtUpdate.run(JSON.stringify(model), model.updated_at, model.id);
+        }
+      });
+      saveAll();
+    }
   }
 
   getAll() {
@@ -97,8 +136,8 @@ class ModelManager {
       ...modelData
     };
 
+    this._stmtInsert.run(model.id, type, JSON.stringify(model), model.updated_at);
     this.models[type].push(model);
-    await this.saveType(type);
     return model;
   }
 
@@ -106,13 +145,14 @@ class ModelManager {
     for (const type of Object.keys(this.models)) {
       const index = this.models[type].findIndex(m => m.id === id);
       if (index !== -1) {
-        this.models[type][index] = {
+        const updated = {
           ...this.models[type][index],
           ...updates,
           updated_at: new Date().toISOString()
         };
-        await this.saveType(type);
-        return this.models[type][index];
+        this._stmtUpdate.run(JSON.stringify(updated), updated.updated_at, id);
+        this.models[type][index] = updated;
+        return updated;
       }
     }
     return null;
@@ -122,8 +162,8 @@ class ModelManager {
     for (const type of Object.keys(this.models)) {
       const index = this.models[type].findIndex(m => m.id === id);
       if (index !== -1) {
+        this._stmtDelete.run(id);
         this.models[type].splice(index, 1);
-        await this.saveType(type);
         return true;
       }
     }
@@ -144,9 +184,7 @@ class ModelManager {
    */
   async scanDownloadedFiles(modelId) {
     const model = this.getById(modelId);
-    if (!model) {
-      return [];
-    }
+    if (!model) return [];
 
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
@@ -157,10 +195,7 @@ class ModelManager {
     }
 
     const files = fs.readdirSync(modelDir);
-    const ggufFiles = files.filter(f =>
-      f.endsWith('.gguf') &&
-      !f.startsWith('mmproj')
-    );
+    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
 
     // console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
 
@@ -175,9 +210,7 @@ class ModelManager {
       if (model.quantizations) {
         const preset = model.quantizations.find(q => {
           // 优先使用配置的 filename
-          if (q.filename && filename === q.filename) {
-            return true;
-          }
+          if (q.filename && filename === q.filename) return true;
           // 否则尝试通配符匹配
           const pattern = q.filename || `*${q.name}*.gguf`;
           const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
@@ -188,7 +221,6 @@ class ModelManager {
 
       // 保留已存储的 is_active 状态
       const existing = existingFiles.find(f => f.filename === filename);
-
       return {
         filename,
         size: stats.size,
@@ -204,13 +236,9 @@ class ModelManager {
    */
   async scanDownloadedQuantizations(modelId) {
     const model = this.getById(modelId);
-    if (!model) {
-      return [];
-    }
+    if (!model) return [];
 
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
-
-    // 检查目录是否存在
     if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {
       console.log(`  ⚠ 模型目录不存在: ${modelDir}`);
       return [];
@@ -232,17 +260,13 @@ class ModelManager {
       const match = fileName.match(/[-_](Q\d+[_]?[KM0]+[_]?[MS]?|BF16|F16|F32|IQ\d+[_]?[XSML]+)/i);
       if (match) {
         let quantName = match[1].toUpperCase();
-
         // 标准化格式：统一转换为带下划线的格式
         // Q4KM -> Q4_K_M
         // Q4K -> Q4_K
         quantName = quantName
-          .replace(/^(Q\d+)([KM])([MS]?)$/, '$1_$2_$3')  // Q4KM -> Q4_K_M
-          .replace(/^(Q\d+)_([KM])_$/, '$1_$2')          // Q4_K_ -> Q4_K
-          .replace(/^(IQ\d+)([XSML]+)$/, '$1_$2');       // IQ3XXS -> IQ3_XXS
-
-        // console.log(`  检测到文件 ${fileName} -> 量化版本: ${quantName}`);
-
+          .replace(/^(Q\d+)([KM])([MS]?)$/, '$1_$2_$3')
+          .replace(/^(Q\d+)_([KM])_$/, '$1_$2')
+          .replace(/^(IQ\d+)([XSML]+)$/, '$1_$2');
         if (!downloadedQuantizations.includes(quantName)) {
           downloadedQuantizations.push(quantName);
         }
@@ -263,17 +287,13 @@ class ModelManager {
 
     for (const model of this.getAll()) {
       const scannedFiles = await this.scanDownloadedFiles(model.id);
-
-      // 保留旧的 is_active 状态
       const existingFiles = model.downloaded_files || [];
       const activeFile = existingFiles.find(f => f.is_active);
 
-      // 如果有激活的文件，保持激活状态
       if (activeFile) {
         const file = scannedFiles.find(f => f.filename === activeFile.filename);
         if (file) file.is_active = true;
       } else if (scannedFiles.length > 0 && !model.selected_quantization) {
-        // 仅在没有设置 selected_quantization 时才自动激活第一个文件
         scannedFiles[0].is_active = true;
       }
 
@@ -296,8 +316,6 @@ class ModelManager {
     for (const model of this.getAll()) {
       if (model.quantizations && model.quantizations.length > 0) {
         const scannedQuantizations = await this.scanDownloadedQuantizations(model.id);
-
-        // 更新模型配置
         const currentQuantizations = model.downloaded_quantizations || [];
         const needsUpdate = JSON.stringify(scannedQuantizations.sort()) !== JSON.stringify(currentQuantizations.sort());
 

@@ -2,6 +2,7 @@ import express from 'express';
 import engineManager from '../services/engineManager.js';
 import engineDownloader from '../services/engineDownloader.js';
 import downloadStateManager from '../services/downloadStateManager.js';
+import processManager from '../services/processManager.js';
 
 const router = express.Router();
 
@@ -140,6 +141,26 @@ router.post('/engines/:id/versions/:version/reinstall', async (req, res) => {
 router.delete('/engines/:id/versions/:version', async (req, res) => {
   try {
     const { id, version } = req.params;
+
+    // 引擎 → 关联模型类型（rocm 作为依赖，检查所有使用它的引擎对应的模型）
+    const engineModelTypes = {
+      llamacpp: ['llm'],
+      comfyui:  ['comfyui'],
+      tts:      ['tts'],
+      whisper:  ['whisper'],
+      rocm:     ['llm', 'comfyui']   // rocm 是 llamacpp/comfyui 的依赖
+    };
+
+    const relatedTypes = engineModelTypes[id] || [];
+    if (relatedTypes.length > 0) {
+      const running = processManager.getAllRunning();
+      const blocking = running.filter(p => relatedTypes.includes(p.type));
+      if (blocking.length > 0) {
+        return res.status(400).json({
+          error: `请先停止正在运行的模型，再卸载引擎（当前有 ${blocking.length} 个模型运行中）`
+        });
+      }
+    }
 
     await engineManager.uninstall(id, version);
     res.json({ success: true });

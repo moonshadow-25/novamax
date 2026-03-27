@@ -1,10 +1,15 @@
+import fs from 'fs';
 import path from 'path';
-import { readJSON, writeJSON, ensureDir } from '../utils/fileHelper.js';
-import { CONFIG_FILE, DATA_DIR, MODELS_DIR, DOWNLOADS_DIR } from '../config/constants.js';
+import Database from 'better-sqlite3';
+import { ensureDir } from '../utils/fileHelper.js';
+import { DB_PATH, CONFIG_FILE, DATA_DIR, MODELS_DIR, DOWNLOADS_DIR } from '../config/constants.js';
 
 class ConfigManager {
   constructor() {
     this.config = null;
+    this.db = null;
+    this._stmtGet = null;
+    this._stmtSet = null;
   }
 
   async init() {
@@ -17,11 +22,54 @@ class ConfigManager {
     await ensureDir(path.join(DOWNLOADS_DIR, 'ASR'));
     await ensureDir(path.join(DATA_DIR, 'logs'));
 
-    this.config = await readJSON(CONFIG_FILE);
-    if (!this.config) {
-      this.config = this.getDefaultConfig();
-      await this.save();
+    this.db = new Database(DB_PATH);
+
+    // 建表（与 modelManager 共用同一个 DB 文件）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+
+    // 预编译语句
+    this._stmtGet = this.db.prepare('SELECT value FROM settings WHERE key = ?');
+    this._stmtSet = this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+    // 加载配置到内存
+    const row = this._stmtGet.get('app_config');
+    if (row) {
+      // DB 中已有配置
+      try {
+        this.config = JSON.parse(row.value);
+      } catch (e) {
+        console.error('[ConfigDB] 解析配置失败，使用默认配置:', e.message);
+        this.config = this.getDefaultConfig();
+        this._persist();
+      }
+    } else {
+      // 尝试从旧 config.json 迁移
+      this.config = this._migrateFromJSON() || this.getDefaultConfig();
+      this._persist();
     }
+  }
+
+  _migrateFromJSON() {
+    if (!fs.existsSync(CONFIG_FILE)) return null;
+    try {
+      const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      console.log('[ConfigDB] 已从 config.json 迁移配置');
+      fs.renameSync(CONFIG_FILE, CONFIG_FILE + '.bak');
+      return data;
+    } catch (e) {
+      console.warn('[ConfigDB] 读取 config.json 失败:', e.message);
+      return null;
+    }
+  }
+
+  _persist() {
+    this._stmtSet.run('app_config', JSON.stringify(this.config));
   }
 
   getDefaultConfig() {
@@ -57,7 +105,7 @@ class ConfigManager {
   }
 
   async save() {
-    await writeJSON(CONFIG_FILE, this.config);
+    this._persist();
   }
 
   get(key) {
@@ -70,7 +118,7 @@ class ConfigManager {
     } else {
       this.config[key] = value;
     }
-    await this.save();
+    this._persist();
   }
 }
 

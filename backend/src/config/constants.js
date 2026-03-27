@@ -43,6 +43,7 @@ export { PROJECT_ROOT };
 //    mklink /J C:\Users\YourUsername\.novastudio C:\novastudio_data
 // 数据目录：项目根目录下的 data 文件夹
 export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+export const DB_PATH = path.join(DATA_DIR, 'novamax.db');
 export const MODELS_DIR = path.join(DATA_DIR, 'models');
 export const DOWNLOADS_DIR = path.join(DATA_DIR, 'downloads');
 export const MODELS_RUN_DIR = path.join(DATA_DIR, 'models_dir');

@@ -414,12 +414,13 @@ const GlobalSettings = () => {
     }
   };
 
-  const handleDownloadEngine = async (engineId) => {
+  const handleDownloadEngine = async (engineId, version = null) => {
     try {
       const engine = engines[engineId];
-      const latestVersion = engine.versions[0].version;
-      await engineService.download(engineId, latestVersion);
-      // 下载已在后端启动，SSE 会触发 loadEngines 刷新状态
+      const targetVersion = version || engine.versions[0].version;
+      await engineService.download(engineId, targetVersion);
+      // 立即刷新一次，确保主列表拿到 download_state 并启动轮询
+      await loadEngines();
     } catch (error) {
       message.error('启动下载失败');
       console.error('Failed to start download:', error);
@@ -1111,7 +1112,7 @@ const GlobalSettings = () => {
                           size="small"
                           icon={<DownloadOutlined />}
                           onClick={() => {
-                            handleDownloadEngine(selectedEngine.id);
+                            handleDownloadEngine(selectedEngine.id, version.version);
                             setVersionDrawerVisible(false);
                           }}
                         >
