@@ -29,7 +29,14 @@ export function checkFilesComplete(dir, files) {
 
 /**
  * 检查模型激活文件（及所有分片）是否完整，用于决定显示"启动"还是"下载"按钮
- * @param {object} model - 含 downloaded_files 和 local_path 的模型对象
+ *
+ * 校验优先级：
+ *   1. SHA256 比对（downloaded_files[].sha256 vs quantizations[].file.sha256）
+ *      —— 下载后台计算并写入，之后每次刷新都是 O(1) 字符串比较
+ *   2. 文件大小比对（优先用配置期望值，次选记录值）
+ *      —— 兜底：旧数据无 sha256、或配置没有 sha256 字段时使用
+ *
+ * @param {object} model - 含 downloaded_files、local_path、quantizations 的模型对象
  * @returns {boolean} true = 完整可启动，false = 文件缺失或损坏
  */
 export function checkActiveFileIntegrity(model) {
@@ -41,7 +48,54 @@ export function checkActiveFileIntegrity(model) {
   const relatedFiles = downloadedFiles.filter(f => f.matched_preset === activeFile.matched_preset);
   const filesToCheck = relatedFiles.length > 0 ? relatedFiles : [activeFile];
 
-  return checkFilesComplete(model.local_path, filesToCheck);
+  const quantizations = model.quantizations || [];
+
+  for (const fileRec of filesToCheck) {
+    const filePath = path.join(model.local_path, fileRec.filename);
+
+    // 1. 文件存在性
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[integrity] 文件不存在: ${fileRec.filename}`);
+      return false;
+    }
+
+    const quantInfo = quantizations.find(q => q.name === fileRec.matched_preset);
+
+    // 2. SHA256 校验：downloaded_files 记录了 sha256 且配置中有期望值
+    if (fileRec.sha256 && quantInfo?.file?.sha256) {
+      if (fileRec.sha256 !== quantInfo.file.sha256) {
+        console.warn(`[integrity] SHA256 不匹配: ${fileRec.filename} 存储=${fileRec.sha256.slice(0, 8)}... 期望=${quantInfo.file.sha256.slice(0, 8)}...`);
+        return false;
+      }
+      // SHA256 验证通过，跳过大小校验
+      continue;
+    }
+
+    // 3. 大小校验（兜底）：优先用配置中的精确期望大小（0 容差），防止部分下载误判通过
+    const actualSize = fs.statSync(filePath).size;
+    if (quantInfo && !quantInfo.is_folder && quantInfo.file?.size) {
+      // 单文件量化：配置里的是精确字节数，0 容差
+      if (actualSize !== quantInfo.file.size) {
+        console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 期望=${quantInfo.file.size} 实际=${actualSize}`);
+        return false;
+      }
+    } else if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
+      // 文件夹型量化：从 folder_files 找对应文件的精确期望大小，0 容差
+      const folderFile = quantInfo.folder_files.find(f => f.name === fileRec.filename);
+      if (folderFile?.size && actualSize !== folderFile.size) {
+        console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 期望=${folderFile.size} 实际=${actualSize}`);
+        return false;
+      }
+    } else if (fileRec.size) {
+      // 无配置期望值（本地模型等）：回退到记录大小，保留 1% 容差
+      if (Math.abs(actualSize - fileRec.size) / fileRec.size > SIZE_TOLERANCE) {
+        console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 记录=${fileRec.size} 实际=${actualSize}`);
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 /**

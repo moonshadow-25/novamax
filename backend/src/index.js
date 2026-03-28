@@ -92,6 +92,11 @@ async function init() {
 
   console.log('Initialization complete');
 
+  // 非阻塞：对缺少 sha256 的已下载文件启动后台补算（处理崩溃/旧版本遗留数据）
+  downloadService.verifyMissingSHA256().catch(err =>
+    console.warn('[SHA256] 启动补算异常:', err.message)
+  );
+
   // 写当前版本的 app .installed 标记
   try {
     const pkgPath = path.join(PROJECT_ROOT, 'backend', 'package.json');

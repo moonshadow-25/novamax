@@ -9,11 +9,8 @@ import modelManager from './modelManager.js';
 import engineManager from './engineManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
-import { getPythonPath, getPythonScriptPath, getModelPath } from '../utils/pathHelper.js';
+import { getModelPath } from '../utils/pathHelper.js';
 import { isQuantizationIncomplete } from '../utils/fileIntegrity.js';
-
-const PYTHON_PATH = getPythonPath();
-const DOWNLOADER_SCRIPT = getPythonScriptPath('modelscope_downloader.py');
 
 class DownloadService extends EventEmitter {
   constructor() {
@@ -131,13 +128,22 @@ class DownloadService extends EventEmitter {
       throw new Error('下载任务不存在');
     }
 
-    // 如果有 Python 进程，终止它
+    // 如果有 Python 进程（hf_downloader 等），终止它
     if (downloadState.pythonProcess) {
       try {
         downloadState.pythonProcess.kill('SIGTERM');
         console.log(`已终止 Python 下载进程: ${modelId}`);
       } catch (error) {
         console.error('终止进程失败:', error);
+      }
+    }
+
+    // 终止 Node.js HTTP 下载（中止 axios 请求）
+    if (downloadState.controller) {
+      try {
+        downloadState.controller.abort();
+      } catch (error) {
+        console.error('终止 HTTP 下载失败:', error);
       }
     }
 
@@ -358,299 +364,265 @@ class DownloadService extends EventEmitter {
   }
 
   /**
-   * 使用 ModelScope 下载模型
-   * 文件直接写入目标目录，下载中使用 .part 后缀，完成后自动重命名。
-   * 无需临时目录，支持并发下载不同量化版本。
+   * 获取 ModelScope 仓库的文件列表
+   */
+  async _getModelScopeFileList(modelId, revision = 'master') {
+    const resp = await axios.get(
+      `https://www.modelscope.cn/api/v1/models/${modelId}/repo/files`,
+      { params: { Revision: revision, Recursive: 'true', Root: '' }, timeout: 30000 }
+    );
+    return (resp.data?.Data?.Files || []).filter(f => !f.IsDir);
+  }
+
+  /**
+   * 根据模型配置解析出完整的下载文件列表（含直接 URL、size、sha256）
+   */
+  async _resolveDownloadFiles(model, targetQuantization) {
+    const files = [];
+    const modelscopeId = model.modelscope_id || model.id;
+
+    const addMmproj = () => {
+      if (!model.mmproj_options?.length) return;
+      const bf16 = model.mmproj_options.filter(m => /bf16/i.test(m.name));
+      const chosen = bf16.length > 0 ? bf16 : [model.mmproj_options[0]];
+      for (const m of chosen) {
+        if (m.download_url) {
+          files.push({ name: m.name, url: m.download_url, size: m.size || 0, sha256: m.sha256 || null });
+          console.log(`添加 mmproj 文件: ${m.name}`);
+        }
+      }
+    };
+
+    if (targetQuantization) {
+      const quantInfo = model.quantizations?.find(q => q.name === targetQuantization);
+      if (quantInfo?.file?.download_url) {
+        files.push({ name: quantInfo.file.name, url: quantInfo.file.download_url, size: quantInfo.file.size, sha256: quantInfo.file.sha256 || null });
+      }
+      addMmproj();
+    } else if (model.files?.model?.download_url) {
+      files.push({ name: model.files.model.name, url: model.files.model.download_url, size: model.files.model.size, sha256: model.files.model.sha256 || null });
+      if (model.files.mmproj?.download_url) {
+        files.push({ name: model.files.mmproj.name, url: model.files.mmproj.download_url, size: model.files.mmproj.size, sha256: model.files.mmproj.sha256 || null });
+      }
+    }
+
+    // 配置文件（*.json, tokenizer*, *.txt, LICENSE, README*）
+    const CONFIG_RE = [/\.json$/i, /^tokenizer/i, /\.txt$/i, /^LICENSE$/i, /^README/i];
+    try {
+      const repoFiles = await this._getModelScopeFileList(modelscopeId);
+      for (const f of repoFiles) {
+        const filePath = f.Path || f.Name || '';
+        const name = path.basename(filePath);
+        if (!name || files.some(x => x.name === name)) continue;
+        if (CONFIG_RE.some(re => re.test(name))) {
+          const url = `https://www.modelscope.cn/api/v1/models/${modelscopeId}/repo?Revision=master&FilePath=${encodeURIComponent(filePath)}`;
+          files.push({ name, url, size: f.Size || 0, sha256: null });
+        }
+      }
+    } catch (e) {
+      console.warn(`[ModelScope] 配置文件列表获取失败，跳过: ${e.message}`);
+    }
+
+    return files;
+  }
+
+  /**
+   * 流式下载单个文件，支持断点续传。
+   * 对全新下载（非续传）同步计算 SHA256，无需下载后再读文件。
+   * 对断点续传，返回 wasResumed=true，由调用方决定是否补算 SHA256。
+   *
+   * @returns {{ sha256: string|null, wasResumed: boolean, skipped: boolean }}
+   */
+  async _downloadFileStreaming(fileInfo, modelDir, downloadState, onProgress) {
+    const finalPath = path.join(modelDir, fileInfo.name);
+    const partPath  = finalPath + '.part';
+
+    if (fs.existsSync(finalPath)) {
+      console.log(`文件已存在，跳过: ${fileInfo.name}`);
+      return { sha256: null, wasResumed: false, skipped: true };
+    }
+
+    const resumePos = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0;
+    const isFresh   = resumePos === 0;
+
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
+    if (resumePos > 0) {
+      headers['Range'] = `bytes=${resumePos}-`;
+      console.log(`断点续传: ${fileInfo.name}, 已下载 ${(resumePos / 1024 / 1024).toFixed(1)} MB`);
+    }
+
+    console.log(`开始下载: ${fileInfo.name}${fileInfo.size ? ` (${(fileInfo.size / 1024 / 1024 / 1024).toFixed(2)} GB)` : ''}`);
+
+    const response = await axios({
+      method: 'GET',
+      url: fileInfo.url,
+      headers,
+      responseType: 'stream',
+      signal: downloadState.controller?.signal,
+      timeout: 60000,
+      maxRedirects: 10,
+    });
+
+    if (response.status === 416) {
+      // Range Not Satisfiable：文件已完整
+      if (fs.existsSync(partPath)) fs.renameSync(partPath, finalPath);
+      console.log(`✓ 文件已完整（416）: ${fileInfo.name}`);
+      return { sha256: null, wasResumed: false, skipped: false };
+    }
+
+    // 全新下载且有期望 sha256 时，边下边算——零额外读盘开销
+    const hash   = (isFresh && fileInfo.sha256) ? crypto.createHash('sha256') : null;
+    const writer = fs.createWriteStream(partPath, { flags: resumePos > 0 ? 'a' : 'w' });
+
+    response.data.on('data', (chunk) => {
+      if (hash) hash.update(chunk);
+      if (onProgress) onProgress(chunk.length);
+    });
+
+    await new Promise((resolve, reject) => {
+      response.data.pipe(writer);
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+      response.data.on('error', reject);
+    });
+
+    fs.renameSync(partPath, finalPath);
+    console.log(`✓ 下载完成: ${fileInfo.name}`);
+
+    return { sha256: hash ? hash.digest('hex') : null, wasResumed: !isFresh, skipped: false };
+  }
+
+  /**
+   * 使用 Node.js HTTP 下载模型（替代 Python modelscope_downloader.py）
+   * - 边下边算 SHA256，无需下载后再读文件
+   * - 直接使用 AbortController 控制暂停/取消，无子进程
    */
   async _downloadModelWithModelScope(model, downloadState) {
     const targetQuantization = downloadState?.targetQuantization || model.selected_quantization;
-    // 直接使用最终目标目录，无需临时目录
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
 
-    // 确保目标目录存在
-    if (!fs.existsSync(modelDir)) {
-      fs.mkdirSync(modelDir, { recursive: true });
-    }
+    if (!fs.existsSync(modelDir)) fs.mkdirSync(modelDir, { recursive: true });
 
     try {
-      console.log(`使用 ModelScope 下载: ${model.modelscope_id || model.id}`);
+      console.log(`下载模型 (Node.js HTTP): ${model.modelscope_id || model.id}`);
 
-      // 确定 ModelScope 模型 ID
-      const modelscopeId = model.modelscope_id || model.id;
+      const filesToDownload = await this._resolveDownloadFiles(model, targetQuantization);
+      if (filesToDownload.length === 0) throw new Error('没有找到需要下载的文件');
+      console.log(`文件列表: ${filesToDownload.map(f => f.name).join(', ')}`);
 
-      // 构建下载参数
-      const downloadArgs = [
-        DOWNLOADER_SCRIPT,
-        modelscopeId,
-        '--output', modelDir
-      ];
+      const totalBytes = filesToDownload.reduce((s, f) => s + (f.size || 0), 0);
+      let globalDownloaded = 0;
+      let lastProgressTime  = Date.now();
+      let lastProgressBytes = 0;
+      downloadStateManager.updateBytes(downloadState.modelId, 0, totalBytes, downloadState.targetQuantization);
 
-      // 从下载状态中获取目标量化版本（已在上面确定）
+      const sha256Map    = {}; // filename → sha256
+      const resumedFiles = new Set();
 
-      // 如果用户选择了特定的量化版本，只下载那个文件
-      if (targetQuantization) {
-        // 查找对应的量化版本信息
-        const quantInfo = model.quantizations?.find(q => q.name === targetQuantization);
-
-        const filesToDownload = [];
-
-        if (quantInfo && quantInfo.filename) {
-          // 如果配置了明确的文件名，使用它
-          console.log(`使用配置的文件名: ${quantInfo.filename}`);
-          filesToDownload.push(quantInfo.filename);
-        } else {
-          // 否则使用通配符匹配，例如 *Q5_K_M*.gguf
-          const quantName = targetQuantization;
-          const wildcardPattern = `*${quantName}*.gguf`;
-          console.log(`使用通配符匹配: ${wildcardPattern}`);
-          filesToDownload.push(wildcardPattern);
+      for (const fileInfo of filesToDownload) {
+        // 检查暂停 / 取消
+        if (!downloadStateManager.hasDownload(model.id, downloadState.targetQuantization)) {
+          console.log(`下载已取消: ${model.id}`); return;
+        }
+        const curState = downloadStateManager.getState(model.id, downloadState.targetQuantization);
+        if (curState?.status === 'paused') {
+          console.log(`下载已暂停: ${model.id}`); return;
         }
 
-        // 如果模型有视觉功能，优先下载 BF16 版本的 mmproj 文件
-        if (model.mmproj_options && model.mmproj_options.length > 0) {
-          const bf16Mmprojs = model.mmproj_options.filter(mmproj => 
-            /bf16/i.test(mmproj.name)
-          );
-          if (bf16Mmprojs.length > 0) {
-            // 找到 BF16 版本，下载所有 BF16 投影文件
-            for (const mmproj of bf16Mmprojs) {
-              filesToDownload.push(mmproj.name);
-              console.log(`添加视觉投影文件 (BF16): ${mmproj.name}`);
-            }
-          } else {
-            // 没有 BF16 版本，下载第一个投影文件
-            const firstMmproj = model.mmproj_options[0];
-            filesToDownload.push(firstMmproj.name);
-            console.log(`未找到 BF16 版本，下载第一个投影文件: ${firstMmproj.name}`);
+        const result = await this._downloadFileStreaming(fileInfo, modelDir, downloadState, (chunkSize) => {
+          globalDownloaded += chunkSize;
+          const now     = Date.now();
+          const elapsed = (now - lastProgressTime) / 1000;
+          if (elapsed >= 0.5) {
+            const speed    = (globalDownloaded - lastProgressBytes) / elapsed;
+            const progress = totalBytes > 0 ? Math.min(99, globalDownloaded / totalBytes * 100) : 0;
+            downloadStateManager.updateProgress(downloadState.modelId, progress, speed, downloadState.targetQuantization);
+            downloadStateManager.updateBytes(downloadState.modelId, globalDownloaded, totalBytes, downloadState.targetQuantization);
+            lastProgressTime  = now;
+            lastProgressBytes = globalDownloaded;
           }
-        }
+        });
 
-        // 添加必要的配置文件（但排除其他 .gguf 文件）
-        filesToDownload.push('*.json', 'tokenizer*', '*.txt', 'LICENSE', 'README*');
-
-        downloadArgs.push('--files', ...filesToDownload);
-        console.log(`下载文件列表: ${filesToDownload.join(', ')}`);
-      } else if (model.files?.model?.name) {
-        // 如果有指定模型文件名，只下载该文件
-        const fallbackFiles = [model.files.model.name];
-        // 如果模型有视觉功能，优先下载 BF16 版本的 mmproj 文件
-        if (model.mmproj_options && model.mmproj_options.length > 0) {
-          const bf16Mmprojs = model.mmproj_options.filter(mmproj => 
-            /bf16/i.test(mmproj.name)
-          );
-          if (bf16Mmprojs.length > 0) {
-            // 找到 BF16 版本，下载所有 BF16 投影文件
-            for (const mmproj of bf16Mmprojs) {
-              fallbackFiles.push(mmproj.name);
-              console.log(`添加视觉投影文件 (BF16): ${mmproj.name}`);
-            }
-          } else {
-            // 没有 BF16 版本，下载第一个投影文件
-            const firstMmproj = model.mmproj_options[0];
-            fallbackFiles.push(firstMmproj.name);
-            console.log(`未找到 BF16 版本，下载第一个投影文件: ${firstMmproj.name}`);
+        // 即时 SHA256 校验
+        if (fileInfo.sha256 && result.sha256) {
+          if (result.sha256 !== fileInfo.sha256) {
+            throw new Error(`SHA256 校验失败: ${fileInfo.name} 期望=${fileInfo.sha256.slice(0, 8)}... 实际=${result.sha256.slice(0, 8)}...`);
           }
+          console.log(`✓ SHA256 验证通过: ${fileInfo.name}`);
         }
-        console.log(`下载文件列表: ${fallbackFiles.join(', ')}`);
-        downloadArgs.push('--files', ...fallbackFiles);
+
+        if (result.sha256) sha256Map[fileInfo.name] = result.sha256;
+        if (result.wasResumed) resumedFiles.add(fileInfo.name);
       }
 
-      // 调用 Python 脚本
-      const pythonProcess = spawn(PYTHON_PATH, downloadArgs);
+      if (!downloadStateManager.hasDownload(model.id, downloadState.targetQuantization)) return;
 
-      // 保存进程引用到状态管理器
-      downloadStateManager.setPythonProcess(downloadState.modelId, pythonProcess, downloadState.targetQuantization);
-
-      let outputData = '';
-      let errorData = '';
-
-      pythonProcess.stdout.on('data', (data) => {
-        outputData += data.toString();
-        console.log(`ModelScope: ${data.toString().trim()}`);
-      });
-
-      pythonProcess.stderr.on('data', (data) => {
-        errorData += data.toString();
-        const line = data.toString().trim();
-        console.error(`ModelScope stderr: ${line}`);
-
-        // 解析进度信息
-        // 格式: Downloading {filename}: {N}%|{downloaded}/{total}|{speed}
-        const progressMatch = line.match(/Downloading\s+.+?:\s*(\d+)%\|([^/]+)\/([^|]+)\|(.+)/);
-
-        if (progressMatch) {
-          const progress = parseInt(progressMatch[1]);
-          const downloaded = progressMatch[2].trim();
-          const total = progressMatch[3].trim();
-          const speed = progressMatch[4].trim();
-
-          // 解析字节数
-          const parseSize = (s) => {
-            const m = s.match(/([\d.]+)\s*(B|KB|MB|GB|TB|K|M|G|T)?/i);
-            if (!m) return 0;
-            const val = parseFloat(m[1]);
-            const unit = (m[2] || 'B').toUpperCase();
-            const units = { B: 1, K: 1024, KB: 1024, M: 1024**2, MB: 1024**2, G: 1024**3, GB: 1024**3, T: 1024**4, TB: 1024**4 };
-            return Math.floor(val * (units[unit] || 1));
-          };
-
-          const dlBytes = parseSize(downloaded);
-          const ttBytes = parseSize(total);
-          const speedBytes = parseSize(speed);
-
-          // 只更新内存中的进度，不写数据库
-          downloadStateManager.updateProgress(downloadState.modelId, progress, speedBytes, downloadState.targetQuantization);
-          downloadStateManager.updateBytes(downloadState.modelId, dlBytes, ttBytes, downloadState.targetQuantization);
-
-          console.log(`📊 下载进度: ${progress}% (${downloaded}/${total}) @ ${speed}`);
-
-          this.emit('progress', {
-            modelId: downloadState.modelId,
-            progress: progress,
-            speed: speed,
-            downloadedBytes: downloaded,
-            totalBytes: total
-          });
-        }
-      });
-
-      const exitCode = await new Promise((resolve) => {
-        pythonProcess.on('close', resolve);
-      });
-
-      // 清理进程引用
-      downloadStateManager.setPythonProcess(downloadState.modelId, null, downloadState.targetQuantization);
-
-      // 检查是否被取消
-      if (!downloadStateManager.hasDownload(model.id, downloadState.targetQuantization)) {
-        console.log(`下载已被取消: ${model.id}`);
-        return;
-      }
-
-      if (exitCode !== 0) {
-        const currentState = downloadStateManager.getState(model.id, downloadState.targetQuantization);
-        if (currentState?.status === 'paused') {
-          console.log(`下载已暂停: ${model.id}`);
-          return;
-        }
-        if (currentState?.status === 'cancelling') {
-          console.log(`下载已取消: ${model.id}`);
-          return;
-        }
-        throw new Error(`ModelScope download failed (exit code ${exitCode}): ${errorData || 'Unknown error'}`);
-      }
-
-      // 解析输出的 JSON 结果
-      try {
-        const result = JSON.parse(outputData.trim().split('\n').pop());
-        if (!result.success) {
-          throw new Error(result.error || 'Download failed');
-        }
-
-        console.log(`✓ ModelScope 下载完成: ${result.model_dir}`);
-      } catch (parseError) {
-        console.warn('无法解析 ModelScope 输出，但下载可能成功了');
-      }
-
-      // 下载完成，更新内存状态
       downloadStateManager.setState(model.id, 'completed', null, downloadState.targetQuantization);
       downloadStateManager.updateProgress(model.id, 100, 0, downloadState.targetQuantization);
 
-      // 文件已直接下载到目标目录，无需移动或合并
-      const targetDir = modelDir;
-
-      // 扫描下载的文件并记录（.part 临时文件已被 Python 脚本自动重命名，无需过滤）
-      const downloadedFiles = await this._listDownloadedFiles(targetDir);
+      // 扫描 + 构建文件记录（含实时算好的 sha256）
+      const downloadedFileNames = await this._listDownloadedFiles(modelDir);
       const existingFiles = model.downloaded_files || [];
 
-      // 为新下载的文件创建记录
-      const newFiles = downloadedFiles.map(filename => {
-        const filePath = path.join(targetDir, filename);
-        const stats = fs.statSync(filePath);
-
-        // 尝试匹配预设：优先使用文件名正则匹配，回退到 targetQuantization
+      const newFiles = downloadedFileNames.map(filename => {
+        const stats = fs.statSync(path.join(modelDir, filename));
         let matchedPreset = null;
         if (model.quantizations) {
           const preset = model.quantizations.find(q => {
+            if (q.file?.name === filename) return true;
             if (q.filename && filename === q.filename) return true;
-            const pattern = q.filename || `*${q.name}*.gguf`;
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i');
-            return regex.test(filename);
+            return new RegExp((q.filename || `*${q.name}*.gguf`).replace(/\*/g, '.*'), 'i').test(filename);
           });
           matchedPreset = preset?.name || null;
         }
-        if (!matchedPreset) {
-          matchedPreset = downloadState?.targetQuantization || null;
-        }
+        if (!matchedPreset) matchedPreset = downloadState?.targetQuantization || null;
 
-        return {
-          filename,
-          size: stats.size,
-          downloaded_at: new Date().toISOString(),
-          matched_preset: matchedPreset,
-          is_active: false
-        };
+        return { filename, size: stats.size, sha256: sha256Map[filename] || null, downloaded_at: new Date().toISOString(), matched_preset: matchedPreset, is_active: false };
       });
 
-      // 合并文件列表，去重
       const mergedFiles = [...existingFiles];
-      for (const newFile of newFiles) {
-        const existingIndex = mergedFiles.findIndex(f => f.filename === newFile.filename);
-        if (existingIndex >= 0) {
-          // 更新现有文件信息
-          mergedFiles[existingIndex] = newFile;
-        } else {
-          // 添加新文件
-          mergedFiles.push(newFile);
-        }
+      for (const f of newFiles) {
+        const idx = mergedFiles.findIndex(x => x.filename === f.filename);
+        if (idx >= 0) mergedFiles[idx] = f; else mergedFiles.push(f);
       }
 
-      // 下载完成后激活逻辑：
-      // 1. 如果下载的文件匹配 selected_quantization，自动激活并清除 selected_quantization
-      // 2. 如果没有激活的文件且没有 selected_quantization，激活第一个
       let shouldClearSelectedQuantization = false;
       if (model.selected_quantization && !mergedFiles.some(f => f.is_active)) {
-        const matchingFile = mergedFiles.find(f => f.matched_preset === model.selected_quantization);
-        if (matchingFile) {
-          matchingFile.is_active = true;
-          shouldClearSelectedQuantization = true;
-        }
+        const m = mergedFiles.find(f => f.matched_preset === model.selected_quantization);
+        if (m) { m.is_active = true; shouldClearSelectedQuantization = true; }
       }
       if (!mergedFiles.some(f => f.is_active) && mergedFiles.length > 0 && !model.selected_quantization) {
         mergedFiles[0].is_active = true;
       }
 
-      // 同时更新新旧字段以保持兼容性（使用方法开头定义的 targetQuantization）
       const downloadedQuantizations = model.downloaded_quantizations || [];
       if (targetQuantization && !downloadedQuantizations.includes(targetQuantization)) {
         downloadedQuantizations.push(targetQuantization);
       }
 
-      // 只更新持久字段到数据库
-      const updateData = {
-        downloaded: true,
-        downloaded_files: mergedFiles,
-        downloaded_quantizations: downloadedQuantizations,
-        local_path: targetDir
-      };
-      if (shouldClearSelectedQuantization) {
-        updateData.selected_quantization = null;
-      }
+      const updateData = { downloaded: true, downloaded_files: mergedFiles, downloaded_quantizations: downloadedQuantizations, local_path: modelDir };
+      if (shouldClearSelectedQuantization) updateData.selected_quantization = null;
       await modelManager.update(model.id, updateData);
 
-      // 重新生成 INI 预设文件
+      // 断点续传的文件没有流式 SHA256，后台补算
+      const resumedNeedVerify = newFiles.filter(f => resumedFiles.has(f.filename) && !f.sha256);
+      if (resumedNeedVerify.length > 0) {
+        this._verifySHA256InBackground(model.id, resumedNeedVerify, model.quantizations, modelDir)
+          .catch(err => console.error('[SHA256] 断点续传补算出错:', err));
+      }
+
       await presetService.generatePresetFile(model.type);
-
-      // 5秒后清除已完成的状态
       const doneQuant = downloadState.targetQuantization;
-      setTimeout(() => {
-        downloadStateManager.deleteState(model.id, doneQuant);
-      }, 5000);
-
-      console.log(`✓ 模型 ${model.id} 下载完成并移动到: ${targetDir}`);
+      setTimeout(() => downloadStateManager.deleteState(model.id, doneQuant), 5000);
+      console.log(`✓ 模型 ${model.id} 下载完成: ${modelDir}`);
 
     } catch (error) {
-      console.error(`ModelScope download error:`, error);
+      if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+        const st = downloadStateManager.getState(model.id, downloadState.targetQuantization);
+        console.log(st?.status === 'paused' ? `下载已暂停: ${model.id}` : `下载已取消: ${model.id}`);
+        return;
+      }
+      console.error(`ModelScope 下载出错:`, error);
       throw error;
     }
   }
@@ -902,6 +874,75 @@ class DownloadService extends EventEmitter {
     // 重命名为正式文件
     fs.renameSync(tempPath, filePath);
     console.log(`✓ 文件下载完成: ${fileInfo.name}`);
+  }
+
+  /**
+   * 后台异步计算 .gguf 文件的 SHA256，并更新 downloaded_files 记录
+   * 计算完成后若与配置期望值不符，记录警告（下次 checkActiveFileIntegrity 会返回 false）
+   *
+   * @param {string} modelId
+   * @param {Array}  files         - 本次下载写入 DB 的 downloaded_files 条目
+   * @param {Array}  quantizations - 模型的 quantizations 配置（含期望 sha256）
+   * @param {string} modelDir      - .gguf 文件所在目录
+   */
+  async _verifySHA256InBackground(modelId, files, quantizations, modelDir) {
+    const sha256Map = {}; // filename -> sha256 hex string
+
+    for (const fileRec of files) {
+      if (!fileRec.filename.endsWith('.gguf')) continue;
+      const filePath = path.join(modelDir, fileRec.filename);
+      if (!fs.existsSync(filePath)) continue;
+
+      try {
+        const sha256 = await this._calculateSHA256(filePath);
+        sha256Map[fileRec.filename] = sha256;
+
+        const quantInfo = quantizations?.find(q => q.name === fileRec.matched_preset);
+        if (quantInfo?.file?.sha256) {
+          if (sha256 !== quantInfo.file.sha256) {
+            console.error(`[SHA256] 文件损坏: ${fileRec.filename} 实际=${sha256.slice(0, 8)}... 期望=${quantInfo.file.sha256.slice(0, 8)}...`);
+          } else {
+            console.log(`[SHA256] 验证通过: ${fileRec.filename}`);
+          }
+        } else {
+          console.log(`[SHA256] 已计算: ${fileRec.filename} = ${sha256.slice(0, 8)}...`);
+        }
+      } catch (err) {
+        console.warn(`[SHA256] 计算失败: ${fileRec.filename}`, err.message);
+      }
+    }
+
+    if (Object.keys(sha256Map).length === 0) return;
+
+    // 重新读取当前最新 model 数据，避免覆盖并发更新
+    const currentModel = modelManager.getById(modelId);
+    if (!currentModel) return;
+
+    const updatedFiles = (currentModel.downloaded_files || []).map(f =>
+      sha256Map[f.filename] !== undefined ? { ...f, sha256: sha256Map[f.filename] } : f
+    );
+
+    await modelManager.update(modelId, { downloaded_files: updatedFiles });
+    console.log(`[SHA256] 已写入 ${modelId} 的 sha256 记录`);
+  }
+
+  /**
+   * 启动时对所有缺少 sha256 的已下载 .gguf 文件补算并写入
+   * 处理场景：下载后 Node 崩溃、旧版本未记录 sha256 的历史数据
+   */
+  async verifyMissingSHA256() {
+    const models = modelManager.getAll().filter(m => m.downloaded_files?.length > 0);
+    const pending = models.filter(m =>
+      m.downloaded_files.some(f => f.filename?.endsWith('.gguf') && !f.sha256) &&
+      m.local_path
+    );
+    if (pending.length === 0) return;
+
+    console.log(`[SHA256] 发现 ${pending.length} 个模型需要补算 sha256，后台处理中...`);
+    for (const model of pending) {
+      this._verifySHA256InBackground(model.id, model.downloaded_files, model.quantizations, model.local_path)
+        .catch(err => console.error(`[SHA256] 补算失败: ${model.id}`, err));
+    }
   }
 
   /**

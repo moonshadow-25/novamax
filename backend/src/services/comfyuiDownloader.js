@@ -1,11 +1,9 @@
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
+import { MODELS_RUN_DIR } from '../config/constants.js';
 import urlConverter from './urlConverter.js';
-import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 import downloadStateManager from './downloadStateManager.js';
 import eventBus from './eventBus.js';
 
@@ -14,17 +12,12 @@ const TASK_CLEANUP_MS = 5 * 1000; // 5 seconds - 完成/失败后快速清理
 /**
  * ComfyUI模型下载服务
  * 下载优先级：
- *   1. ModelScope SDK（modelscope_downloader.py）
- *   2. HuggingFace SDK via hf-mirror（hf_downloader.py）
- *   3. HTTP 直接下载 - ModelScope URL
- *   4. HTTP 直接下载 - hf-mirror URL
+ *   1. HTTP 直接下载 - ModelScope URL
+ *   2. HTTP 直接下载 - hf-mirror URL
  *   永远不使用 huggingface.co 直连
  */
 class ComfyUIDownloader {
   constructor() {
-    this.pythonPath = getPythonPath();
-    this.msScript = getPythonScriptPath('modelscope_downloader.py');
-    this.hfScript = getPythonScriptPath('hf_downloader.py');
     this.tasks = new Map();
   }
 
@@ -319,31 +312,17 @@ class ComfyUIDownloader {
 
     const checkAborted = () => abortSignal?.aborted;
 
-    // 1. ModelScope SDK
+    // 1. HTTP - ModelScope URL
     if (checkAborted()) return { aborted: true };
-    console.log('[1/4] 尝试 ModelScope SDK...');
-    if (await this._downloadWithModelScopeSDK(originalUrl, targetPath, onProgress, abortSignal)) {
-      return { success: true, path: targetPath, source: 'modelscope_sdk' };
-    }
-
-    // 2. HuggingFace SDK via hf-mirror
-    if (checkAborted()) return { aborted: true };
-    console.log('[2/4] 尝试 HuggingFace SDK (hf-mirror)...');
-    if (await this._downloadWithHuggingFaceSDK(originalUrl, targetPath, onProgress, abortSignal)) {
-      return { success: true, path: targetPath, source: 'hf_mirror_sdk' };
-    }
-
-    // 3. HTTP - ModelScope URL
-    if (checkAborted()) return { aborted: true };
-    console.log('[3/4] 尝试 HTTP (ModelScope)...');
+    console.log('[1/2] 尝试 HTTP (ModelScope)...');
     const msUrl = this._toModelScopeUrl(originalUrl);
     if (msUrl && await this._downloadWithHTTP(msUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'http_modelscope' };
     }
 
-    // 4. HTTP - hf-mirror URL
+    // 2. HTTP - hf-mirror URL
     if (checkAborted()) return { aborted: true };
-    console.log('[4/4] 尝试 HTTP (hf-mirror)...');
+    console.log('[2/2] 尝试 HTTP (hf-mirror)...');
     const hfMirrorUrl = this._toHFMirrorUrl(originalUrl);
     if (hfMirrorUrl && await this._downloadWithHTTP(hfMirrorUrl, targetPath, onProgress, abortSignal)) {
       return { success: true, path: targetPath, source: 'http_hf_mirror' };
@@ -354,102 +333,6 @@ class ComfyUIDownloader {
   }
 
   // ────────────────────────────── private ──────────────────────────────
-
-  /**
-   * 使用 modelscope_downloader.py 下载
-   * 与 LLM 下载方式一致：直接输出到目标目录，脚本内部用 .part 文件，完成后自动重命名
-   */
-  async _downloadWithModelScopeSDK(url, targetPath, onProgress, abortSignal = null) {
-    try {
-      const repoInfo = urlConverter.parseRepoInfo(url);
-      if (!repoInfo) {
-        console.log('  无法解析仓库信息，跳过 ModelScope SDK');
-        return false;
-      }
-
-      const modelId = `${repoInfo.org}/${repoInfo.repo}`;
-      const filename = path.basename(repoInfo.filepath || targetPath);
-      const targetDir = path.dirname(targetPath);
-
-      console.log(`  ModelScope 模型: ${modelId}, 文件: ${filename}`);
-
-      fs.mkdirSync(targetDir, { recursive: true });
-
-      const result = await this._execScript(this.msScript, [
-        modelId,
-        '--output', targetDir,
-        '--files', filename
-      ], onProgress, targetPath, abortSignal);
-
-      if (result.success) {
-        if (fs.existsSync(targetPath)) {
-          console.log(`  ✅ ModelScope SDK 下载成功`);
-          return true;
-        }
-        console.log('  下载脚本成功但未找到文件');
-      } else {
-        console.log(`  ModelScope SDK 失败: exit code ${result.code}`);
-      }
-    } catch (error) {
-      console.log(`  ModelScope SDK 异常: ${error.message}`);
-    }
-    return false;
-  }
-
-  /**
-   * 使用 hf_downloader.py + hf-mirror 端点下载
-   * 直接输出到目标目录；hf_hub_download 可能保留仓库内路径结构，用 _findFileRecursive 兜底定位
-   */
-  async _downloadWithHuggingFaceSDK(url, targetPath, onProgress, abortSignal = null) {
-    try {
-      const repoInfo = urlConverter.parseRepoInfo(url);
-      if (!repoInfo) {
-        console.log('  无法解析仓库信息，跳过 HF SDK');
-        return false;
-      }
-
-      const repoId = `${repoInfo.org}/${repoInfo.repo}`;
-      const filepath = repoInfo.filepath;
-      const filename = path.basename(filepath || targetPath);
-      const targetDir = path.dirname(targetPath);
-
-      console.log(`  HF 仓库: ${repoId}, 文件路径: ${filepath}`);
-
-      fs.mkdirSync(targetDir, { recursive: true });
-
-      const args = [
-        repoId,
-        '--output', targetDir,
-        '--endpoint', 'https://hf-mirror.com'
-      ];
-      if (filepath) {
-        args.push('--files', filepath);
-      }
-
-      const result = await this._execScript(this.hfScript, args, onProgress, targetPath, abortSignal);
-
-      if (result.success) {
-        // 优先检查文件是否已在正确位置
-        if (fs.existsSync(targetPath)) {
-          console.log(`  ✅ HF SDK (hf-mirror) 下载成功`);
-          return true;
-        }
-        // hf_hub_download 可能把文件放在子目录（保留仓库路径），递归查找后移动
-        const found = this._findFileRecursive(targetDir, filename);
-        if (found) {
-          fs.renameSync(found, targetPath);
-          console.log(`  ✅ HF SDK (hf-mirror) 下载成功`);
-          return true;
-        }
-        console.log('  下载脚本成功但未找到文件');
-      } else {
-        console.log(`  HF SDK 失败: exit code ${result.code}`);
-      }
-    } catch (error) {
-      console.log(`  HF SDK 异常: ${error.message}`);
-    }
-    return false;
-  }
 
   /**
    * 使用 HTTP 直接下载，带进度/速度回调，支持 Range 断点续传
@@ -536,136 +419,6 @@ class ComfyUIDownloader {
    *   50%|█████     | 1.00G/2.00G [01:15<01:15, 6.67MB/s]
    *   Downloading model.safetensors: 100%|██| 5.00G/5.00G [02:30, 35.2MB/s]
    */
-  _parseTqdmLine(line) {
-    const info = {};
-
-    // 进度百分比
-    const pctMatch = line.match(/(\d+)%\|/);
-    if (pctMatch) info.progress = parseInt(pctMatch[1], 10);
-
-    // 已下载/总大小，如 "1.00G/2.00G" 或 "500.0M/1.00G"
-    const sizeMatch = line.match(/([\d.]+)\s*([KMGT]?i?)B?\s*\/\s*([\d.]+)\s*([KMGT]?i?)B?/);
-    if (sizeMatch) {
-      info.downloadedBytes = this._parseHumanSize(sizeMatch[1], sizeMatch[2]);
-      info.totalBytes = this._parseHumanSize(sizeMatch[3], sizeMatch[4]);
-    }
-
-    // 速度，如 "6.67MB/s" 或 "35.2 MB/s"
-    const speedMatch = line.match(/([\d.]+)\s*([KMGT]?i?)B\/s/);
-    if (speedMatch) {
-      info.speed = this._parseHumanSize(speedMatch[1], speedMatch[2]);
-    }
-
-    return info;
-  }
-
-  /**
-   * 解析人类可读的文件大小字符串，返回字节数
-   * 支持 K/M/G/T 和 Ki/Mi/Gi/Ti
-   */
-  _parseHumanSize(value, unit) {
-    const n = parseFloat(value);
-    if (isNaN(n)) return null;
-    const u = unit.toUpperCase().replace('I', '');
-    const multipliers = { '': 1, 'K': 1024, 'M': 1024 ** 2, 'G': 1024 ** 3, 'T': 1024 ** 4 };
-    return Math.round(n * (multipliers[u] ?? 1));
-  }
-
-  /**
-   * 执行 Python 脚本，返回 { success, code, stdout, stderr }
-   * @param {string} scriptPath
-   * @param {string[]} args
-   * @param {Function} onProgress - 进度回调 ({ progress, totalBytes, downloadedBytes, speed })
-   * @param {string} targetPath - 用于监测磁盘写入速度（可选）
-   */
-  _execScript(scriptPath, args, onProgress = null, targetPath = null, abortSignal = null) {
-    return new Promise((resolve) => {
-      if (abortSignal?.aborted) {
-        return resolve({ success: false, aborted: true });
-      }
-
-      const proc = spawn(this.pythonPath, [scriptPath, ...args], {
-        cwd: PROJECT_ROOT,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-      });
-
-      // 存储进程引用到对应的 task（通过遍历查找）
-      for (const task of this.tasks.values()) {
-        if (task._abortController?.signal === abortSignal && task._process === null) {
-          task._process = proc;
-          break;
-        }
-      }
-
-      // 监听 abort 信号，杀掉子进程
-      const onAbort = () => {
-        try { proc.kill('SIGTERM'); } catch {}
-      };
-      if (abortSignal) {
-        abortSignal.addEventListener('abort', onAbort, { once: true });
-      }
-
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr.on('data', (data) => {
-        const line = data.toString();
-        stderr += line;
-        if (line.trim()) console.log(' ', line.trim());
-
-        if (onProgress) {
-          const info = this._parseTqdmLine(line);
-          if (info.progress != null) {
-            onProgress({
-              progress: info.progress,
-              totalBytes: info.totalBytes ?? null,
-              downloadedBytes: info.downloadedBytes ?? null,
-              speed: info.speed ?? null
-            });
-          }
-        }
-      });
-
-      proc.on('close', (code) => {
-        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-        // 清除进程引用
-        for (const task of this.tasks.values()) {
-          if (task._process === proc) { task._process = null; break; }
-        }
-
-        if (abortSignal?.aborted) {
-          return resolve({ success: false, aborted: true });
-        }
-        if (code === 0) {
-          try {
-            const lastLine = stdout.trim().split('\n').pop();
-            const parsed = JSON.parse(lastLine);
-            resolve({ success: parsed.success === true, code, stdout, stderr, parsed });
-          } catch {
-            resolve({ success: true, code, stdout, stderr });
-          }
-        } else {
-          resolve({ success: false, code, stdout, stderr });
-        }
-      });
-
-      proc.on('error', (error) => {
-        if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-        for (const task of this.tasks.values()) {
-          if (task._process === proc) { task._process = null; break; }
-        }
-        if (abortSignal?.aborted) {
-          return resolve({ success: false, aborted: true });
-        }
-        resolve({ success: false, code: -1, error: error.message, stdout, stderr });
-      });
-    });
-  }
-
   /**
    * 获取模型目标路径
    * type 是 ComfyUI 目录名（text_encoders / vae / diffusion_models / checkpoints 等）
@@ -700,26 +453,6 @@ class ComfyUIDownloader {
     if (url.includes('modelscope.cn/models')) {
       return url.replace('modelscope.cn/models', 'hf-mirror.com');
     }
-    return null;
-  }
-
-  /**
-   * 在目录中递归查找指定文件名
-   */
-  _findFileRecursive(dir, filename) {
-    if (!fs.existsSync(dir)) return null;
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          const found = this._findFileRecursive(full, filename);
-          if (found) return found;
-        } else if (entry.name === filename) {
-          return full;
-        }
-      }
-    } catch {}
     return null;
   }
 
