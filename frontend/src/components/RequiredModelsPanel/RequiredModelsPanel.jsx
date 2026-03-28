@@ -33,29 +33,14 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
   const [models, setModels] = useState(requiredModels || []);
   const [batchInitiating, setBatchInitiating] = useState(false);
   // { [filename]: { taskId, progress } }
-  const [downloadingTasks, setDownloadingTasks] = useState(() => {
-    // 组件挂载时从 localStorage 恢复任务状态（关闭弹框再打开也能续上）
-    if (!modelId) return {};
-    try {
-      const saved = localStorage.getItem(`comfyui_tasks_${modelId}`);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [downloadingTasks, setDownloadingTasks] = useState({});
   const downloadingTasksRef = useRef({});
   const isFirstPollRef = useRef(true);
   const pollingRef = useRef(false);
 
-  // Keep ref in sync with state，同时持久化到 localStorage
+  // Keep ref in sync with state
   useEffect(() => {
     downloadingTasksRef.current = downloadingTasks;
-    if (!modelId) return;
-    if (Object.keys(downloadingTasks).length === 0) {
-      localStorage.removeItem(`comfyui_tasks_${modelId}`);
-    } else {
-      localStorage.setItem(`comfyui_tasks_${modelId}`, JSON.stringify(downloadingTasks));
-    }
   }, [downloadingTasks, modelId]);
 
   useEffect(() => {
@@ -185,6 +170,20 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
       const response = await comfyuiService.getModelsStatus(modelId);
       if (response.success) {
         setModels(response.required_models);
+        // 从后端拉取活跃任务（downloading/paused），补充本地未追踪的任务
+        const activeFromServer = {};
+        (response.required_models || []).forEach(m => {
+          if (m.active_task && !downloadingTasksRef.current[m.filename]) {
+            activeFromServer[m.filename] = {
+              taskId: m.active_task.taskId,
+              progress: 0,
+              paused: m.active_task.status === 'paused'
+            };
+          }
+        });
+        if (Object.keys(activeFromServer).length > 0) {
+          setDownloadingTasks(prev => ({ ...prev, ...activeFromServer }));
+        }
       }
     } catch (error) {
       console.error('Failed to load models status:', error);
