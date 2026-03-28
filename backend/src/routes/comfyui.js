@@ -13,6 +13,7 @@ import urlConverter from '../services/urlConverter.js';
 import comfyuiDownloader from '../services/comfyuiDownloader.js';
 import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
 import engineManager from '../services/engineManager.js';
+import downloadStateManager from '../services/downloadStateManager.js';
 import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 
 const router = express.Router();
@@ -579,9 +580,28 @@ router.get('/comfyui/:id/models-status', async (req, res) => {
       required_models: updatedModels
     });
 
+    // 附加 downloadStateManager 中活跃的 ComfyUI 任务（paused/downloading），供前端恢复 UI 状态
+    // 这样前端不需要 localStorage，每次打开弹窗从后端拉取即可
+    const allStates = downloadStateManager.getAllStates();
+    const activeByFilename = {};
+    for (const state of Object.values(allStates)) {
+      if (state.type === 'comfyui' && state.comfyuiTaskId && state.targetQuantization &&
+          (state.status === 'paused' || state.status === 'downloading' || state.status === 'pending')) {
+        activeByFilename[state.targetQuantization] = {
+          taskId: state.comfyuiTaskId,
+          status: state.status
+        };
+      }
+    }
+    const modelsWithPaused = updatedModels.map(m =>
+      activeByFilename[m.filename]
+        ? { ...m, active_task: activeByFilename[m.filename] }
+        : m
+    );
+
     res.json({
       success: true,
-      required_models: updatedModels,
+      required_models: modelsWithPaused,
       summary: {
         total: updatedModels.length,
         downloaded: updatedModels.filter(m => m.downloaded).length,

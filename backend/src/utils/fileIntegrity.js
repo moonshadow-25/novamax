@@ -75,3 +75,67 @@ export function isQuantizationIncomplete(modelDir, quantInfo, model) {
 
   return !checkFilesComplete(modelDir, matchedFiles);
 }
+
+/**
+ * 推算 .part 文件已下载的进度百分比（0-99）
+ * 用于程序重启后，将恢复的暂停状态补充真实进度
+ *
+ * @param {string} modelDir - 模型文件目录（由调用方传入，不依赖 pathHelper）
+ * @param {object|null} quantInfo - 量化版本配置（含 is_folder / folder_path / total_size / file.size）
+ * @param {string} quantName - 量化版本名称（用于文件名模糊匹配）
+ * @returns {number} 0-99 的进度值；若无 .part 文件则返回 0
+ */
+export function calcPartFileProgress(modelDir, quantInfo, quantName) {
+  if (!modelDir || !fs.existsSync(modelDir)) return 0;
+
+  // 扫描顶层 .part 文件
+  let topPartFiles = [];
+  try {
+    topPartFiles = fs.readdirSync(modelDir).filter(f => f.endsWith('.part'));
+  } catch (e) {
+    return 0;
+  }
+
+  // 文件夹型量化：额外扫描子目录
+  let subPartFiles = [];
+  let subDir = null;
+  if (quantInfo?.is_folder && quantInfo.folder_path) {
+    subDir = path.join(modelDir, quantInfo.folder_path);
+    if (fs.existsSync(subDir)) {
+      try {
+        subPartFiles = fs.readdirSync(subDir).filter(f => f.endsWith('.part'));
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  if (topPartFiles.length === 0 && subPartFiles.length === 0) return 0;
+
+  // 顶层：按量化名称模糊匹配（文件名包含 quantName）
+  const escapedQuant = (quantName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const quantRegex = escapedQuant ? new RegExp(escapedQuant, 'i') : null;
+  const matchedTop = quantRegex
+    ? topPartFiles.filter(f => quantRegex.test(f.replace(/\.part$/, '')))
+    : topPartFiles;
+
+  // 子目录中的任何 .part 文件都属于该文件夹型量化
+  const hasSubMatch = subPartFiles.length > 0;
+
+  if (matchedTop.length === 0 && !hasSubMatch) return 0;
+
+  // 计算已下载字节 / 预期总大小
+  const totalSize = quantInfo?.is_folder
+    ? (quantInfo.total_size || 0)
+    : (quantInfo?.file?.size || 0);
+
+  let partSize = 0;
+  for (const f of matchedTop) {
+    try { partSize += fs.statSync(path.join(modelDir, f)).size; } catch (e) { /* ignore */ }
+  }
+  if (hasSubMatch) {
+    for (const f of subPartFiles) {
+      try { partSize += fs.statSync(path.join(subDir, f)).size; } catch (e) { /* ignore */ }
+    }
+  }
+
+  return totalSize > 0 ? Math.min(99, Math.floor(partSize / totalSize * 100)) : 0;
+}

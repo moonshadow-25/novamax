@@ -43,6 +43,7 @@ class ComfyUIDownloader {
     const dsState = downloadStateManager.createState(stateId, modelInfo.filename, 'comfyui');
     dsState.comfyuiTaskId = taskId;
     dsState.displayName = `${modelInfo.filename}`;
+    dsState._modelInfo = modelInfo; // 持久化时保留，重启后可重建任务
 
     this.tasks.set(taskId, {
       taskId,
@@ -97,10 +98,35 @@ class ComfyUIDownloader {
    * 恢复下载
    */
   resumeDownload(taskId) {
-    const task = this.tasks.get(taskId);
-    if (!task || task.status !== 'paused') {
-      return false;
+    let task = this.tasks.get(taskId);
+
+    // 程序重启后 tasks 为空，尝试从 downloadStateManager 恢复的状态重建任务
+    if (!task) {
+      const dsState = downloadStateManager.getFullStateByComfyuiTaskId(taskId);
+      if (!dsState || !dsState._modelInfo) return false;
+
+      task = {
+        taskId,
+        filename: dsState.targetQuantization,
+        type: dsState._modelInfo.type,
+        status: 'paused',
+        progress: 0,
+        totalBytes: null,
+        downloadedBytes: null,
+        speed: null,
+        source: null,
+        path: null,
+        error: null,
+        _abortController: new AbortController(),
+        _modelInfo: dsState._modelInfo,
+        _onComplete: null,
+        _process: null,
+        _stateId: dsState.id
+      };
+      this.tasks.set(taskId, task);
     }
+
+    if (task.status !== 'paused') return false;
     // 创建新的 AbortController
     task._abortController = new AbortController();
     task.status = 'downloading';
@@ -118,7 +144,14 @@ class ComfyUIDownloader {
    */
   cancelDownload(taskId) {
     const task = this.tasks.get(taskId);
-    if (!task) return false;
+    if (!task) {
+      // 程序重启后 tasks 为空，直接从 downloadStateManager 清理残留状态
+      const dsState = downloadStateManager.getFullStateByComfyuiTaskId(taskId);
+      if (dsState) {
+        downloadStateManager.deleteState(dsState.id, dsState.targetQuantization);
+      }
+      return true;
+    }
     // 中止当前下载
     task._abortController.abort();
     if (task._process) {
@@ -173,7 +206,23 @@ class ComfyUIDownloader {
    */
   getTask(taskId) {
     const task = this.tasks.get(taskId);
-    if (!task) return null;
+    if (!task) {
+      // 程序重启后 tasks 为空，从 downloadStateManager 恢复状态供前端轮询
+      const dsState = downloadStateManager.getFullStateByComfyuiTaskId(taskId);
+      if (dsState) {
+        return {
+          taskId,
+          filename: dsState.targetQuantization,
+          status: 'paused',
+          progress: 0,
+          totalBytes: null,
+          downloadedBytes: null,
+          speed: 0,
+          _restoredFromDisk: true
+        };
+      }
+      return null;
+    }
     // 不暴露内部字段
     const { _abortController, _modelInfo, _onComplete, _process, ...publicTask } = task;
     return publicTask;

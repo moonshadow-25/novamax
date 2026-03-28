@@ -2,22 +2,97 @@
  * 下载临时状态管理器
  *
  * 职责：
- * - 管理所有下载任务的临时状态（仅在内存中）
- * - 不持久化任何临时数据到数据库
- * - 后端重启时状态自动清空
+ * - 管理所有下载任务的内存状态
+ * - 将 downloading / paused 状态持久化到 download_state.json
+ *   程序崩溃或被关闭后，重启时可从文件恢复为 paused 状态
  * - 支持同一模型的多个量化版本并发下载
  */
+import fs from 'fs';
 import eventBus from './eventBus.js';
+import { DOWNLOAD_STATE_FILE } from '../config/constants.js';
 
 class DownloadStateManager {
   constructor() {
     this.states = new Map(); // key: "modelId" or "modelId::quantName" -> state
     this._lastBroadcast = 0;
+    this._load(); // 启动时从磁盘恢复中断的下载
   }
 
   /** 构建内部 key */
   _key(modelId, quantName) {
     return quantName ? `${modelId}::${quantName}` : modelId;
+  }
+
+  /**
+   * 将 downloading / paused 状态写入持久化文件
+   * 每次状态变更时调用，文件内容始终与内存一致
+   */
+  _persist() {
+    const records = {};
+    for (const [key, state] of this.states.entries()) {
+      // 引擎不持久化：下载不支持断点续传，重启后直接重头下载即可，不需要恢复暂停状态
+      if (state.type === 'engine') continue;
+      if (state.status === 'downloading' || state.status === 'paused') {
+        records[key] = {
+          id: state.id,
+          type: state.type || 'model',
+          quantName: state.targetQuantization || null,
+          startedAt: state.startTime,
+          // ComfyUI 专用字段
+          displayName: state.displayName || null,
+          comfyuiTaskId: state.comfyuiTaskId || null,
+          // ComfyUI 下载需要 modelInfo 才能重建任务
+          modelInfo: state.type === 'comfyui' ? (state._modelInfo || null) : undefined
+        };
+      }
+    }
+    try {
+      fs.writeFileSync(DOWNLOAD_STATE_FILE, JSON.stringify(records, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('[downloadState] 持久化失败:', e.message);
+    }
+  }
+
+  /**
+   * 启动时从持久化文件恢复中断的下载任务（全部标记为 paused）
+   */
+  _load() {
+    if (!fs.existsSync(DOWNLOAD_STATE_FILE)) return;
+    try {
+      const raw = fs.readFileSync(DOWNLOAD_STATE_FILE, 'utf-8');
+      const records = JSON.parse(raw);
+      let count = 0;
+      for (const [key, record] of Object.entries(records)) {
+        const state = {
+          id: record.id,
+          modelId: record.type === 'model' ? record.id : null,
+          engineId: record.type === 'engine' ? record.id : null,
+          type: record.type || 'model',
+          status: 'paused',          // 程序重启后统一视为暂停
+          progress: 0,               // 进度由路由层从 .part 文件重新推算
+          error: null,
+          targetQuantization: record.quantName || null,
+          speed: 0,
+          startTime: record.startedAt || Date.now(),
+          pythonProcess: null,
+          controller: null,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          files: [],
+          displayName: record.displayName || null,
+          comfyuiTaskId: record.comfyuiTaskId || null,
+          _modelInfo: record.modelInfo || null,  // ComfyUI 重建任务所需
+          _restoredFromDisk: true    // 标记为磁盘恢复，路由层据此补算进度
+        };
+        this.states.set(key, state);
+        count++;
+      }
+      if (count > 0) {
+        console.log(`[downloadState] 从磁盘恢复 ${count} 个中断的下载任务`);
+      }
+    } catch (e) {
+      console.error('[downloadState] 加载持久化文件失败:', e.message);
+    }
   }
 
   /**
@@ -49,7 +124,8 @@ class DownloadStateManager {
           error: state.error,
           targetQuantization: state.targetQuantization,
           speed: state.speed,
-          startTime: state.startTime
+          startTime: state.startTime,
+          _restoredFromDisk: state._restoredFromDisk || false
         });
       }
     }
@@ -78,9 +154,11 @@ class DownloadStateManager {
       controller: null,
       downloadedBytes: 0,
       totalBytes: 0,
-      files: []
+      files: [],
+      _restoredFromDisk: false
     };
     this.states.set(this._key(id, targetQuantization), state);
+    this._persist();
     return state;
   }
 
@@ -123,6 +201,7 @@ class DownloadStateManager {
       state.status = status;
       state.error = error;
       eventBus.broadcast('download-progress', { modelId, status });
+      this._persist();
     }
   }
 
@@ -131,6 +210,7 @@ class DownloadStateManager {
    */
   deleteState(modelId, quantName) {
     this.states.delete(this._key(modelId, quantName));
+    this._persist();
     eventBus.broadcast('download-progress', { modelId });
   }
 
@@ -143,6 +223,7 @@ class DownloadStateManager {
         this.states.delete(key);
       }
     }
+    this._persist();
   }
 
   /**
@@ -177,6 +258,16 @@ class DownloadStateManager {
    */
   getFullState(modelId, quantName) {
     return this.states.get(this._key(modelId, quantName)) || null;
+  }
+
+  /**
+   * 通过 comfyuiTaskId 查找完整状态（用于程序重启后重建 ComfyUI 任务）
+   */
+  getFullStateByComfyuiTaskId(taskId) {
+    for (const state of this.states.values()) {
+      if (state.comfyuiTaskId === taskId) return state;
+    }
+    return null;
   }
 
   /**

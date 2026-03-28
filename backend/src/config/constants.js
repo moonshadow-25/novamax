@@ -50,3 +50,4 @@ export const MODELS_RUN_DIR = path.join(DATA_DIR, 'models_dir');
 export const PRESETS_DIR = path.join(DATA_DIR, 'presets');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
+export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');

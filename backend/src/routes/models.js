@@ -8,9 +8,22 @@ import parameterService from '../services/parameterService.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
-import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
+import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
 
 const router = express.Router();
+
+/**
+ * 对磁盘恢复的 paused 状态，从 .part 文件推算真实进度
+ */
+function resolveDownloadProgress(m, primaryDownload) {
+  if (!primaryDownload) return 0;
+  if (primaryDownload.status === 'paused' && primaryDownload._restoredFromDisk) {
+    const modelDir = getModelPath(MODELS_RUN_DIR, m);
+    const quantInfo = m.quantizations?.find(q => q.name === primaryDownload.targetQuantization);
+    return calcPartFileProgress(modelDir, quantInfo, primaryDownload.targetQuantization);
+  }
+  return primaryDownload.progress || 0;
+}
 
 /**
  * 修复 downloaded_files 为空的已下载模型（遗留数据问题）
@@ -82,7 +95,7 @@ router.get('/models', async (req, res) => {
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,
-        download_progress: primaryDownload?.progress || 0,
+        download_progress: resolveDownloadProgress(m, primaryDownload),
         download_error: primaryDownload?.error || null,
         downloading_quantization: primaryDownload?.targetQuantization || null,
         active_file_ok: checkActiveFileIntegrity(m)
@@ -112,7 +125,7 @@ router.get('/models/:id', async (req, res) => {
       port: processStatus.port || null,
       download_states: downloadStates,
       download_status: primaryDownload?.status || null,
-      download_progress: primaryDownload?.progress || 0,
+      download_progress: resolveDownloadProgress(m, primaryDownload),
       download_error: primaryDownload?.error || null,
       downloading_quantization: primaryDownload?.targetQuantization || null,
       active_file_ok: checkActiveFileIntegrity(m)
@@ -139,7 +152,7 @@ router.get('/models/type/:type', async (req, res) => {
         port: processStatus.port || null,
         download_states: downloadStates,
         download_status: primaryDownload?.status || null,
-        download_progress: primaryDownload?.progress || 0,
+        download_progress: resolveDownloadProgress(m, primaryDownload),
         download_error: primaryDownload?.error || null,
         downloading_quantization: primaryDownload?.targetQuantization || null,
         active_file_ok: checkActiveFileIntegrity(m)
