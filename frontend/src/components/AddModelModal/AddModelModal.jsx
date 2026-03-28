@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typography, Tag } from 'antd';
-import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
-import { modelscopeService } from '../../services/api';
+import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typography, Tag, Form } from 'antd';
+import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { modelscopeService, modelService, systemService } from '../../services/api';
 import ModelPreviewDialog from './ModelPreviewDialog';
 import AddWorkflowTab from './AddWorkflowTab';
 
@@ -26,6 +26,14 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
   const [previewData, setPreviewData] = useState(null);
   const [previewConfig, setPreviewConfig] = useState(null);
 
+  // 自定义模型相关状态
+  const [customName, setCustomName] = useState('');
+  const [customPath, setCustomPath] = useState('');
+  const [customDesc, setCustomDesc] = useState('');
+  const [customError, setCustomError] = useState('');
+  const [customLoading, setCustomLoading] = useState(false);
+  const [browseLoading, setBrowseLoading] = useState(false);
+
   // 重置状态
   const resetState = () => {
     setInputMode('search');
@@ -38,6 +46,10 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
     setPreviewVisible(false);
     setPreviewData(null);
     setPreviewConfig(null);
+    setCustomName('');
+    setCustomPath('');
+    setCustomDesc('');
+    setCustomError('');
   };
 
   // 处理关闭
@@ -166,6 +178,56 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || '保存模型失败';
       message.error(errorMsg);
+    }
+  };
+
+  // 浏览文件夹
+  const handleBrowseFolder = async () => {
+    setBrowseLoading(true);
+    try {
+      const result = await systemService.pickFolder();
+      if (!result.cancelled && result.path) {
+        setCustomPath(result.path);
+        setCustomError('');
+      }
+    } catch (err) {
+      message.error('打开文件夹选择器失败');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  // 添加自定义模型
+  const handleAddCustomModel = async () => {
+    if (!customName.trim()) {
+      setCustomError('模型名称不能为空');
+      return;
+    }
+    if (!customPath.trim()) {
+      setCustomError('请选择模型文件夹');
+      return;
+    }
+    setCustomLoading(true);
+    setCustomError('');
+    try {
+      const response = await modelService.addCustomModel({
+        name: customName.trim(),
+        description: customDesc.trim(),
+        local_path: customPath.trim(),
+        type: type || 'llm'
+      });
+      if (response.success) {
+        message.success('自定义模型添加成功');
+        handleClose();
+        if (onSuccess) onSuccess(response.model);
+      } else {
+        setCustomError(response.error || '添加失败');
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.message || '添加失败';
+      setCustomError(errMsg);
+    } finally {
+      setCustomLoading(false);
     }
   };
 
@@ -320,7 +382,57 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
             )}
 
             {activeTab === 'custom' && (
-              <div>自定义模型功能开发中...</div>
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                <Form layout="vertical" style={{ marginTop: 8 }}>
+                  <Form.Item label="模型名称" required>
+                    <Input
+                      placeholder="输入模型名称，例如：My-Llama-Model"
+                      value={customName}
+                      onChange={(e) => { setCustomName(e.target.value); setCustomError(''); }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="模型文件夹" required extra="选择包含 .gguf 文件的文件夹">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input
+                        placeholder="文件夹路径，例如：D:\models\llama"
+                        value={customPath}
+                        onChange={(e) => { setCustomPath(e.target.value); setCustomError(''); }}
+                      />
+                      <Button
+                        icon={<FolderOpenOutlined />}
+                        loading={browseLoading}
+                        onClick={handleBrowseFolder}
+                      >
+                        浏览
+                      </Button>
+                    </Space.Compact>
+                  </Form.Item>
+                  <Form.Item label="模型说明" extra="可不填，不填时卡片上显示模型名称">
+                    <Input.TextArea
+                      placeholder="输入模型说明（可选）"
+                      rows={3}
+                      value={customDesc}
+                      onChange={(e) => setCustomDesc(e.target.value)}
+                    />
+                  </Form.Item>
+                </Form>
+                {customError && (
+                  <Alert
+                    message={customError}
+                    type="error"
+                    closable
+                    onClose={() => setCustomError('')}
+                  />
+                )}
+                <Button
+                  type="primary"
+                  block
+                  loading={customLoading}
+                  onClick={handleAddCustomModel}
+                >
+                  确认添加
+                </Button>
+              </Space>
             )}
           </>
         )}

@@ -10,12 +10,14 @@ import {
   PauseCircleOutlined,
   SwapOutlined,
   AppstoreOutlined,
+  HddOutlined,
   FileTextOutlined,
   StarFilled,
   StarOutlined,
   UndoOutlined,
   LoadingOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  WarningOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
@@ -583,7 +585,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
   // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
   // 3. 或者有active文件但文件不完整（需要重新下载）
-  const shouldDownload = (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization) || (hasActiveFile && !model.active_file_ok)) &&
+  const shouldDownload = model.source !== 'custom' &&
+      (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization) || (hasActiveFile && !model.active_file_ok)) &&
       !isDefaultDownloadCompleted &&
       !isDownloadingDefault &&
       !isDefaultDownloadFailed &&
@@ -697,7 +700,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       </div>
       <div className="model-meta">
-        {model.modelscope_id ? (
+        {model.source === 'custom' ? (
+          <span className="model-source">custom</span>
+        ) : model.modelscope_id ? (
           <span className="model-source" title={model.modelscope_id}>
             {model.modelscope_id.split('/')[0]}
           </span>
@@ -712,8 +717,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           {modelSize > 0 && (
             <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
           )}
-          {currentQuant && (
-            model.quantizations && model.quantizations.length > 1 ? (
+          {(currentQuant || model.source === 'custom') && (
+            model.source === 'custom' ? (
+              <Tag style={{ background: '#fff7e6', borderColor: '#ffd591', color: '#FF9800' }}>自定义 <HddOutlined /></Tag>
+            ) : model.quantizations && model.quantizations.length > 1 ? (
               <Tag
                 color="blue"
                 style={{ cursor: 'pointer' }}
@@ -942,8 +949,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
 
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI） */}
-      {canStart && model.type !== 'comfyui' && (
-        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canStart && model.type !== 'comfyui' && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger
@@ -986,6 +992,20 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               </Button>
             </div>
           )}
+        </Space>
+      )}
+
+      {/* 自定义模型文件缺失提示 */}
+      {model.source === 'custom' && !activeFileOk && model.type !== 'comfyui' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          <Button
+            block
+            disabled
+            icon={<WarningOutlined />}
+            style={{ background: '#FF4D4F', borderColor: '#FF4D4F', color: '#fff', cursor: 'not-allowed' }}
+          >
+            模型文件缺失
+          </Button>
         </Space>
       )}
       </div>

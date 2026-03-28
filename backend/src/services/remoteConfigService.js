@@ -128,6 +128,11 @@ async function syncModels() {
     }
   }
 
+  // 同步后重新计算推荐量化版本，确保新增/更新的模型有 selected_quantization
+  if (added > 0 || updated > 0) {
+    await modelManager._recalcRecommendations();
+  }
+
   console.log(`[remoteConfig] 模型同步完成: 新增 ${added}, 更新 ${updated}`);
   return { added, updated };
 }

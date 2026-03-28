@@ -27,7 +27,8 @@ export const modelService = {
   setActiveFile: (id, filename) => api.post(`/models/${id}/set-active-file`, { filename }),
   deleteQuantization: (id, filename) => api.delete(`/models/${id}/quantization`, { data: { filename } }),
   restoreDefaults: (id) => api.post(`/models/${id}/restore-defaults`),
-  deleteConfig: (id) => api.delete(`/models/${id}/config`)
+  deleteConfig: (id) => api.delete(`/models/${id}/config`),
+  addCustomModel: (data) => api.post('/models/custom', data)
 };
 
 export const modelscopeService = {

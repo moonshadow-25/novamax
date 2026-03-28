@@ -359,16 +359,25 @@ router.post('/system/storage/restore', async (req, res) => {
 /** 调用系统原生文件夹选择对话框 */
 router.post('/system/storage/pick-folder', async (req, res) => {
   try {
+    // 使用隐藏的置顶父窗口，确保对话框显示在最前面而不是被浏览器遮挡
     const cmd = [
       'powershell',
       '-NoProfile',
       '-NoLogo',
       '-Command',
       '"Add-Type -AssemblyName System.Windows.Forms;',
+      '$owner = New-Object System.Windows.Forms.Form;',
+      '$owner.TopMost = $true;',
+      '$owner.Width = 0;',
+      '$owner.Height = 0;',
+      '$owner.ShowInTaskbar = $false;',
+      '$owner.Opacity = 0;',
+      '$null = $owner.Handle;',
       '$f = New-Object System.Windows.Forms.FolderBrowserDialog;',
       '$f.Description = \'选择目标文件夹\';',
       '$f.ShowNewFolderButton = $true;',
-      'if ($f.ShowDialog() -eq \'OK\') { $f.SelectedPath }"'
+      'if ($f.ShowDialog($owner) -eq \'OK\') { $f.SelectedPath };',
+      '$owner.Dispose()"'
     ].join(' ');
 
     const { stdout } = await execAsync(cmd, { encoding: 'utf-8', timeout: 120000 });

@@ -164,6 +164,63 @@ router.get('/models/type/:type', async (req, res) => {
   }
 });
 
+// 添加自定义（本地）模型
+router.post('/models/custom', async (req, res) => {
+  try {
+    const { name, local_path, description, type = 'llm' } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: '模型名称不能为空' });
+    }
+    if (!local_path || !local_path.trim()) {
+      return res.status(400).json({ error: '请选择模型文件夹' });
+    }
+    if (!fs.existsSync(local_path)) {
+      return res.status(400).json({ error: '文件夹不存在，请检查路径' });
+    }
+
+    const trimmedName = name.trim();
+    const duplicate = modelManager.getAll().find(m => m.name === trimmedName && m.type === type);
+    if (duplicate) {
+      return res.status(409).json({ error: `已存在同名模型"${trimmedName}"，请使用其他名称` });
+    }
+
+    const entries = fs.readdirSync(local_path);
+    const ggufFiles = entries.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    if (ggufFiles.length === 0) {
+      return res.status(400).json({ error: '该文件夹中没有找到 .gguf 文件（mmproj 文件不计入）' });
+    }
+
+    const downloaded_files = ggufFiles.map((filename, idx) => {
+      const filePath = path.join(local_path, filename);
+      let size = 0;
+      try { size = fs.statSync(filePath).size; } catch (_) {}
+      return { filename, size, is_active: idx === 0, matched_preset: null };
+    });
+
+    const quantizations = ggufFiles.map(filename => ({
+      name: filename,
+      file: { filename }
+    }));
+
+    const model = await modelManager.create(type, {
+      name: trimmedName,
+      description: description?.trim() || trimmedName,
+      source: 'custom',
+      local_path,
+      downloaded: true,
+      downloaded_files,
+      quantizations,
+      files: { model: downloaded_files[0], mmproj: null }
+    });
+
+    eventBus.broadcast('model-updated', { modelId: model.id });
+    res.json({ success: true, model });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/models', async (req, res) => {
   try {
     const { type, ...modelData } = req.body;
