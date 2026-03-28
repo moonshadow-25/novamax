@@ -295,21 +295,21 @@ class WorkflowAnalyzer {
         if (Array.isArray(inp?.positive) && Array.isArray(inp?.negative)) {
           const posSourceId = traceConditioningSource(inp.positive);
           const negSourceId = traceConditioningSource(inp.negative);
-          if (posSourceId && negSourceId && posSourceId !== negSourceId) {
-            const currentPosId = mapping.inputs.prompt.node_id;
-            const currentNegId = mapping.inputs.negative_prompt.node_id;
-            // 如果追踪到的正面源与当前映射的负面节点一致，说明搞反了 → 交换
-            if (posSourceId === currentNegId && negSourceId === currentPosId) {
-              console.log(`[WorkflowAnalyzer] 正/负面提示词映射已交换: positive→${posSourceId}, negative→${negSourceId}`);
-              const temp = mapping.inputs.prompt;
-              mapping.inputs.prompt = mapping.inputs.negative_prompt;
-              mapping.inputs.negative_prompt = temp;
-              // 更新描述
-              mapping.inputs.prompt.description = '正面提示词';
-              mapping.inputs.negative_prompt.description = '负面提示词';
-            }
+          // posSourceId === negSourceId 说明两条路追踪到同一节点（如 LTXVCropGuides 的两个输出槽
+          // 都来自同一个 LTXVConditioning），无法判断正负，继续找下一个节点
+          if (!posSourceId || !negSourceId || posSourceId === negSourceId) continue;
+          const currentPosId = mapping.inputs.prompt.node_id;
+          const currentNegId = mapping.inputs.negative_prompt.node_id;
+          // 如果追踪到的正面源与当前映射的负面节点一致，说明搞反了 → 交换
+          if (posSourceId === currentNegId && negSourceId === currentPosId) {
+            console.log(`[WorkflowAnalyzer] 正/负面提示词映射已交换: positive→${posSourceId}, negative→${negSourceId}`);
+            const temp = mapping.inputs.prompt;
+            mapping.inputs.prompt = mapping.inputs.negative_prompt;
+            mapping.inputs.negative_prompt = temp;
+            mapping.inputs.prompt.description = '正面提示词';
+            mapping.inputs.negative_prompt.description = '负面提示词';
           }
-          break; // 找到一个即可
+          break; // 找到一个可区分的节点即可
         }
       }
     }

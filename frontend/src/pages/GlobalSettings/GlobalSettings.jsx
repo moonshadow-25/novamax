@@ -333,7 +333,7 @@ const GlobalSettings = () => {
   };
 
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
-    'required_models', 'workflow', 'parameter_mapping'];
+    'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'files', 'capabilities'];
 
   const buildExportJson = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));
@@ -343,8 +343,10 @@ const GlobalSettings = () => {
     const toExportModel = (m) => {
       const out = { id: m.id, version: exportVersionMap[m.id] || '1.0' };
       REMOTE_FIELDS.forEach(f => { if (m[f] !== undefined) out[f] = m[f]; });
-      // 用户实际配置的参数 → 远端 default_parameters
-      const params = m.user_parameters ?? m.parameters;
+      // 用户实际配置的参数 → 远端 default_parameters（合并默认参数 + 用户自定义参数）
+      const params = m.user_parameters
+        ? { ...(m.parameters || {}), ...m.user_parameters }
+        : m.parameters;
       if (params !== undefined) out.default_parameters = params;
       // 用户自定义参数映射
       if (m.user_parameter_mapping !== undefined) out.user_parameters = m.user_parameter_mapping;
