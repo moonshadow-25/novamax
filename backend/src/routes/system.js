@@ -359,31 +359,52 @@ router.post('/system/storage/restore', async (req, res) => {
 /** 调用系统原生文件夹选择对话框 */
 router.post('/system/storage/pick-folder', async (req, res) => {
   try {
-    // 使用隐藏的置顶父窗口，确保对话框显示在最前面而不是被浏览器遮挡
-    const cmd = [
-      'powershell',
-      '-NoProfile',
-      '-NoLogo',
-      '-Command',
-      '"Add-Type -AssemblyName System.Windows.Forms;',
-      '$owner = New-Object System.Windows.Forms.Form;',
-      '$owner.TopMost = $true;',
-      '$owner.Width = 0;',
-      '$owner.Height = 0;',
-      '$owner.ShowInTaskbar = $false;',
-      '$owner.Opacity = 0;',
-      '$null = $owner.Handle;',
-      '$f = New-Object System.Windows.Forms.FolderBrowserDialog;',
-      '$f.Description = \'选择目标文件夹\';',
-      '$f.ShowNewFolderButton = $true;',
-      'if ($f.ShowDialog($owner) -eq \'OK\') { $f.SelectedPath };',
-      '$owner.Dispose()"'
-    ].join(' ');
+    const { initialDir } = req.body;
 
-    const { stdout } = await execAsync(cmd, { encoding: 'utf-8', timeout: 120000 });
+    // 用户输入只嵌入 PS 脚本字符串内（非命令行），单引号在 PS 单引号串中需双写转义
+    let initDirLine = '';
+    if (initialDir && typeof initialDir === 'string') {
+      const safePath = initialDir.replace(/'/g, "''");
+      initDirLine = `$f.InitialDirectory = '${safePath}'`;
+    }
+
+    // 构建 PS 脚本：-STA 保证 WinForms 在 PS3+ 正常创建窗口
+    // 使用隐藏的置顶父窗口，确保对话框显示在最前面而不是被浏览器遮挡
+    // 同时让父窗口置于当前鼠标所在屏幕（支持多屏）
+    const script = [
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$screen = [System.Windows.Forms.Screen]::FromPoint([System.Windows.Forms.Cursor]::Position)',
+      '$owner = New-Object System.Windows.Forms.Form',
+      '$owner.StartPosition = "Manual"',
+      '$owner.Left = [int]($screen.WorkingArea.Left + ($screen.WorkingArea.Width / 2))',
+      '$owner.Top = [int]($screen.WorkingArea.Top + ($screen.WorkingArea.Height / 2))',
+      '$owner.TopMost = $true; $owner.Width = 0; $owner.Height = 0',
+      '$owner.ShowInTaskbar = $false; $owner.Opacity = 0',
+      '$null = $owner.Handle',
+      '$f = New-Object System.Windows.Forms.OpenFileDialog',
+      "$f.Title = '选择目标文件夹'",
+      '$f.CheckFileExists = $false; $f.CheckPathExists = $true; $f.ValidateNames = $false',
+      "$f.FileName = '请选择文件夹'",
+      initDirLine,
+      'if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {',
+      '  $selected = Split-Path -Path $f.FileName -Parent',
+      '  if (-not $selected) { $selected = $f.FileName }',
+      '  Write-Output $selected',
+      '}',
+      '$owner.Dispose()',
+    ].filter(Boolean).join('\n');
+
+    // -EncodedCommand 接受 UTF-16LE Base64，彻底避免 shell 转义和中文乱码
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -NonInteractive -STA -EncodedCommand ${encoded}`,
+      { encoding: 'utf8', timeout: 120000 }
+    );
     const selected = stdout.trim();
     res.json(selected ? { cancelled: false, path: selected } : { cancelled: true });
   } catch (error) {
+    // execAsync 在非零退出时 throw，stdout 仍可能含有效路径
     const out = error.stdout?.trim();
     res.json(out ? { cancelled: false, path: out } : { cancelled: true });
   }

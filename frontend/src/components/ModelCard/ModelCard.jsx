@@ -17,7 +17,8 @@ import {
   UndoOutlined,
   LoadingOutlined,
   CloseCircleOutlined,
-  WarningOutlined
+  WarningOutlined,
+  CloudOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
@@ -124,8 +125,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleStart = async () => {
     setLoading(true);
     try {
-      // LLM 模型启动前检查 llamacpp 引擎
-      if (model.type === 'llm') {
+      // LLM 模型启动前检查 llamacpp 引擎（云API不需要）
+      if (model.type === 'llm' && model.source !== 'cloudapi') {
         const engineResult = await engineService.checkInstalled('llamacpp');
         if (!engineResult.installed) {
           setEngineInfo(engineResult.engineInfo);
@@ -527,13 +528,19 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
   const handleSaveName = async () => {
     const trimmed = nameValue.trim();
-    if (!trimmed) { setNameValue(model.name); setEditingName(false); return; }
+    if (!trimmed) {
+      message.warning('模型名称不能为空');
+      setNameValue(model.name);
+      setEditingName(false);
+      return;
+    }
     if (trimmed === model.name) { setEditingName(false); return; }
     try {
       await modelService.update(model.id, { name: trimmed });
       onUpdate();
     } catch (e) {
-      message.error('重命名失败');
+      const errorText = getApiErrorMessage(e) || '重命名失败';
+      message.error(errorText);
       setNameValue(model.name);
     }
     setEditingName(false);
@@ -579,13 +586,13 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 判断是否可以启动：
   // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted);
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi';
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
   // 2. 或者完全没有文件也没有选中版本（从服务器同步的新卡片）
   // 3. 或者有active文件但文件不完整（需要重新下载）
-  const shouldDownload = model.source !== 'custom' &&
+  const shouldDownload = model.source !== 'custom' && model.source !== 'cloudapi' &&
       (hasUndownloadedSelection || (!hasActiveFile && !model.selected_quantization) || (hasActiveFile && !model.active_file_ok)) &&
       !isDefaultDownloadCompleted &&
       !isDownloadingDefault &&
@@ -675,10 +682,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           {model.type === 'llm' && (
             <Button
               size="small"
-              type="text"
               icon={isFavorited
-                ? <StarFilled style={{ color: '#faad14' }} />
-                : <StarOutlined style={{ color: '#bbb' }} />}
+                ? <StarFilled />
+                : <StarOutlined />}
               onClick={() => onToggleFavorite?.(model.id)}
               title={isFavorited ? '取消收藏' : '收藏'}
             />
@@ -702,6 +708,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       <div className="model-meta">
         {model.source === 'custom' ? (
           <span className="model-source">custom</span>
+        ) : model.source === 'cloudapi' ? (
+          <span className="model-source">{model.cloud_platform || '云API'}</span>
         ) : model.modelscope_id ? (
           <span className="model-source" title={model.modelscope_id}>
             {model.modelscope_id.split('/')[0]}
@@ -712,14 +720,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
       <div className="model-card-footer">
       {/* 显示量化版本信息和模型大小 */}
-      {(currentQuant || modelSize > 0) && (
+      {(currentQuant || modelSize > 0 || model.source === 'cloudapi') && (
         <div className="model-quantization">
           {modelSize > 0 && (
             <span className="model-size-badge">{parseFloat((modelSize / (1024 ** 3)).toFixed(2))}GB</span>
           )}
-          {(currentQuant || model.source === 'custom') && (
+          {(currentQuant || model.source === 'custom' || model.source === 'cloudapi') && (
             model.source === 'custom' ? (
-              <Tag style={{ background: '#fff7e6', borderColor: '#ffd591', color: '#FF9800' }}>自定义 <HddOutlined /></Tag>
+              <Tag color="orange">自定义 <HddOutlined /></Tag>
+              // <Tag style={{ background: '#fff7e6', borderColor: '#ffd591', color: '#ff9800' }}>自定义 </Tag> //<HddOutlined />
+            ) : model.source === 'cloudapi' ? (
+              <Tag color="geekblue">云API <CloudOutlined /></Tag>
+              // <Tag style={{ background: '#e6f7ff', borderColor: '#91d5ff', color: '#1890ff' }}>云API </Tag> //<CloudOutlined />
             ) : model.quantizations && model.quantizations.length > 1 ? (
               <Tag
                 color="blue"
@@ -956,7 +968,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               icon={<LoadingOutlined />}
               onClick={handleStop}
               block
-              style={{ background: '#ff4d4f', borderColor: '#ff4d4f', color: '#fff' }}
+              color="red"
+              variant="solid"
             >
               中断启动
             </Button>
@@ -967,9 +980,22 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               onClick={handleStart}
               loading={loading}
               block
-              style={{ background: '#4caf50', borderColor: '#4caf50' }}
+              color="green"
+              variant="solid"
             >
               启动
+            </Button>
+          ) : model.source === 'cloudapi' ? (
+            <Button
+              danger
+              icon={<StopOutlined />}
+              onClick={handleStop}
+              loading={loading}
+              block
+              color="red"
+              variant="solid"
+            >
+              停止
             </Button>
           ) : (
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
@@ -978,7 +1004,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 icon={<StopOutlined />}
                 onClick={handleStop}
                 loading={loading}
-                style={{ background: '#ff4d4f', borderColor: '#ff4d4f', color: '#fff', flex: 1 }}
+                color="red"
+                variant="solid"
+                style={{ flex: 1 }}
               >
                 停止
               </Button>
@@ -986,7 +1014,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 type="primary"
                 icon={<MessageOutlined />}
                 onClick={handleUse}
-                style={{ background: 'linear-gradient(135deg, #69c0ff, #1890ff)', borderColor: '#40a9ff', flex: 1 }}
+                color="green"
+                variant="solid"
+                style={{ flex: 1 }}
               >
                 使用
               </Button>
@@ -1002,7 +1032,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             block
             disabled
             icon={<WarningOutlined />}
-            style={{ background: '#FF4D4F', borderColor: '#FF4D4F', color: '#fff', cursor: 'not-allowed' }}
+            color="red"
+            variant="solid"
+            style={{ cursor: 'not-allowed' }}
           >
             模型文件缺失
           </Button>

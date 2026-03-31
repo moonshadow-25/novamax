@@ -28,7 +28,9 @@ export const modelService = {
   deleteQuantization: (id, filename) => api.delete(`/models/${id}/quantization`, { data: { filename } }),
   restoreDefaults: (id) => api.post(`/models/${id}/restore-defaults`),
   deleteConfig: (id) => api.delete(`/models/${id}/config`),
-  addCustomModel: (data) => api.post('/models/custom', data)
+  addCustomModel: (data) => api.post('/models/custom', data),
+  addCloudApiModel: (data) => api.post('/models/cloudapi', data),
+  testCloudApiModel: (data) => api.post('/models/cloudapi/test', data)
 };
 
 export const modelscopeService = {

@@ -4,6 +4,7 @@
  */
 
 import axios from 'axios';
+import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 
 // 量化类型元数据
 const QUANTIZATION_INFO = {
@@ -138,37 +139,37 @@ class ModelscopeParser {
     // 移除 .gguf 后缀
     const baseName = filename.replace('.gguf', '');
 
-    // 匹配量化类型模式
+    // 匹配量化类型模式（支持破折号或点号作为分隔符，如 Model-Q4_K_M.gguf 或 Model.Q4_K_M.gguf）
     const patterns = [
-      /-(BF16)$/i,
-      /-(F16)$/i,
-      /-(F32)$/i,
-      /-(Q8_0)$/i,
-      /-(Q6_K)$/i,
-      /-(Q5_K_M)$/i,
-      /-(Q5_K_S)$/i,
-      /-(Q4_K_M)$/i,
-      /-(Q4_K_S)$/i,
-      /-(Q4_0)$/i,
-      /-(Q4_1)$/i,
-      /-(IQ4_NL)$/i,
-      /-(IQ4_XS)$/i,
-      /-(Q3_K_M)$/i,
-      /-(Q3_K_S)$/i,
-      /-(IQ3_XXS)$/i,
-      /-(Q2_K)$/i,
-      /-(IQ2_M)$/i,
-      /-(IQ2_XXS)$/i,
+      /[-\.](BF16)$/i,
+      /[-\.](F16)$/i,
+      /[-\.](F32)$/i,
+      /[-\.](Q8_0)$/i,
+      /[-\.](Q6_K)$/i,
+      /[-\.](Q5_K_M)$/i,
+      /[-\.](Q5_K_S)$/i,
+      /[-\.](Q4_K_M)$/i,
+      /[-\.](Q4_K_S)$/i,
+      /[-\.](Q4_0)$/i,
+      /[-\.](Q4_1)$/i,
+      /[-\.](IQ4_NL)$/i,
+      /[-\.](IQ4_XS)$/i,
+      /[-\.](Q3_K_M)$/i,
+      /[-\.](Q3_K_S)$/i,
+      /[-\.](IQ3_XXS)$/i,
+      /[-\.](Q2_K)$/i,
+      /[-\.](IQ2_M)$/i,
+      /[-\.](IQ2_XXS)$/i,
       // UD 系列
-      /-(UD-IQ2_M)$/i,
-      /-(UD-IQ2_XXS)$/i,
-      /-(UD-IQ3_XXS)$/i,
-      /-(UD-Q2_K_XL)$/i,
-      /-(UD-Q3_K_XL)$/i,
-      /-(UD-Q4_K_XL)$/i,
-      /-(UD-Q5_K_XL)$/i,
-      /-(UD-Q6_K_XL)$/i,
-      /-(UD-Q8_K_XL)$/i,
+      /[-\.](UD-IQ2_M)$/i,
+      /[-\.](UD-IQ2_XXS)$/i,
+      /[-\.](UD-IQ3_XXS)$/i,
+      /[-\.](UD-Q2_K_XL)$/i,
+      /[-\.](UD-Q3_K_XL)$/i,
+      /[-\.](UD-Q4_K_XL)$/i,
+      /[-\.](UD-Q5_K_XL)$/i,
+      /[-\.](UD-Q6_K_XL)$/i,
+      /[-\.](UD-Q8_K_XL)$/i,
     ];
 
     for (const pattern of patterns) {
@@ -343,6 +344,7 @@ class ModelscopeParser {
       name: modelData.Name || modelId.split('/').pop(),
       description: description || '暂无描述',
       type: type,
+      source: 'modelscope',
       modelscope_id: modelId,
       downloaded: false,
       status: 'stopped',
@@ -386,17 +388,7 @@ class ModelscopeParser {
           completion: true
         },
 
-        parameters: {
-          version: '1.0.0',
-          context_length: 0,
-          parallel: 1,
-          'no-mmap': true,
-          'n-gpu-layers': 100,
-          temperature: 0.7,
-          top_p: 0.9,
-          top_k: 40,
-          repeat_penalty: 1.1
-        },
+        parameters: { ...DEFAULT_LLM_PARAMETERS },
 
         user_parameters: null,
         user_parameters_version: null,

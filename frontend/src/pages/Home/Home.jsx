@@ -21,10 +21,12 @@ const MODEL_TYPES = [
   { key: 'whisper', label: 'Whisper' }
 ];
 
-const DEFAULT_FILTER_OPTIONS = (favorites, downloadedModels) => [
+const DEFAULT_FILTER_OPTIONS = (favorites, downloadedModels, customModels, cloudApiModels) => [
   { label: '全部', value: 'all' },
   { label: `收藏 ${favorites.length > 0 ? favorites.length : ''}`.trim(), value: 'favorited' },
   { label: `已下载 ${downloadedModels.length > 0 ? downloadedModels.length : ''}`.trim(), value: 'downloaded' },
+  { label: `自定义 ${customModels.length > 0 ? customModels.length : ''}`.trim(), value: 'custom' },
+  { label: `云API ${cloudApiModels.length > 0 ? cloudApiModels.length : ''}`.trim(), value: 'cloudapi' },
 ];
 
 const COMFYUI_FILTER_OPTIONS = [
@@ -203,12 +205,16 @@ function Home() {
     if (activeTab === 'comfyui' && filterTab !== 'all') {
       return model.workflow?.type === filterTab;
     }
-    if (filterTab === 'downloaded') return isModelDownloaded(model);
+    if (filterTab === 'downloaded') return model.source !== 'custom' && model.source !== 'cloudapi' && isModelDownloaded(model);
     if (filterTab === 'favorited') return favorites.includes(model.id);
+    if (filterTab === 'custom') return model.source === 'custom';
+    if (filterTab === 'cloudapi') return model.source === 'cloudapi';
     return true;
   });
 
-  const downloadedModels = models.filter(m => isModelDownloaded(m));
+  const downloadedModels = models.filter(m => m.source !== 'custom' && m.source !== 'cloudapi' && isModelDownloaded(m));
+  const customModels = models.filter(m => m.source === 'custom');
+  const cloudApiModels = models.filter(m => m.source === 'cloudapi');
 
   return (
     <Layout className="home-layout">
@@ -279,9 +285,9 @@ function Home() {
             onChange={setFilterTab}
             options={
               activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS
-                : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels)
-                : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels)
-                : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels)
+                : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
             }
           />
         </div>

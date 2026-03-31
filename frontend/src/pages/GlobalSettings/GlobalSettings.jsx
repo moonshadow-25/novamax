@@ -945,7 +945,7 @@ const GlobalSettings = () => {
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, marginLeft: 16 }}>
                   <Button size="small" icon={<FolderOpenOutlined />} disabled={!item.exists}
                     onClick={() => handleOpenFolder(item.path)}>打开</Button>
-                  <Button size="small" icon={<SwapOutlined />}
+                  <Button size="small" icon={<SwapOutlined />} disabled={!item.exists}
                     onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label }); setMigratePath(''); }}>迁移</Button>
                 </div>
               </div>

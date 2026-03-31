@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typography, Tag, Form } from 'antd';
-import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typography, Tag, Form, Select } from 'antd';
+import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined, FolderOpenOutlined, CloudOutlined } from '@ant-design/icons';
 import { modelscopeService, modelService, systemService } from '../../services/api';
 import ModelPreviewDialog from './ModelPreviewDialog';
 import AddWorkflowTab from './AddWorkflowTab';
 
 const { Text } = Typography;
+const { Option } = Select;
 
 // 初始显示的搜索结果数量
 const INITIAL_DISPLAY_COUNT = 8;
@@ -34,6 +35,29 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
   const [customLoading, setCustomLoading] = useState(false);
   const [browseLoading, setBrowseLoading] = useState(false);
 
+  // 云API模型相关状态
+  const CLOUD_PLATFORMS = [
+    { label: '阿里云百炼', value: '阿里云百炼', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+    { label: '文心一言', value: '文心一言', url: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1' },
+    { label: '豆包', value: '豆包', url: 'https://ark.cn-beijing.volces.com/api/v3' },
+    { label: '智谱开放平台', value: '智谱开放平台', url: 'https://open.bigmodel.cn/api/paas/v4' },
+    { label: '腾讯混元', value: '腾讯混元', url: 'https://api.hunyuan.cloud.tencent.com/v1' },
+    { label: '硅基流动', value: '硅基流动', url: 'https://api.siliconflow.cn/v1' },
+    { label: '深度求索', value: '深度求索', url: 'https://api.deepseek.com/v1' },
+    { label: '月之暗面', value: '月之暗面', url: 'https://api.moonshot.cn/v1' },
+    { label: '其他', value: '其他', url: '' },
+  ];
+  const [cloudName, setCloudName] = useState('');
+  const [cloudPlatform, setCloudPlatform] = useState(null);
+  const [cloudApiUrl, setCloudApiUrl] = useState('');
+  const [cloudApiKey, setCloudApiKey] = useState('');
+  const [cloudApiModel, setCloudApiModel] = useState('');
+  const [cloudDesc, setCloudDesc] = useState('');
+  const [cloudError, setCloudError] = useState('');
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudTestLoading, setCloudTestLoading] = useState(false);
+  const [cloudTested, setCloudTested] = useState(false);
+
   // 重置状态
   const resetState = () => {
     setInputMode('search');
@@ -50,6 +74,13 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
     setCustomPath('');
     setCustomDesc('');
     setCustomError('');
+    setCloudName('');
+    setCloudPlatform(null);
+    setCloudApiUrl('');
+    setCloudApiKey('');
+    setCloudApiModel('');
+    setCloudDesc('');
+    setCloudError('');
   };
 
   // 处理关闭
@@ -181,6 +212,72 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
     }
   };
 
+  // 云 API 连接测试
+  const handleTestCloudApiConnection = async () => {
+    if (!cloudName.trim()) { setCloudError('模型名称不能为空'); return false; }
+    if (!cloudPlatform) { setCloudError('请选择云平台'); return false; }
+    if (!cloudApiUrl.trim()) { setCloudError('API基础URL不能为空'); return false; }
+    if (!cloudApiKey.trim()) { setCloudError('API密钥不能为空'); return false; }
+    if (!cloudApiModel.trim()) { setCloudError('API模型标识不能为空'); return false; }
+
+    setCloudTestLoading(true);
+    setCloudError('');
+    try {
+      const response = await modelService.testCloudApiModel({
+        api_base_url: cloudApiUrl.trim(),
+        api_key: cloudApiKey.trim(),
+        api_model: cloudApiModel.trim(),
+      });
+
+      if (response.success) {
+        setCloudTested(true);
+        message.success('云API连接测试成功');
+        return true;
+      }
+
+      setCloudError(response.error || '连接测试失败');
+      return false;
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.message || '连接测试失败';
+      setCloudError(errMsg);
+      return false;
+    } finally {
+      setCloudTestLoading(false);
+    }
+  };
+
+  // 添加云API模型
+  const handleAddCloudApiModel = async () => {
+    if (!await handleTestCloudApiConnection()) {
+      return;
+    }
+
+    setCloudLoading(true);
+    setCloudError('');
+
+    try {
+      const response = await modelService.addCloudApiModel({
+        name: cloudName.trim(),
+        cloud_platform: cloudPlatform,
+        api_base_url: cloudApiUrl.trim(),
+        api_key: cloudApiKey.trim(),
+        api_model: cloudApiModel.trim(),
+        description: cloudDesc.trim() || cloudName.trim(),
+      });
+      if (response.success) {
+        message.success('云API模型添加成功');
+        handleClose();
+        if (onSuccess) onSuccess(response.model);
+      } else {
+        setCloudError(response.error || '添加失败');
+      }
+    } catch (err) {
+      setCloudError(err.response?.data?.error || err.message || '添加失败');
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
   // 浏览文件夹
   const handleBrowseFolder = async () => {
     setBrowseLoading(true);
@@ -262,7 +359,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
               onChange={setActiveTab}
               items={[
                 { key: 'modelscope', label: 'ModelScope' },
-                { key: 'custom', label: '自定义' }
+                { key: 'custom', label: '自定义' },
+                { key: 'cloudapi', label: '云API' },
               ]}
             />
 
@@ -386,7 +484,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                 <Form layout="vertical" style={{ marginTop: 8 }}>
                   <Form.Item label="模型名称" required>
                     <Input
-                      placeholder="输入模型名称，例如：My-Llama-Model"
+                      placeholder="请输入模型显示名称（如：My-Qwen3.5-35B）"
                       value={customName}
                       onChange={(e) => { setCustomName(e.target.value); setCustomError(''); }}
                     />
@@ -394,7 +492,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                   <Form.Item label="模型文件夹" required extra="选择包含 .gguf 文件的文件夹">
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
-                        placeholder="文件夹路径，例如：D:\models\llama"
+                        placeholder="请输入模型文件夹路径（例如：D:\models\Qwen3.5-35B）"
                         value={customPath}
                         onChange={(e) => { setCustomPath(e.target.value); setCustomError(''); }}
                       />
@@ -407,9 +505,9 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                       </Button>
                     </Space.Compact>
                   </Form.Item>
-                  <Form.Item label="模型说明" extra="可不填，不填时卡片上显示模型名称">
+                  <Form.Item label="模型说明">
                     <Input.TextArea
-                      placeholder="输入模型说明（可选）"
+                      placeholder="输入模型说明，未输入时显示模型名称（可选）"
                       rows={3}
                       value={customDesc}
                       onChange={(e) => setCustomDesc(e.target.value)}
@@ -432,6 +530,100 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                 >
                   确认添加
                 </Button>
+              </Space>
+            )}
+            {activeTab === 'cloudapi' && (
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                <Form layout="vertical" style={{ marginTop: 8 }}>
+                  <Form.Item label="模型名称" required>
+                    <Input
+                      placeholder="请输入模型显示名称（如：qwen-plus）"
+                      value={cloudName}
+                      onChange={(e) => { setCloudName(e.target.value); setCloudError(''); setCloudTested(false); }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="云平台名称" required>
+                    <Select
+                      placeholder="请选择云平台"
+                      value={cloudPlatform}
+                      onChange={(val) => {
+                        setCloudPlatform(val);
+                        setCloudError('');
+                        const found = CLOUD_PLATFORMS.find(p => p.value === val);
+                        setCloudApiUrl(found?.url || '');
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      {CLOUD_PLATFORMS.map(p => (
+                        <Option key={p.value} value={p.value}>{p.label}</Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                  <Form.Item label="API基础URL" required>
+                    <Input
+                      placeholder="请输入自定义API地址"
+                      value={cloudApiUrl}
+                      onChange={(e) => { setCloudApiUrl(e.target.value); setCloudError(''); }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="API密钥" required>
+                    <Input.Password
+                      placeholder="请输入API密钥"
+                      value={cloudApiKey}
+                      onChange={(e) => { setCloudApiKey(e.target.value); setCloudError(''); }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="API模型标识" required>
+                    <Input
+                      placeholder="请输入API模型标识（如：qwen-plus）"
+                      value={cloudApiModel}
+                      onChange={(e) => { setCloudApiModel(e.target.value); setCloudError(''); }}
+                    />
+                  </Form.Item>
+                  <Form.Item label="模型说明">
+                    <Input.TextArea
+                      placeholder="输入模型说明，未输入时显示模型名称（可选）"
+                      rows={2}
+                      value={cloudDesc}
+                      onChange={(e) => { setCloudDesc(e.target.value); setCloudTested(false); }}
+                    />
+                  </Form.Item>
+                </Form>
+                {cloudError && (
+                  <Alert
+                    message={cloudError}
+                    type="error"
+                    closable
+                    onClose={() => setCloudError('')}
+                  />
+                )}
+                {cloudTested && (
+                  <Alert
+                    message="连接测试已通过，可直接添加"
+                    type="success"
+                    showIcon
+                    style={{ marginBottom: 8 }}
+                  />
+                )}
+
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Button
+                    type="default"
+                    block
+                    loading={cloudTestLoading}
+                    onClick={handleTestCloudApiConnection}
+                  >
+                    测试连接
+                  </Button>
+                  <Button
+                    type="primary"
+                    block
+                    loading={cloudLoading}
+                    onClick={handleAddCloudApiModel}
+                  >
+                    确认添加
+                  </Button>
+                </Space>
               </Space>
             )}
           </>

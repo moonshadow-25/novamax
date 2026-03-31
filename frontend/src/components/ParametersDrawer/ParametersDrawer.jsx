@@ -54,6 +54,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   const [autoStart, setAutoStart] = useState(false);
   const [multiHost, setMultiHost] = useState(false);
 
+  const isCloudApi = model?.source === 'cloudapi';
+
   useEffect(() => {
     if (visible && modelId) {
       loadData();
@@ -93,8 +95,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   };
 
   const loadEngineVersions = async () => {
-    // 只有 LLM 类型才需要引擎版本选择
-    if (model?.type !== 'llm') return;
+    // 只有本地 LLM 类型才需要引擎版本选择，云 API 模型不需要
+    if (model?.type !== 'llm' || isCloudApi) return;
     try {
       const data = await engineService.getById('llamacpp');
       setEngineVersions(data.installed_versions || []);
@@ -129,11 +131,11 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       setParameters(params);
 
       // 标准参数键（与后端 parameterService 保持一致）
-      const standardKeys = [
-        'context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
-        'temperature', 'top_p', 'top_k',
-        'repeat_penalty', 'version'
-      ];
+      const standardKeys = isCloudApi
+        ? ['port']
+        : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
+           'temperature', 'top_p', 'top_k',
+           'repeat_penalty', 'version'];
 
       const custom = [];
       const formValues = {};
@@ -148,25 +150,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         }
       });
 
-      // 如果 no-mmap 没有值，填入默认值 true
-      if (formValues['no-mmap'] === undefined) {
-        formValues['no-mmap'] = 'true';
-      } else {
-        formValues['no-mmap'] = String(formValues['no-mmap']);
-      }
-
       // 如果 port 没有值，填入默认值（Embedding 模型默认 1278，其他默认 1234）
       if (formValues.port === undefined) {
         const isEmbedding = /embedding/i.test(model?.name || model?.id || '');
         formValues.port = isEmbedding ? 1278 : 1234;
       }
 
-      // 如果 n-gpu-layers 没有值，填入默认值 100
-      if (formValues['n-gpu-layers'] === undefined) {
-        formValues['n-gpu-layers'] = 100;
-      }
-
-      setCustomParams(custom);
+      setCustomParams(isCloudApi ? [] : custom);
       form.setFieldsValue(formValues);
     } catch (error) {
       message.error('加载参数失败');
@@ -188,11 +178,11 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       const values = await form.validateFields();
 
       // 标准参数键（确保所有标准参数都被保存）
-      const standardKeys = [
-        'context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
-        'temperature', 'top_p', 'top_k',
-        'repeat_penalty'
-      ];
+      const standardKeys = isCloudApi
+        ? ['port']
+        : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
+           'temperature', 'top_p', 'top_k',
+           'repeat_penalty'];
 
       // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
       const allParams = {};
@@ -210,10 +200,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         allParams['no-mmap'] = v !== 'false' && v !== '0' && v !== '';
       }
 
-      // 添加自定义参数
-      customParams.forEach(({ key, value }) => {
-        allParams[key] = value;
-      });
+      // 云 API 模型不允许自定义参数
+      if (!isCloudApi) {
+        customParams.forEach(({ key, value }) => {
+          allParams[key] = value;
+        });
+      }
 
       await axios.put(`/api/parameters/${modelId}`, {
         parameters: allParams
@@ -300,6 +292,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       setLoading(false);
     }
   };
+
+  const runtimeKeys = isCloudApi
+    ? ['port']
+    : ['context_length', 'parallel', 'no-mmap', 'n-gpu-layers', 'port'];
+
+  const samplingKeys = isCloudApi
+    ? []
+    : ['temperature', 'top_p', 'top_k', 'repeat_penalty'];
 
   const renderFormItem = (key, meta) => {
     return (
@@ -402,28 +402,30 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               style={{ marginBottom: 16 }}
             />
 
-            {/* 版本信息 */}
-            <Alert
-              message={
-                <Space>
-                  <span>参数来源:</span>
-                  <Tag color={parameters._source === 'user' ? 'blue' : 'default'}>
-                    {parameters._source === 'user' ? '用户自定义' : '默认配置'}
-                  </Tag>
-                  <span>版本: {parameters._version}</span>
-                </Space>
-              }
-              type={parameters._note ? 'warning' : 'info'}
-              description={parameters._note}
-              style={{ marginBottom: 16 }}
-            />
+            {/* 版本信息（云 API 模型不显示参数来源/版本） */}
+            {!isCloudApi && (
+              <Alert
+                message={
+                  <Space>
+                    <span>参数来源:</span>
+                    <Tag color={parameters._source === 'user' ? 'blue' : 'default'}>
+                      {parameters._source === 'user' ? '用户自定义' : '默认配置'}
+                    </Tag>
+                    <span>版本: {parameters._version}</span>
+                  </Space>
+                }
+                type={parameters._note ? 'warning' : 'info'}
+                description={parameters._note}
+                style={{ marginBottom: 16 }}
+              />
+            )}
 
           <Form
             form={form}
             layout="vertical"
           >
-            {/* 引擎版本选择（仅 LLM） */}
-            {model?.type === 'llm' && engineVersions.length > 0 && (
+            {/* 引擎版本选择（仅本地 LLM） */}
+            {model?.type === 'llm' && !isCloudApi && engineVersions.length > 0 && (
               <>
                 <Form.Item
                   label={
@@ -492,68 +494,76 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
             <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16 }}>
               {/* 运行时参数 */}
               <Panel header="运行时参数" key="runtime">
-                {['context_length', 'parallel', 'no-mmap', 'n-gpu-layers', 'port']
+                {runtimeKeys
                   .filter(key => metadata[key])
                   .map(key => renderFormItem(key, metadata[key]))}
               </Panel>
 
               {/* 采样参数 */}
-              <Panel header="采样参数" key="sampling">
-                {['temperature', 'top_p', 'top_k', 'repeat_penalty']
-                  .filter(key => metadata[key])
-                  .map(key => renderFormItem(key, metadata[key]))}
-              </Panel>
+              {samplingKeys.length > 0 && (
+                <Panel header="采样参数" key="sampling">
+                  {samplingKeys
+                    .filter(key => metadata[key])
+                    .map(key => renderFormItem(key, metadata[key]))}
+                </Panel>
+              )}
             </Collapse>
 
-            <Divider />
+            {!isCloudApi && (
+              <>
+                <Divider />
 
-            {/* 自定义参数 */}
-            <div style={{ marginBottom: 16 }}>
-              <h4>自定义参数</h4>
-              {customParams.map(({ key, value }) => (
-                <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
-                  <Col span={10}>
-                    <Input value={key} disabled />
-                  </Col>
-                  <Col span={10}>
-                    <Input value={String(value)} disabled />
-                  </Col>
-                  <Col span={4}>
-                    <Button
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => handleDeleteCustom(key)}
-                      block
-                    />
-                  </Col>
-                </Row>
-              ))}
+                {/* 自定义参数 */}
+                <div style={{ marginBottom: 16 }}>
+                  <h4>自定义参数</h4>
+                  {customParams.map(({ key, value }) => (
+                    <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+                      <Col span={10}>
+                        <Input value={key} disabled />
+                      </Col>
+                      <Col span={10}>
+                        <Input value={String(value)} disabled />
+                      </Col>
+                      <Col span={4}>
+                        <Button
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDeleteCustom(key)}
+                          block
+                        />
+                      </Col>
+                    </Row>
+                  ))}
 
-              <Row gutter={8} style={{ marginTop: 16 }}>
-                <Col span={10}>
-                  <Input
-                    placeholder="参数名"
-                    value={newKey}
-                    onChange={(e) => setNewKey(e.target.value)}
-                  />
-                </Col>
-                <Col span={10}>
-                  <Input
-                    placeholder="值"
-                    value={newValue}
-                    onChange={(e) => setNewValue(e.target.value)}
-                  />
-                </Col>
-                <Col span={4}>
-                  <Button
-                    type="dashed"
-                    icon={<PlusOutlined />}
-                    onClick={handleAddCustom}
-                    block
-                  />
-                </Col>
-              </Row>
-            </div>
+                  <Row gutter={8} style={{ marginTop: 16 }}>
+                    <Col span={10}>
+                      <Input
+                        placeholder="参数名"
+                        value={newKey}
+                        onChange={(e) => setNewKey(e.target.value)}
+                      />
+                    </Col>
+                    <Col span={10}>
+                      <Input
+                        placeholder="值"
+                        value={newValue}
+                        onChange={(e) => setNewValue(e.target.value)}
+                      />
+                    </Col>
+                    <Col span={4}>
+                      <Button
+                        type="dashed"
+                        icon={<PlusOutlined />}
+                        onClick={handleAddCustom}
+                        block
+                      />
+                    </Col>
+                  </Row>
+                </div>
+
+                <Divider />
+              </>
+            )}
 
             {/* 打开日志文件夹 */}
             <Divider />

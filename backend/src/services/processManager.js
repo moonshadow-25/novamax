@@ -1,8 +1,10 @@
 import { spawn } from 'child_process';
 import axios from 'axios';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT } from '../config/constants.js';
+import { decrypt } from '../utils/crypto.js';
 import modelManager from './modelManager.js';
 import configManager from './configManager.js';
 import engineManager from './engineManager.js';
@@ -12,6 +14,10 @@ import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CLOUD_API_PROXY_SCRIPT = path.join(__dirname, '../utils/cloudApiProxy.js');
 
 class ProcessManager {
   constructor() {
@@ -73,6 +79,10 @@ class ProcessManager {
 
     // 对于 LLM，根据 mode 选择启动方式
     if (model.type === 'llm') {
+      // 云API模型使用代理服务器
+      if (model.source === 'cloudapi') {
+        return await this.startCloudApiProxy(modelId);
+      }
       if (mode === 'single') {
         return await this.startSingleModel(modelId);
       } else {
@@ -82,6 +92,145 @@ class ProcessManager {
 
     // 其他类型使用原有逻辑
     return await this.startLegacyBackend(modelId);
+  }
+
+  /**
+   * 云API连通性测试：发送一个最小请求验证URL和密钥是否有效
+   */
+  async testCloudApiConnection(model) {
+    const baseUrl = model.api_base_url.replace(/\/$/, '');
+    const apiKey = decrypt(model.api_key);
+    let response;
+    try {
+      response = await axios.post(`${baseUrl}/chat/completions`, {
+        model: model.api_model,
+        messages: [{ role: 'user', content: 'Hi' }],  // 最小请求验证
+        max_tokens: 1,  // 最小请求验证
+        stream: false,  // 不使用流式，快速返回结果
+      }, {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
+        throw new Error(`无法连接到API服务器，请检查Base URL是否正确`);
+      }
+      if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') {
+        throw new Error(`连接超时，请检查网络或Base URL是否正确`);
+      }
+      throw new Error(`连接测试失败: ${err.message}`);
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`API密钥无效或无权限（HTTP ${response.status}），请检查密钥是否正确`);
+    }
+  }
+
+  /**
+   * 启动云API代理服务器
+   */
+  async startCloudApiProxy(modelId) {
+    const model = modelManager.getById(modelId);
+    if (!model) throw new Error('Model not found');
+    if (this.processes.has(modelId)) throw new Error('Backend already running');
+
+    // 启动前先测试连通性
+    await this.testCloudApiConnection(model);
+
+    const effectiveParams = parameterService.getEffectiveParameters(model);
+    const port = effectiveParams.port || model.port || 1234;
+
+    if (this.allocatedPorts.has(port)) {
+      throw new Error(`端口 ${port} 已被其他模型占用，请在模型参数中修改端口号`);
+    }
+    this.allocatedPorts.add(port);
+
+    // 查找可用的 node 可执行文件
+    const nodePath = (() => {
+      const bundled = path.join(PROJECT_ROOT, 'external', 'node', 'node.exe');
+      if (fs.existsSync(bundled)) return bundled;
+      return process.execPath; // 使用运行当前进程的 node
+    })();
+
+    // 日志目录
+    const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const logFilePath = path.join(logDir, `model_${modelId}_runtime.log`);
+    const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+    logStream.write(`=== 云API代理启动日志 ===\n`);
+    logStream.write(`模型: ${model.name} (${modelId})\n`);
+    logStream.write(`时间: ${new Date().toISOString()}\n`);
+    logStream.write(`端口: ${port}\n`);
+    logStream.write(`平台: ${model.cloud_platform}\n`);
+    logStream.write(`${'='.repeat(50)}\n\n`);
+
+    const args = [
+      CLOUD_API_PROXY_SCRIPT,
+      '--api-key', decrypt(model.api_key),
+      '--base-url', model.api_base_url,
+      '--model-name', model.api_model,
+      '--platform-name', model.cloud_platform || '云API',
+      '--port', String(port),
+    ];
+
+    const proc = spawn(nodePath, args);
+
+    const processInfo = {
+      process: proc,
+      port,
+      type: 'llm',
+      mode: 'cloudapi',
+      logs: [],
+      ready: false,
+      logStream,
+    };
+    this.processes.set(modelId, processInfo);
+
+    proc.stdout.on('data', (data) => {
+      const line = data.toString();
+      processInfo.logs.push(line);
+      logStream.write(line);
+      console.log(`[cloudapi:${modelId}] ${line}`);
+      if (!processInfo.ready && line.includes('server is listening')) {
+        processInfo.ready = true;
+        console.log(`[cloudapi:${modelId}] 代理已就绪`);
+        eventBus.broadcast('model-updated', { modelId });
+      }
+    });
+
+    proc.stderr.on('data', (data) => {
+      const line = data.toString();
+      processInfo.logs.push(line);
+      logStream.write(line);
+      console.error(`[cloudapi:${modelId}] ${line}`);
+    });
+
+    proc.on('error', (err) => {
+      console.error(`[cloudapi:${modelId}] 进程错误: ${err.message}`);
+      this.cleanup(modelId);
+      eventBus.broadcast('model-updated', { modelId });
+    });
+
+    proc.on('exit', (code) => {
+      console.log(`[cloudapi:${modelId}] 进程退出，退出码: ${code}`);
+      logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
+      logStream.end();
+      this.cleanup(modelId);
+      eventBus.broadcast('model-updated', { modelId });
+    });
+
+    return { port, status: MODEL_STATUS.STARTING, mode: 'cloudapi' };
+  }
+
+  /**
+   * 停止云API代理
+   */
+  async stopCloudApiProxy(modelId) {
+    const processInfo = this.processes.get(modelId);
+    if (!processInfo) throw new Error('Backend not running');
+    processInfo.process.kill();
+    this.cleanup(modelId);
+    return { status: MODEL_STATUS.STOPPED };
   }
 
   /**
@@ -419,6 +568,11 @@ class ProcessManager {
     const model = modelManager.getById(modelId);
     if (!model) {
       throw new Error('Model not found');
+    }
+
+    // 云API代理模式
+    if (model.source === 'cloudapi') {
+      return await this.stopCloudApiProxy(modelId);
     }
 
     // 检查是单模型模式还是路由模式

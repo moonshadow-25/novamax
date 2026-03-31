@@ -1,16 +1,29 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import { encrypt } from '../utils/crypto.js';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import parameterService from '../services/parameterService.js';
-import { MODELS_RUN_DIR, DOWNLOADS_DIR } from '../config/constants.js';
+import { MODELS_RUN_DIR, DOWNLOADS_DIR, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
 
 const router = express.Router();
+
+/*
+ * 检查模型运行状态，运行中禁止删除
+ */
+function assertModelNotRunning(modelId, res) {
+  const processStatus = processManager.getStatus(modelId);
+  if (processStatus.running) {
+    res.status(400).json({ error: '模型正在运行，无法删除。请先停止模型后再操作。' });
+    return false;
+  }
+  return true;
+}
 
 /**
  * 对磁盘恢复的 paused 状态，从 .part 文件推算真实进度
@@ -204,6 +217,7 @@ router.post('/models/custom', async (req, res) => {
     }));
 
     const model = await modelManager.create(type, {
+      id: `custom_${trimmedName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_\-]/g, '_')}`,
       name: trimmedName,
       description: description?.trim() || trimmedName,
       source: 'custom',
@@ -211,13 +225,88 @@ router.post('/models/custom', async (req, res) => {
       downloaded: true,
       downloaded_files,
       quantizations,
-      files: { model: downloaded_files[0], mmproj: null }
+      files: { model: downloaded_files[0], mmproj: null },
+      parameters: { ...DEFAULT_LLM_PARAMETERS },
+      user_parameters: null,
+      user_parameters_version: null
     });
 
     eventBus.broadcast('model-updated', { modelId: model.id });
     res.json({ success: true, model });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/models/cloudapi', async (req, res) => {
+  try {
+    const { name, api_base_url, api_key, api_model, description, cloud_platform } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: '模型名称不能为空' });
+    }
+    if (!api_base_url || !api_base_url.trim()) {
+      return res.status(400).json({ error: 'API基础URL不能为空' });
+    }
+    if (!api_key || !api_key.trim()) {
+      return res.status(400).json({ error: 'API密钥不能为空' });
+    }
+    if (!api_model || !api_model.trim()) {
+      return res.status(400).json({ error: 'API模型标识不能为空' });
+    }
+
+    const trimmedName = name.trim();
+    const targetId = `cloudapi_${trimmedName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_\-]/g, '_')}`;
+    const duplicate = modelManager.getAll().find(m => m.name === trimmedName && m.type === 'llm');
+    if (duplicate) {
+      return res.status(409).json({ error: `已存在同名模型"${trimmedName}"，请使用其他名称` });
+    }
+
+    const model = await modelManager.create('llm', {
+      id: targetId,
+      name: trimmedName,
+      description: description?.trim() || trimmedName,
+      source: 'cloudapi',
+      downloaded: true,
+      active_file_ok: true,
+      cloud_platform: cloud_platform || '',
+      api_base_url: api_base_url.trim(),
+      api_key: encrypt(api_key.trim()),
+      api_model: api_model.trim(),
+    });
+
+    eventBus.broadcast('model-updated', { modelId: model.id });
+    res.json({ success: true, model });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/models/cloudapi/test', async (req, res) => {
+  try {
+    const { api_base_url, api_key, api_model } = req.body;
+
+    if (!api_base_url || !api_base_url.trim()) {
+      return res.status(400).json({ error: 'API基础URL不能为空' });
+    }
+    if (!api_key || !api_key.trim()) {
+      return res.status(400).json({ error: 'API密钥不能为空' });
+    }
+    if (!api_model || !api_model.trim()) {
+      return res.status(400).json({ error: 'API模型标识不能为空' });
+    }
+
+    const tempModel = {
+      api_base_url: api_base_url.trim(),
+      api_model: api_model.trim(),
+      api_key: encrypt(api_key.trim()),
+    };
+
+    await processManager.testCloudApiConnection(tempModel);
+
+    res.json({ success: true, message: '云API连接测试成功' });
+  } catch (error) {
+    res.status(500).json({ error: error.message || '连接测试失败' });
   }
 });
 
@@ -247,9 +336,26 @@ router.put('/models/:id', async (req, res) => {
     const updates = req.body;
     console.log('📝 更新模型请求:', req.params.id, updates);
 
+    const currentModel = modelManager.getById(req.params.id);
+    if (!currentModel) {
+      return res.status(404).json({ error: 'Model not found' });
+    }
+
+    // 修改名称时检查唯一性
+    if (updates.name) {
+      const trimmedName = updates.name.trim();
+      if (!trimmedName) {
+        return res.status(400).json({ error: '模型名称不能为空' });
+      }
+      const duplicate = modelManager.getAll().find(m => m.id !== req.params.id && m.name === trimmedName && m.type === currentModel.type);
+      if (duplicate) {
+        return res.status(409).json({ error: `已存在同名模型"${trimmedName}"，请使用其他名称` });
+      }
+      updates.name = trimmedName;
+    }
+
     // 开启自动启动时检查端口是否已被其他模型占用
     if (updates.auto_start === true) {
-      const currentModel = modelManager.getById(req.params.id);
       const isEmbedding = /embedding/i.test(currentModel?.name || currentModel?.id || '');
       const currentParams = parameterService.getEffectiveParameters(currentModel);
       const currentPort = currentParams.port || (isEmbedding ? 1278 : 1234);
@@ -311,6 +417,11 @@ router.put('/models/:id', async (req, res) => {
       }
     }
 
+    // 如果更新了 api_key（云API模型），需要加密后再存储
+    if (updates.api_key) {
+      updates.api_key = encrypt(updates.api_key);
+    }
+
     const updatedModel = await modelManager.update(req.params.id, updates);
     if (!updatedModel) {
       return res.status(404).json({ error: 'Model not found' });
@@ -326,11 +437,13 @@ router.put('/models/:id', async (req, res) => {
 
 // 删除指定量化版本的文件
 router.delete('/models/:id/quantization', async (req, res) => {
+
   try {
     const { filename } = req.body;
     const model = modelManager.getById(req.params.id);
-
     if (!model) return res.status(404).json({ error: 'Model not found' });
+    // 检查运行状态，运行中禁止删除
+    if (!assertModelNotRunning(req.params.id, res)) return;
     if (!filename) return res.status(400).json({ error: 'filename is required' });
 
     // 删除运行时目录中的文件
@@ -392,11 +505,14 @@ router.delete('/models/:id/quantization', async (req, res) => {
 
 // 清理模型文件（不删除配置）
 router.delete('/models/:id/files', async (req, res) => {
+
   try {
     const model = modelManager.getById(req.params.id);
     if (!model) {
       return res.status(404).json({ error: 'Model not found' });
     }
+    // 检查运行状态，运行中禁止删除
+    if (!assertModelNotRunning(req.params.id, res)) return;
 
     // 删除运行时目录中的所有量化版本文件
     const runtimeDir = getModelPath(MODELS_RUN_DIR, model);
@@ -429,6 +545,8 @@ router.delete('/models/:id/files', async (req, res) => {
 // 只删除卡片配置，不删除模型文件
 router.delete('/models/:id/config', async (req, res) => {
   try {
+    // 检查运行状态，运行中禁止删除
+    if (!assertModelNotRunning(req.params.id, res)) return;
     const success = await modelManager.delete(req.params.id);
     if (!success) return res.status(404).json({ error: 'Model not found' });
     res.json({ success: true, message: '卡片已删除，模型文件保留' });
@@ -439,10 +557,13 @@ router.delete('/models/:id/config', async (req, res) => {
 
 // 删除模型（包括配置）
 router.delete('/models/:id', async (req, res) => {  try {
+
     const model = modelManager.getById(req.params.id);
     if (!model) {
       return res.status(404).json({ error: 'Model not found' });
     }
+    // 检查运行状态，运行中禁止删除
+    if (!assertModelNotRunning(req.params.id, res)) return;
 
     // 删除文件
     const runtimeDir = getModelPath(MODELS_RUN_DIR, model);

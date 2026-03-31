@@ -40,6 +40,9 @@ export function checkFilesComplete(dir, files) {
  * @returns {boolean} true = 完整可启动，false = 文件缺失或损坏
  */
 export function checkActiveFileIntegrity(model) {
+  // 云API模型无本地文件，始终视为完整
+  if (model.source === 'cloudapi') return true;
+
   const downloadedFiles = model.downloaded_files || [];
   const activeFile = downloadedFiles.find(f => f.is_active);
   if (!activeFile || !model.local_path) return false;

@@ -51,3 +51,15 @@ export const PRESETS_DIR = path.join(DATA_DIR, 'presets');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');
+
+export const DEFAULT_LLM_PARAMETERS = {
+  version: '1.0.0',
+  context_length: 0,
+  parallel: 1,
+  'no-mmap': true,
+  'n-gpu-layers': 100,
+  temperature: 0.7,
+  top_p: 0.9,
+  top_k: 40,
+  repeat_penalty: 1.1
+};
