@@ -30,6 +30,7 @@ const GlobalSettings = () => {
   const [engines, setEngines] = useState({});
   const [versionDrawerVisible, setVersionDrawerVisible] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState(null);
+  const [forcePolling, setForcePolling] = useState(false);
 
   // 从 engines.app 派生下载状态，天然支持刷新恢复
   const appDownloadState = engines['app']?.download_state || null;
@@ -120,11 +121,13 @@ const GlobalSettings = () => {
     const hasActiveDownload = Object.values(engines).some(
       e => e.download_state && ['downloading', 'unpacking', 'installing'].includes(e.download_state.status)
     );
-    if (!hasActiveDownload) return;
+    // 一旦检测到真实的 download_state，清除强制轮询标志
+    if (hasActiveDownload && forcePolling) setForcePolling(false);
+    if (!hasActiveDownload && !forcePolling) return;
 
     const timer = setInterval(() => loadEngines(), 2000);
     return () => clearInterval(timer);
-  }, [engines]);
+  }, [engines, forcePolling]);
 
   // 监听 app 下载状态变化
   useEffect(() => {
@@ -470,6 +473,8 @@ const GlobalSettings = () => {
       const engine = engines[engineId];
       const targetVersion = version || engine.versions[0].version;
       await engineService.download(engineId, targetVersion);
+      // 立即开启强制轮询，防止 download_state 尚未就绪时漏掉状态
+      setForcePolling(true);
       // 立即刷新一次，确保主列表拿到 download_state 并启动轮询
       await loadEngines();
     } catch (error) {
@@ -1085,7 +1090,7 @@ const GlobalSettings = () => {
           <Card size="small" title="已安装版本">
             <Alert
               message="版本说明"
-              description="默认使用最新安装的版本。如需使用特定版本，请在模型设置中配置。"
+              description="默认使用版本号最高的版本。如需使用特定版本，请在模型设置中配置。"
               type="info"
               showIcon
               style={{ marginBottom: 16 }}

@@ -76,12 +76,8 @@ class EngineManager {
       }
     }
 
-    // 按安装时间倒序排序（最新的在前）
-    installed.sort((a, b) => {
-      const timeA = new Date(a.installed_at).getTime();
-      const timeB = new Date(b.installed_at).getTime();
-      return timeB - timeA;
-    });
+    // 按版本号倒序排序（最高版本在前）
+    installed.sort((a, b) => b.version.localeCompare(a.version));
 
     return installed;
   }

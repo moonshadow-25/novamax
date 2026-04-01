@@ -431,7 +431,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                   label={
                     <Space>
                       引擎版本
-                      <Tooltip title="选择运行此模型使用的 llama.cpp 版本，默认使用最新安装的版本">
+                      <Tooltip title="选择运行此模型使用的 llama.cpp 版本，默认使用版本号最高的版本">
                         <QuestionCircleOutlined style={{ color: '#999' }} />
                       </Tooltip>
                     </Space>

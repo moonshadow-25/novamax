@@ -5,8 +5,13 @@ class ParameterService {
    * 获取模型的有效参数（用户参数优先，带版本控制）
    */
   getEffectiveParameters(model) {
-    const defaultParams = model.parameters || {};
-    const defaultVersion = defaultParams.version || '1.0.0';
+    const deletedKeys = new Set(model.deleted_parameters || []);
+    const rawDefault = model.parameters || {};
+    // 过滤掉用户主动删除的 key
+    const defaultParams = Object.fromEntries(
+      Object.entries(rawDefault).filter(([k]) => !deletedKeys.has(k))
+    );
+    const defaultVersion = rawDefault.version || '1.0.0';
 
     // 如果没有用户参数，返回默认参数
     if (!model.user_parameters) {
@@ -73,7 +78,8 @@ class ParameterService {
 
     await modelManager.update(modelId, {
       user_parameters: null,
-      user_parameters_version: null
+      user_parameters_version: null,
+      deleted_parameters: []   // 清空删除记录，让 models.json 的参数完全恢复
     });
 
     return this.getEffectiveParameters(modelManager.getById(modelId));
@@ -86,6 +92,14 @@ class ParameterService {
     const model = modelManager.getById(modelId);
     if (!model) {
       throw new Error('模型不存在');
+    }
+
+    // 如果用户重新添加了此前删除的 key，从删除记录中移除
+    const prevDeleted = model.deleted_parameters || [];
+    if (prevDeleted.includes(key)) {
+      await modelManager.update(modelId, {
+        deleted_parameters: prevDeleted.filter(k => k !== key)
+      });
     }
 
     const currentParams = model.user_parameters || {};
@@ -115,6 +129,11 @@ class ParameterService {
       const { [key]: _removed, ...remainingDefault } = model.parameters;
       await modelManager.update(modelId, { parameters: remainingDefault });
     }
+
+    // 记录用户主动删除的 key，防止远程同步时恢复
+    const deletedSet = new Set(model.deleted_parameters || []);
+    deletedSet.add(key);
+    await modelManager.update(modelId, { deleted_parameters: [...deletedSet] });
 
     return this.saveUserParameters(modelId, remainingParams);
   }
