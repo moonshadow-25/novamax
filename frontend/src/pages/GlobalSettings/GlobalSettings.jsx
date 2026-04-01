@@ -53,11 +53,16 @@ const GlobalSettings = () => {
 
   // 模型存储相关
   const [storage, setStorage] = useState(null);
-  const [migrateModal, setMigrateModal] = useState({ open: false, type: null, label: '' });
+  const [migrateModal, setMigrateModal] = useState({ open: false, type: null, label: '', size: 0, driveFreeSpace: null, srcPath: '' });
   const [migratePath, setMigratePath] = useState('');
+  const [migrateBackup, setMigrateBackup] = useState(false);
   const [migrating, setMigrating] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState(null); // { progress, copiedBytes, totalBytes, speed }
   const [pickingFolder, setPickingFolder] = useState(false);
   const [restoringType, setRestoringType] = useState(null);
+  // step: 'confirm' | 'progress'
+  const [restoreModal, setRestoreModal] = useState({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' });
+  const [restoreProgress, setRestoreProgress] = useState(null); // { progress, copiedBytes, totalBytes, speed, sameDrive }
 
   // 日志相关
   const [logEntries, setLogEntries] = useState([]);
@@ -252,31 +257,75 @@ const GlobalSettings = () => {
       return;
     }
     setMigrating(true);
+    setMigrateProgress(null);
     try {
-      const res = await systemService.migrateStorage(migrateModal.type, migratePath.trim());
-      message.success(res.message || '迁移成功');
+      const res = await systemService.migrateStorage(migrateModal.type, migratePath.trim(), migrateBackup);
+      const jobId = res.jobId;
+      await pollJobStatus(jobId, '迁移', (job) => setMigrateProgress({
+        progress: job.progress || 0,
+        copiedBytes: job.copiedBytes || 0,
+        totalBytes: job.totalBytes || 0,
+        speed: job.speed || 0,
+        phase: job.phase || 'migrate',
+        sameDrive: job.sameDrive || false
+      }));
       setMigrateModal({ open: false, type: null, label: '' });
       setMigratePath('');
+      setMigrateBackup(false);
       loadStorage();
     } catch (e) {
-      message.error(e.response?.data?.error || '迁移失败');
+      message.error(e.response?.data?.error || e.message || '迁移失败');
     } finally {
       setMigrating(false);
+      setMigrateProgress(null);
     }
   };
 
-  const handleRestore = async (type, label) => {
+  const handleRestore = async () => {
+    const { type, label } = restoreModal;
     setRestoringType(type);
+    setRestoreProgress(null);
+    setRestoreModal(prev => ({ ...prev, step: 'progress' }));
     try {
       const res = await systemService.restoreStorage(type);
-      message.success(res.message || '还原成功');
+      await pollJobStatus(res.jobId, '还原', (job) => setRestoreProgress({
+        progress: job.progress || 0,
+        copiedBytes: job.copiedBytes || 0,
+        totalBytes: job.totalBytes || 0,
+        speed: job.speed || 0,
+        sameDrive: job.sameDrive || false
+      }));
       loadStorage();
     } catch (e) {
-      message.error(e.response?.data?.error || '还原失败');
+      message.error(e.response?.data?.error || e.message || '还原失败');
     } finally {
       setRestoringType(null);
+      setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' });
+      setRestoreProgress(null);
     }
   };
+
+  /** 轮询后台任务直到完成，成功时 resolve，失败时 reject */
+  const pollJobStatus = (jobId, opName, onProgress) => new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        const job = await systemService.getJobStatus(jobId);
+        if (onProgress) onProgress(job);
+        if (job.status === 'success') {
+          clearInterval(interval);
+          message.success(job.message || `${opName}成功`);
+          resolve();
+        } else if (job.status === 'failed') {
+          clearInterval(interval);
+          reject(new Error(job.message || `${opName}失败`));
+        }
+        // status === 'running' 继续等待
+      } catch (e) {
+        clearInterval(interval);
+        reject(new Error(`查询${opName}状态失败`));
+      }
+    }, 2000);
+  });
 
   const handleStopProcess = async (proc) => {
     setStoppingId(proc.id);
@@ -922,19 +971,17 @@ const GlobalSettings = () => {
                         <Tooltip title={`Junction → ${item.junctionTarget}`}>
                           <Tag color="blue" icon={<LinkOutlined />}>已迁移</Tag>
                         </Tooltip>
-                        <Popconfirm
-                          title="确认还原"
-                          description={`确定要将 ${item.label} 还原到原路径吗？文件将从 ${item.junctionTarget} 移回原位置。`}
-                          onConfirm={() => handleRestore(item.type, item.label)}
-                          okText="还原"
-                          cancelText="取消"
-                          okButtonProps={{ danger: true }}
+                        <Tag
+                          color="orange"
+                          style={{ cursor: restoringType ? 'not-allowed' : 'pointer' }}
+                          icon={restoringType === item.type ? <SyncOutlined spin /> : undefined}
+                          onClick={() => !restoringType && setRestoreModal({
+                            open: true, type: item.type, label: item.label,
+                            step: 'confirm', junctionTarget: item.junctionTarget
+                          })}
                         >
-                          <Tag color="orange" style={{ cursor: 'pointer' }}
-                            icon={restoringType === item.type ? <SyncOutlined spin /> : undefined}>
-                            还原
-                          </Tag>
-                        </Popconfirm>
+                          还原
+                        </Tag>
                       </>
                     )}
                   </div>
@@ -946,7 +993,7 @@ const GlobalSettings = () => {
                   <Button size="small" icon={<FolderOpenOutlined />} disabled={!item.exists}
                     onClick={() => handleOpenFolder(item.path)}>打开</Button>
                   <Button size="small" icon={<SwapOutlined />} disabled={!item.exists}
-                    onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label }); setMigratePath(''); }}>迁移</Button>
+                    onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label, size: item.size, driveFreeSpace: item.driveFreeSpace, srcPath: item.path }); setMigratePath(''); setMigrateBackup(false); }}>迁移</Button>
                 </div>
               </div>
             ))}
@@ -1199,18 +1246,37 @@ const GlobalSettings = () => {
       <Modal
         title={`迁移 ${migrateModal.label}`}
         open={migrateModal.open}
-        onCancel={() => setMigrateModal({ open: false, type: null, label: '' })}
+        onCancel={() => !migrating && setMigrateModal({ open: false, type: null, label: '' })}
         onOk={handleMigrate}
         okText="开始迁移"
         cancelText="取消"
         confirmLoading={migrating}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{
+          danger: true,
+          disabled: (() => {
+            const p = migratePath.trim();
+            if (!p || !/^[a-zA-Z]:[\\\/]/.test(p)) return true;
+            if (/[*?"<>|]/.test(p.slice(3))) return true;
+            if (migrateBackup && migrateModal.driveFreeSpace != null && migrateModal.size > migrateModal.driveFreeSpace) return true;
+            return false;
+          })()
+        }}
+        cancelButtonProps={{ disabled: migrating }}
+        closable={!migrating}
+        maskClosable={!migrating}
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">
             将模型文件移动到新位置，并在原路径创建目录联接（mklink /J），程序无需修改即可正常使用。
           </Text>
         </div>
+        {migrating && (
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+            <Text style={{ color: '#d46b08', fontSize: 13 }}>
+              正在迁移中，请耐心等待，文件较大时可能需要数分钟甚至更长时间，请勿关闭程序...
+            </Text>
+          </div>
+        )}
         <div style={{ marginBottom: 8 }}>
           <Text strong>目标路径:</Text>
         </div>
@@ -1221,9 +1287,11 @@ const GlobalSettings = () => {
             onChange={(e) => setMigratePath(e.target.value)}
             onPressEnter={handleMigrate}
             style={{ flex: 1 }}
+            status={migratePath.trim() && !/^[a-zA-Z]:[\\\/]/.test(migratePath.trim()) ? 'error' : ''}
           />
           <Button icon={<FolderOpenOutlined />}
             loading={pickingFolder}
+            disabled={migrating}
             onClick={async () => {
               setPickingFolder(true);
               try {
@@ -1240,11 +1308,128 @@ const GlobalSettings = () => {
             浏览
           </Button>
         </div>
+        {migratePath.trim() && !/^[a-zA-Z]:[\\\/]/.test(migratePath.trim()) && (
+          <div style={{ marginTop: 4 }}>
+            <Text style={{ fontSize: 12, color: '#ff4d4f' }}>
+              请输入合法的 Windows 绝对路径，例如 D:\novastudio\llm
+            </Text>
+          </div>
+        )}
         <div style={{ marginTop: 12 }}>
           <Text type="warning" style={{ fontSize: 12 }}>
             注意: 迁移过程中请勿关闭程序，大文件可能需要较长时间。目标路径必须为空目录或不存在的路径。
           </Text>
         </div>
+        <div style={{ marginTop: 12 }}>
+          <Checkbox
+            checked={migrateBackup}
+            onChange={e => setMigrateBackup(e.target.checked)}
+            disabled={migrating}
+          >
+            迁移前备份原数据
+          </Checkbox>
+          {migrateBackup && (() => {
+            const notEnough = migrateModal.driveFreeSpace != null && migrateModal.size > migrateModal.driveFreeSpace;
+            return (
+              <div style={{ marginTop: 4 }}>
+                {notEnough ? (
+                  <Text style={{ fontSize: 12, color: '#ff4d4f' }}>
+                    源磁盘空间不足：备份需要 {(migrateModal.size / 1024 ** 3).toFixed(2)} GB，当前剩余 {(migrateModal.driveFreeSpace / 1024 ** 3).toFixed(2)} GB
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 12, color: '#888' }}>
+                    备份将保存至：{migrateModal.srcPath}_bak_xxx（与源目录同级），迁移完成后可手动删除
+                  </Text>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+        {migrating && (
+          <div style={{ marginTop: 16 }}>
+            {migrateProgress?.sameDrive ? (
+              <div style={{ color: '#1677ff', fontSize: 13 }}>正在重命名目录（同盘迁移，无需复制数据）...</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+                  {migrateProgress?.phase === 'backup' ? '正在备份...' : '正在迁移...'}
+                </div>
+                <Progress
+                  percent={migrateProgress?.progress || 0}
+                  status={migrateProgress?.progress >= 100 ? 'success' : 'active'}
+                  strokeColor={{ from: '#108ee9', to: '#87d068' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  <Text style={{ fontSize: 12, color: '#888' }}>
+                    {migrateProgress
+                      ? `${(migrateProgress.copiedBytes / 1024 ** 3).toFixed(2)} GB / ${(migrateProgress.totalBytes / 1024 ** 3).toFixed(2)} GB`
+                      : '正在准备...'}
+                  </Text>
+                  {migrateProgress?.speed > 0 && (
+                    <Text style={{ fontSize: 12, color: '#888' }}>
+                      {migrateProgress.speed >= 1024 ** 2
+                        ? `${(migrateProgress.speed / 1024 ** 2).toFixed(1)} MB/s`
+                        : `${(migrateProgress.speed / 1024).toFixed(0)} KB/s`}
+                    </Text>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* 还原弹窗（确认 + 进度两步合一，无 Popconfirm 冲突） */}
+      <Modal
+        title={restoreModal.step === 'confirm' ? `确认还原 ${restoreModal.label}` : `正在还原 ${restoreModal.label}`}
+        open={restoreModal.open}
+        onCancel={restoreModal.step === 'confirm' ? () => setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' }) : undefined}
+        closable={restoreModal.step === 'confirm'}
+        maskClosable={restoreModal.step === 'confirm'}
+        footer={restoreModal.step === 'confirm' ? [
+          <Button key="cancel" onClick={() => setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' })}>取消</Button>,
+          <Button key="ok" danger type="primary" onClick={handleRestore}>确认还原</Button>
+        ] : null}
+      >
+        {restoreModal.step === 'confirm' ? (
+          <div style={{ padding: '8px 0' }}>
+            <Text>确定要将 <Text strong>{restoreModal.label}</Text> 还原到原路径吗？</Text>
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>文件将从 {restoreModal.junctionTarget} 移回原位置。</Text>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '8px 0 16px' }}>
+            {restoreProgress?.sameDrive ? (
+              <div style={{ color: '#1677ff', fontSize: 13 }}>正在重命名目录（同盘还原，无需复制数据）...</div>
+            ) : (
+              <>
+                <Progress
+                  percent={restoreProgress?.progress || 0}
+                  status={(restoreProgress?.progress || 0) >= 100 ? 'success' : 'active'}
+                  strokeColor={{ from: '#108ee9', to: '#87d068' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+                  <Text style={{ fontSize: 13, color: '#555' }}>
+                    {restoreProgress
+                      ? `${(restoreProgress.copiedBytes / 1024 ** 3).toFixed(2)} GB / ${(restoreProgress.totalBytes / 1024 ** 3).toFixed(2)} GB`
+                      : '正在准备...'}
+                  </Text>
+                  {restoreProgress?.speed > 0 && (
+                    <Text style={{ fontSize: 13, color: '#555' }}>
+                      {restoreProgress.speed >= 1024 ** 2
+                        ? `${(restoreProgress.speed / 1024 ** 2).toFixed(1)} MB/s`
+                        : `${(restoreProgress.speed / 1024).toFixed(0)} KB/s`}
+                    </Text>
+                  )}
+                </div>
+              </>
+            )}
+            <div style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
+              正在将文件移回原路径，请耐心等待，请勿关闭程序...
+            </div>
+          </div>
+        )}
       </Modal>
     </Layout>
   );

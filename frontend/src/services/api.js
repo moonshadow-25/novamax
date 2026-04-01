@@ -190,8 +190,9 @@ export const systemService = {
   getLogs: (limit = 200, level = 'all') => api.get(`/system/logs?limit=${limit}&level=${level}`),
   clearLogs: () => api.delete('/system/logs'),
   openFolder: (dirPath) => api.post('/system/storage/open', { dirPath }),
-  migrateStorage: (type, targetPath) => api.post('/system/storage/migrate', { type, targetPath }),
+  migrateStorage: (type, targetPath, backup = false) => api.post('/system/storage/migrate', { type, targetPath, backup }),
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),
+  getJobStatus: (jobId) => api.get(`/system/storage/job-status/${jobId}`),
   pickFolder: () => api.post('/system/storage/pick-folder', {}, { timeout: 120000 })
 };
 

@@ -4,12 +4,14 @@ import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
+import { PassThrough } from 'stream';
 import processManager from '../services/processManager.js';
 import modelManager from '../services/modelManager.js';
 import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
 import logCollector from '../services/logCollector.js';
 import configManager from '../services/configManager.js';
-import { PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
+import { PROJECT_ROOT, MODELS_RUN_DIR, DATA_DIR } from '../config/constants.js';
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -134,6 +136,227 @@ router.delete('/system/logs', (req, res) => {
 
 // ========== 模型存储管理 ==========
 
+/** 存储迁移/还原异步任务状态 */
+const migrationJobs = new Map();
+
+function createJob() {
+  const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  migrationJobs.set(jobId, {
+    status: 'running', message: '', startTime: Date.now(), endTime: null,
+    totalBytes: 0, copiedBytes: 0, progress: 0, speed: 0,
+    phase: 'migrate', // 'backup' | 'migrate'
+    backupPath: null,
+    sameDrive: false
+  });
+  return jobId;
+}
+
+function finishJob(jobId, success, message) {
+  const job = migrationJobs.get(jobId);
+  if (job) {
+    job.status = success ? 'success' : 'failed';
+    job.message = message;
+    job.endTime = Date.now();
+    if (success) { job.progress = 100; job.copiedBytes = job.totalBytes; }
+    setTimeout(() => migrationJobs.delete(jobId), 600000);
+  }
+}
+
+router.get('/system/storage/job-status/:jobId', (req, res) => {
+  const job = migrationJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: '任务不存在' });
+  res.json(job);
+});
+
+/** 检测两个路径是否在同一个盘符（卷） */
+function isSameDrive(p1, p2) {
+  return path.parse(path.resolve(p1)).root.toLowerCase() ===
+         path.parse(path.resolve(p2)).root.toLowerCase();
+}
+
+/** 获取指定路径所在盘符的剩余空间（字节），失败返回 null */
+async function getDriveFreeSpace(targetPath) {
+  try {
+    const root = path.parse(path.resolve(targetPath)).root; // e.g. "C:\"
+    const letter = root.charAt(0).toUpperCase();
+    // 优先用 wmic，失败时用 PowerShell 兜底
+    try {
+      const { stdout } = await execAsync(
+        `wmic logicaldisk where "DeviceID='${letter}:'" get FreeSpace /value`,
+        { timeout: 5000, encoding: 'utf8' }
+      );
+      const match = stdout.match(/FreeSpace=(\d+)/);
+      if (match) return parseInt(match[1], 10);
+    } catch (_) { /* fall through */ }
+
+    const { stdout: ps } = await execAsync(
+      `powershell -NoProfile -Command "(Get-PSDrive -Name '${letter}').Free"`,
+      { timeout: 5000, encoding: 'utf8' }
+    );
+    const num = parseInt(ps.trim(), 10);
+    return isNaN(num) ? null : num;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── 大文件阈值与小文件并发数 ──────────────────────────────────────────────────
+const LARGE_FILE_THRESHOLD = 512 * 1024 * 1024; // 512 MB：大文件顺序复制最大化带宽
+const COPY_CONCURRENCY = 8;                      // 小文件最大并发数
+
+/** 流式复制单个文件，边复制边计算 SHA-256，返回源文件哈希 */
+function streamCopyFile(srcFile, destFile, onChunk) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const pt = new PassThrough();
+    const rs = fs.createReadStream(srcFile);
+    const ws = fs.createWriteStream(destFile);
+    pt.on('data', chunk => { hash.update(chunk); if (onChunk) onChunk(chunk.length); });
+    rs.on('error', reject);
+    pt.on('error', reject);
+    ws.on('error', reject);
+    ws.on('finish', () => resolve(hash.digest('hex')));
+    rs.pipe(pt).pipe(ws);
+  });
+}
+
+/** 独立读取文件计算 SHA-256（用于验证目标文件） */
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const rs = fs.createReadStream(filePath);
+    rs.on('data', chunk => hash.update(chunk));
+    rs.on('end', () => resolve(hash.digest('hex')));
+    rs.on('error', reject);
+  });
+}
+
+/**
+ * 复制单个文件，含 SHA-256 校验、时间戳保留、失败重试（最多 3 次）。
+ * move=true 时：只有校验通过才删除源文件，保证数据安全。
+ */
+async function copyFileVerified(srcFile, destFile, onChunk, move) {
+  const srcStat = fs.statSync(srcFile);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (fs.existsSync(destFile)) { try { fs.unlinkSync(destFile); } catch (_) {} }
+    try {
+      const srcHash = await streamCopyFile(srcFile, destFile, onChunk);
+      const destHash = await hashFile(destFile); // 独立读取验证，捕获静默写入错误
+      if (srcHash !== destHash) throw new Error(`SHA-256 不匹配 (第 ${attempt} 次): ${path.basename(srcFile)}`);
+      fs.utimesSync(destFile, srcStat.atime, srcStat.mtime); // 补回时间戳
+      if (move) fs.unlinkSync(srcFile); // 校验通过后才删源文件
+      return srcHash;
+    } catch (err) {
+      if (fs.existsSync(destFile)) { try { fs.unlinkSync(destFile); } catch (_) {} }
+      if (attempt === 3) throw err;
+      await new Promise(r => setTimeout(r, 1000 * attempt)); // 重试等待 1s / 2s
+    }
+  }
+}
+
+/**
+ * 复制目录，支持字节级进度、SHA-256 校验、时间戳保留、失败重试。
+ * 大文件（>= LARGE_FILE_THRESHOLD）顺序复制；小文件并发（最多 COPY_CONCURRENCY 个）。
+ */
+async function copyWithProgress(src, dest, move, jobId) {
+  const job = migrationJobs.get(jobId);
+
+  // 递归枚举文件
+  function listFiles(dir) {
+    const result = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) result.push(...listFiles(full));
+      else if (entry.isFile()) result.push({ full, rel: path.relative(src, full), size: fs.statSync(full).size });
+    }
+    return result;
+  }
+
+  const files = listFiles(src);
+  const totalBytes = files.reduce((s, f) => s + f.size, 0);
+  if (job) { job.totalBytes = totalBytes; job.copiedBytes = 0; job.progress = 0; job.speed = 0; }
+
+  // 日志（UTF-8，无乱码）
+  const logsDir = path.join(DATA_DIR, 'logs', 'migrate');
+  fs.mkdirSync(logsDir, { recursive: true });
+  const logStream = fs.createWriteStream(path.join(logsDir, `migrate_${jobId}_${Date.now()}.log`), { encoding: 'utf8' });
+  const log = msg => logStream.write(`[${new Date().toISOString()}] ${msg}\n`);
+  log(`${move ? '迁移' : '备份'} | ${files.length} 个文件 | ${(totalBytes / 1024 ** 3).toFixed(2)} GB`);
+  log(`大文件阈值: ${LARGE_FILE_THRESHOLD / 1024 ** 2} MB | 小文件并发: ${COPY_CONCURRENCY}`);
+
+  // 进度追踪（inProgressMap 追踪并发小文件各自的已读字节）
+  let completedBytes = 0;
+  let snapshotBytes = 0, snapshotTime = Date.now();
+  const inProgressMap = new Map();
+
+  const tick = (rel, chunkLen) => {
+    if (!job) return;
+    if (rel) inProgressMap.set(rel, (inProgressMap.get(rel) || 0) + chunkLen);
+    const inProgress = [...inProgressMap.values()].reduce((a, b) => a + b, 0);
+    job.copiedBytes = Math.min(completedBytes + inProgress, totalBytes);
+    job.progress = totalBytes > 0 ? Math.min(99, Math.round(job.copiedBytes / totalBytes * 100)) : 0;
+    const now = Date.now();
+    const elapsed = (now - snapshotTime) / 1000;
+    if (elapsed >= 1) { job.speed = (job.copiedBytes - snapshotBytes) / elapsed; snapshotBytes = job.copiedBytes; snapshotTime = now; }
+  };
+
+  const finishFile = (file, hash) => {
+    completedBytes += file.size;
+    inProgressMap.delete(file.rel);
+    tick(null, 0);
+    log(`✓ ${file.rel} | ${(file.size / 1024 ** 2).toFixed(2)} MB | sha256:${hash.slice(0, 16)}...`);
+  };
+
+  // 大文件顺序处理
+  for (const file of files.filter(f => f.size >= LARGE_FILE_THRESHOLD)) {
+    fs.mkdirSync(path.dirname(path.join(dest, file.rel)), { recursive: true });
+    inProgressMap.set(file.rel, 0);
+    const hash = await copyFileVerified(file.full, path.join(dest, file.rel), len => tick(file.rel, len), move);
+    finishFile(file, hash);
+  }
+
+  // 小文件并发处理（worker pool）
+  const smallTasks = files.filter(f => f.size < LARGE_FILE_THRESHOLD).map(file => async () => {
+    fs.mkdirSync(path.dirname(path.join(dest, file.rel)), { recursive: true });
+    inProgressMap.set(file.rel, 0);
+    const hash = await copyFileVerified(file.full, path.join(dest, file.rel), len => tick(file.rel, len), move);
+    finishFile(file, hash);
+  });
+
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(COPY_CONCURRENCY, smallTasks.length || 1) }, async () => {
+    while (idx < smallTasks.length) await smallTasks[idx++]();
+  }));
+
+  // 保留目录时间戳（补回 robocopy /COPY:T 对目录的处理）
+  const syncDirTimes = (srcDir, destDir) => {
+    try {
+      for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) {
+        if (e.isDirectory()) syncDirTimes(path.join(srcDir, e.name), path.join(destDir, e.name));
+      }
+      const s = fs.statSync(srcDir);
+      fs.utimesSync(destDir, s.atime, s.mtime);
+    } catch (_) {}
+  };
+  syncDirTimes(src, dest);
+
+  // move 模式：清理空目录
+  if (move) {
+    const removeEmpty = dir => {
+      try {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) removeEmpty(path.join(dir, e.name));
+        }
+        if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+      } catch (_) {}
+    };
+    removeEmpty(src);
+  }
+
+  log('完成');
+  logStream.end();
+}
+
 const STORAGE_TYPES = {
   llm: { label: 'LLM 模型', dir: 'llm' },
   comfyui: { label: 'ComfyUI 模型', dir: 'comfyui' },
@@ -185,7 +408,9 @@ router.get('/system/storage', async (req, res) => {
       const exists = fs.existsSync(dirPath);
       const junction = isJunction(dirPath);
       const target = junction ? getJunctionTarget(dirPath) : null;
+      const realPath = junction ? target : dirPath;
       const size = exists ? getDirSize(dirPath) : 0;
+      const driveFreeSpace = realPath ? await getDriveFreeSpace(realPath) : null;
 
       items.push({
         type,
@@ -193,6 +418,7 @@ router.get('/system/storage', async (req, res) => {
         path: dirPath,
         exists,
         size,
+        driveFreeSpace,
         isJunction: junction,
         junctionTarget: target
       });
@@ -221,10 +447,8 @@ router.post('/system/storage/open', async (req, res) => {
 router.post('/system/storage/migrate', async (req, res) => {
   console.log('[migrate] 收到请求:', req.body);
   try {
-    const { type, targetPath } = req.body;
-    if (!type || !targetPath) {
-      return res.status(400).json({ error: '缺少参数' });
-    }
+    const { type, targetPath, backup = false } = req.body;
+    if (!type || !targetPath) return res.status(400).json({ error: '缺少参数' });
     const info = STORAGE_TYPES[type];
     if (!info) return res.status(400).json({ error: '无效的类型' });
 
@@ -235,64 +459,95 @@ router.post('/system/storage/migrate', async (req, res) => {
       return res.status(400).json({ error: '目标路径不能与当前路径相同' });
     }
 
-    const realSrc = isJunction(srcPath)
-      ? getJunctionTarget(srcPath)
-      : srcPath;
+    const realSrc = isJunction(srcPath) ? getJunctionTarget(srcPath) : srcPath;
 
+    // 验证目标路径
     if (fs.existsSync(destPath)) {
-      const entries = fs.readdirSync(destPath);
-      if (entries.length > 0) {
-        return res.status(400).json({
-          error: `目标路径 ${destPath} 已存在且非空，请清空后重试`
-        });
+      if (fs.readdirSync(destPath).length > 0) {
+        return res.status(400).json({ error: `目标路径 ${destPath} 已存在且非空，请清空后重试` });
       }
     } else {
       const parentDir = path.dirname(destPath);
       if (!fs.existsSync(parentDir)) {
-        return res.status(400).json({
-          error: `父目录 ${parentDir} 不存在，请先创建`
-        });
-      }
-      fs.mkdirSync(destPath);
-    }
-
-    const robocopy = `robocopy "${realSrc}" "${destPath}" /E /MOVE /R:1 /W:1`;
-    const mklink = `mklink /J "${srcPath}" "${destPath}"`;
-
-    if (isJunction(srcPath)) {
-      await execAsync(`rmdir "${srcPath}"`, { timeout: 5000 });
-    }
-
-    try {
-      await execAsync(robocopy, { timeout: 600000 });
-    } catch (e) {
-      const exitCode = e.code || 0;
-      if (exitCode >= 8) {
-        throw new Error(`robocopy 失败 (code=${exitCode}): ${e.stderr || e.message}`);
+        return res.status(400).json({ error: `父目录 ${parentDir} 不存在，请先创建` });
       }
     }
 
-    if (fs.existsSync(srcPath) && !isJunction(srcPath)) {
+    const sameDrive = isSameDrive(realSrc, destPath);
+
+    if (!sameDrive) {
+      // 跨盘：检查目标磁盘剩余空间
+      const srcSize = getDirSize(realSrc);
+      const destFree = await getDriveFreeSpace(destPath);
+      if (destFree !== null && destFree < srcSize) {
+        const need = (srcSize / 1024 ** 3).toFixed(2);
+        const avail = (destFree / 1024 ** 3).toFixed(2);
+        return res.status(400).json({ error: `目标磁盘空间不足：需要 ${need} GB，可用 ${avail} GB` });
+      }
+      // 如需备份，同时检查源磁盘剩余空间（备份写回源盘）
+      if (backup) {
+        const srcFree = await getDriveFreeSpace(realSrc);
+        if (srcFree !== null && srcFree < srcSize) {
+          const need = (srcSize / 1024 ** 3).toFixed(2);
+          const avail = (srcFree / 1024 ** 3).toFixed(2);
+          return res.status(400).json({ error: `备份空间不足：源磁盘需要 ${need} GB，可用 ${avail} GB` });
+        }
+      }
+    }
+
+    const jobId = createJob();
+    const job = migrationJobs.get(jobId);
+    job.sameDrive = sameDrive;
+    res.json({ jobId, sameDrive });
+
+    // 后台执行
+    (async () => {
       try {
-        await execAsync(`rmdir /S /Q "${srcPath}"`, { timeout: 30000 });
-      } catch (e) {
-        throw new Error(`删除原目录失败: ${e.message}`);
+        // ── 阶段一：备份（可选）──
+        if (backup) {
+          job.phase = 'backup';
+          const backupPath = `${realSrc}_bak_${Date.now()}`;
+          await copyWithProgress(realSrc, backupPath, false, jobId);
+          job.backupPath = backupPath;
+          // 重置进度供迁移阶段使用
+          job.copiedBytes = 0; job.progress = 0; job.totalBytes = 0; job.speed = 0;
+        }
+
+        // ── 阶段二：迁移 ──
+        job.phase = 'migrate';
+
+        if (isJunction(srcPath)) {
+          await execAsync(`rmdir "${srcPath}"`, { timeout: 5000 });
+        }
+
+        if (sameDrive) {
+          // 同盘：用 fs.rename（只改目录项，不移动数据，无需额外空间）
+          if (fs.existsSync(destPath)) fs.rmdirSync(destPath); // rename 前清除空目标目录
+          fs.renameSync(realSrc, destPath);
+          job.progress = 100; job.totalBytes = 1; job.copiedBytes = 1;
+        } else {
+          // 跨盘：用 robocopy /MOVE
+          if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
+          await copyWithProgress(realSrc, destPath, true, jobId);
+          if (fs.existsSync(srcPath) && !isJunction(srcPath)) {
+            await execAsync(`rmdir /S /Q "${srcPath}"`, { timeout: 30000 });
+          }
+        }
+
+        // 创建 junction，保持原路径透明可用
+        await execAsync(`mklink /J "${srcPath}" "${destPath}"`, { timeout: 5000 });
+
+        let msg = `已将 ${info.label} 迁移到 ${destPath}`;
+        if (backup && job.backupPath) msg += `（备份位于 ${job.backupPath}）`;
+        finishJob(jobId, true, msg);
+        console.log('[migrate] 完成:', destPath, sameDrive ? '(同盘)' : '(跨盘)');
+      } catch (error) {
+        finishJob(jobId, false, `迁移失败: ${error.message}`);
+        console.error('[migrate] 错误:', error);
       }
-    }
-
-    try {
-      await execAsync(mklink, { timeout: 5000 });
-    } catch (e) {
-      throw new Error(`创建目录联接失败: ${e.stderr || e.message}`);
-    }
-
-    res.json({
-      success: true,
-      message: `已将 ${info.label} 迁移到 ${destPath}`,
-      junctionTarget: destPath
-    });
+    })();
   } catch (error) {
-    console.error('[migrate] 错误:', error);
+    console.error('[migrate] 参数验证错误:', error);
     res.status(500).json({ error: `迁移失败: ${error.message}` });
   }
 });
@@ -302,56 +557,68 @@ router.post('/system/storage/restore', async (req, res) => {
   console.log('[restore] 收到请求:', req.body);
   try {
     const { type } = req.body;
-    if (!type) {
-      return res.status(400).json({ error: '缺少参数' });
-    }
+    if (!type) return res.status(400).json({ error: '缺少参数' });
     const info = STORAGE_TYPES[type];
     if (!info) return res.status(400).json({ error: '无效的类型' });
 
     const junctionPath = path.join(MODELS_RUN_DIR, info.dir);
 
-    // 检查是否为 junction
     if (!isJunction(junctionPath)) {
       return res.status(400).json({ error: '当前路径不是 junction，无需还原' });
     }
 
-    // 获取 junction 目标路径
     const targetPath = getJunctionTarget(junctionPath);
     if (!targetPath || !fs.existsSync(targetPath)) {
       return res.status(400).json({ error: 'Junction 目标路径不存在' });
     }
 
-    // 1. 删除 junction
-    await execAsync(`rmdir "${junctionPath}"`, { timeout: 5000 });
+    const sameDrive = isSameDrive(targetPath, junctionPath);
 
-    // 2. 将文件从目标路径移回原路径
-    fs.mkdirSync(junctionPath, { recursive: true });
-    const robocopy = `robocopy "${targetPath}" "${junctionPath}" /E /MOVE /R:1 /W:1`;
-
-    try {
-      await execAsync(robocopy, { timeout: 600000 });
-    } catch (e) {
-      const exitCode = e.code || 0;
-      if (exitCode >= 8) {
-        throw new Error(`robocopy 失败 (code=${exitCode}): ${e.stderr || e.message}`);
+    if (!sameDrive) {
+      // 跨盘还原：检查目标（原路径所在盘）剩余空间
+      const dataSize = getDirSize(targetPath);
+      const destFree = await getDriveFreeSpace(junctionPath);
+      if (destFree !== null && destFree < dataSize) {
+        const need = (dataSize / 1024 ** 3).toFixed(2);
+        const avail = (destFree / 1024 ** 3).toFixed(2);
+        return res.status(400).json({ error: `还原磁盘空间不足：需要 ${need} GB，可用 ${avail} GB` });
       }
     }
 
-    // 3. 删除原迁移目标目录
-    if (fs.existsSync(targetPath)) {
+    const jobId = createJob();
+    const job = migrationJobs.get(jobId);
+    job.sameDrive = sameDrive;
+    res.json({ jobId });
+
+    (async () => {
       try {
-        await execAsync(`rmdir /S /Q "${targetPath}"`, { timeout: 30000 });
-      } catch (e) {
-        console.warn('[restore] 删除目标目录失败:', e.message);
-      }
-    }
+        job.phase = 'migrate';
+        await execAsync(`rmdir "${junctionPath}"`, { timeout: 5000 });
 
-    res.json({
-      success: true,
-      message: `已将 ${info.label} 还原到原路径`
-    });
+        if (sameDrive) {
+          // 同盘：rename
+          if (fs.existsSync(junctionPath)) fs.rmdirSync(junctionPath);
+          fs.renameSync(targetPath, junctionPath);
+          job.progress = 100; job.totalBytes = 1; job.copiedBytes = 1;
+        } else {
+          // 跨盘：robocopy /MOVE
+          fs.mkdirSync(junctionPath, { recursive: true });
+          await copyWithProgress(targetPath, junctionPath, true, jobId);
+          if (fs.existsSync(targetPath)) {
+            try { await execAsync(`rmdir /S /Q "${targetPath}"`, { timeout: 30000 }); }
+            catch (e) { console.warn('[restore] 删除目标目录失败:', e.message); }
+          }
+        }
+
+        finishJob(jobId, true, `已将 ${info.label} 还原到原路径`);
+        console.log('[restore] 完成', sameDrive ? '(同盘)' : '(跨盘)');
+      } catch (error) {
+        finishJob(jobId, false, `还原失败: ${error.message}`);
+        console.error('[restore] 错误:', error);
+      }
+    })();
   } catch (error) {
-    console.error('[restore] 错误:', error);
+    console.error('[restore] 参数验证错误:', error);
     res.status(500).json({ error: `还原失败: ${error.message}` });
   }
 });
