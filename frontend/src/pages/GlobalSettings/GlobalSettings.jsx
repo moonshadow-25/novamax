@@ -149,7 +149,7 @@ const GlobalSettings = () => {
         try {
           await fetch('/api/health');
           clearInterval(poll);
-          window.location.reload();
+          window.location.href = '/';
         } catch {}
       }, 2000);
     } else if (appDownloadState.status === 'failed') {
