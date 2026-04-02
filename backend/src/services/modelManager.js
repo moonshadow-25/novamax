@@ -125,7 +125,37 @@ class ModelManager {
     return null;
   }
 
+  _isEmbeddingModel(type, modelData) {
+    if (type !== 'llm') return false;
+
+    const keywords = [
+      modelData?.name,
+      modelData?.id,
+      modelData?.modelscope_id,
+      modelData?.api_model
+    ].filter(v => typeof v === 'string' && v.trim().length > 0);
+
+    return keywords.some(v => /embedding/i.test(v));
+  }
+
   async create(type, modelData) {
+    const normalizedModelData = { ...modelData };
+
+    // Embedding 模型默认注入 embedding=true，统一覆盖所有新增模型入口。
+    if (this._isEmbeddingModel(type, normalizedModelData)) {
+      const baseParams =
+        normalizedModelData.parameters &&
+        typeof normalizedModelData.parameters === 'object' &&
+        !Array.isArray(normalizedModelData.parameters)
+          ? normalizedModelData.parameters
+          : {};
+
+      normalizedModelData.parameters = {
+        ...baseParams,
+        ...(baseParams.embedding === undefined ? { embedding: true } : {})
+      };
+    }
+
     const model = {
       id: generateId(),
       type,
@@ -133,7 +163,7 @@ class ModelManager {
       status: MODEL_STATUS.STOPPED,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      ...modelData
+      ...normalizedModelData
     };
 
     this._stmtInsert.run(model.id, type, JSON.stringify(model), model.updated_at);

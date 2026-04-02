@@ -623,6 +623,96 @@ router.post('/system/storage/restore', async (req, res) => {
   }
 });
 
+// ========== 缓存管理 ==========
+
+/**
+ * data/ 目录下永不纳入缓存管理的条目（白名单排除）
+ */
+const CACHE_EXCLUDE = new Set([
+  'models_dir',
+  'presets',
+  'novamax.db',
+  'novamax.db-shm',
+  'novamax.db-wal',
+]);
+
+/** 递归计算目录或文件的大小（字节）及文件数量 */
+function getCacheDirInfo(targetPath) {
+  let size = 0;
+  let count = 0;
+  try {
+    const stat = fs.statSync(targetPath);
+    if (!stat.isDirectory()) return { size: stat.size, count: 1 };
+    for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+      const full = path.join(targetPath, entry.name);
+      if (entry.isDirectory()) {
+        const sub = getCacheDirInfo(full);
+        size += sub.size;
+        count += sub.count;
+      } else {
+        try { size += fs.statSync(full).size; count++; } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return { size, count };
+}
+
+/** 动态扫描 data/ 获取所有可清除条目（排除 CACHE_EXCLUDE） */
+function getCacheItems() {
+  const items = [];
+  try {
+    for (const entry of fs.readdirSync(DATA_DIR, { withFileTypes: true })) {
+      if (CACHE_EXCLUDE.has(entry.name)) continue;
+      const full = path.join(DATA_DIR, entry.name);
+      const { size, count } = getCacheDirInfo(full);
+      items.push({ key: entry.name, label: entry.name, isDir: entry.isDirectory(), path: full, size, count });
+    }
+  } catch (_) {}
+  return items;
+}
+
+/** 删除单个文件或清空目录内容（保留目录本身） */
+function clearCacheItem(itemPath, isDir) {
+  try {
+    if (!fs.existsSync(itemPath)) return;
+    if (isDir) {
+      for (const entry of fs.readdirSync(itemPath, { withFileTypes: true })) {
+        const full = path.join(itemPath, entry.name);
+        if (entry.isDirectory()) fs.rmSync(full, { recursive: true, force: true });
+        else fs.unlinkSync(full);
+      }
+    } else {
+      fs.unlinkSync(itemPath);
+    }
+  } catch (_) {}
+}
+
+router.get('/system/cache', (req, res) => {
+  try {
+    const items = getCacheItems();
+    const totalSize = items.reduce((sum, i) => sum + i.size, 0);
+    res.json({ items, totalSize });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/system/cache', (req, res) => {
+  try {
+    const { keys } = req.body || {};
+    const all = getCacheItems();
+    const targets = Array.isArray(keys) && keys.length > 0
+      ? all.filter(i => keys.includes(i.key))
+      : all;
+    for (const item of targets) {
+      clearCacheItem(item.path, item.isDir);
+    }
+    res.json({ success: true, cleared: targets.map(i => i.key) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /** 调用系统原生文件夹选择对话框 */
 router.post('/system/storage/pick-folder', async (req, res) => {
   try {

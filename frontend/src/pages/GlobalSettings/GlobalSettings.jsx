@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
-import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 const { Header, Content, Sider } = Layout;
@@ -73,6 +73,11 @@ const GlobalSettings = () => {
   const logContainerRef = useRef(null);
   const logTimerRef = useRef(null);
 
+  // 缓存管理相关
+  const [cacheInfo, setCacheInfo] = useState(null);
+  const [cacheLoading, setCacheLoading] = useState(false);
+  const [cacheClearing, setCacheClearing] = useState(null); // null | 'all' | key
+
   useEffect(() => {
     loadSettings();
     loadEngines();
@@ -101,6 +106,11 @@ const GlobalSettings = () => {
   // 切换到存储标签时加载
   useEffect(() => {
     if (selectedMenu === 'storage') loadStorage();
+  }, [selectedMenu]);
+
+  // 切换到缓存管理标签时加载
+  useEffect(() => {
+    if (selectedMenu === 'cache') loadCacheInfo();
   }, [selectedMenu]);
 
   // 日志定时刷新
@@ -205,6 +215,32 @@ const GlobalSettings = () => {
       setStorage(data);
     } catch (e) {
       console.error('Failed to load storage:', e);
+    }
+  };
+
+  const loadCacheInfo = async () => {
+    try {
+      setCacheLoading(true);
+      const data = await systemService.getCacheInfo();
+      setCacheInfo(data);
+    } catch (e) {
+      message.error('加载缓存信息失败');
+    } finally {
+      setCacheLoading(false);
+    }
+  };
+
+  const handleClearCache = async (keys) => {
+    const clearKey = keys ? keys[0] : 'all';
+    try {
+      setCacheClearing(clearKey);
+      await systemService.clearCache(keys || null);
+      message.success('缓存已清除');
+      await loadCacheInfo();
+    } catch (e) {
+      message.error('清除缓存失败');
+    } finally {
+      setCacheClearing(null);
     }
   };
 
@@ -541,7 +577,9 @@ const GlobalSettings = () => {
   const renderEnginesContent = () => (
     <Card title="引擎管理" extra={<Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>}>
       <List
-        dataSource={Object.values(engines).filter(e => e.category !== 'app')}
+        // 过滤掉 category 为 app 由运行状态页面统一管理
+        // tts、whisper 功能暂未完成，先隐藏，后续完善后再放出来
+        dataSource={Object.values(engines).filter(e => e.category !== 'app' && e.id !== 'tts' && e.id !== 'whisper')}
         renderItem={engine => {
           const downloadState = engine.download_state;
           const latestVersion = engine.versions?.[0];
@@ -830,6 +868,44 @@ const GlobalSettings = () => {
     </Card>
   );
 
+  const renderCacheContent = () => (
+    <Card title="缓存管理">
+      {cacheLoading && !cacheInfo ? (
+        <Skeleton active />
+      ) : cacheInfo ? (
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <HddOutlined style={{ fontSize: 20, color: '#888' }} />
+            <span style={{ fontSize: 15 }}>
+              缓存占用：<Text strong>{formatBytes(cacheInfo.totalSize)}</Text>
+            </span>
+            <Button icon={<ReloadOutlined />} onClick={loadCacheInfo} loading={cacheLoading} size="small">
+              刷新
+            </Button>
+            <Popconfirm
+              title="确定要清除全部缓存吗？"
+              onConfirm={() => handleClearCache(null)}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button
+                icon={<DeleteOutlined />}
+                danger
+                size="small"
+                loading={cacheClearing === 'all'}
+                disabled={cacheLoading || cacheInfo.totalSize === 0}
+              >
+                清除缓存
+              </Button>
+            </Popconfirm>
+          </div>
+        </Space>
+      ) : (
+        <Empty description="加载失败" />
+      )}
+    </Card>
+  );
+
   const renderRuntimeContent = () => {
     const hw = systemInfo?.hardware;
     const processes = systemInfo?.processes || [];
@@ -1070,6 +1146,7 @@ const GlobalSettings = () => {
       case 'logs':    return renderLogsContent();
       case 'engines': return renderEnginesContent();
       case 'storage': return renderStorageContent();
+      case 'cache':   return renderCacheContent();
       case 'export':  return renderExportContent();
       case 'update':  return renderUpdateContent();
       default:        return null;
@@ -1234,6 +1311,7 @@ const GlobalSettings = () => {
               { key: 'logs',    icon: <FileTextOutlined />,  label: '系统日志' },
               { key: 'storage', icon: <DatabaseOutlined />, label: '模型存储' },
               { key: 'engines', icon: <AppstoreOutlined />, label: '引擎管理' },
+              { key: 'cache',   icon: <HddOutlined />,      label: '缓存管理' },
               { key: 'export',  icon: <ExportOutlined />,   label: '导出配置' },
               { key: 'update',  icon: <SyncOutlined />,     label: '更新设置' }
             ]}

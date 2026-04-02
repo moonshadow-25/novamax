@@ -193,7 +193,9 @@ export const systemService = {
   migrateStorage: (type, targetPath, backup = false) => api.post('/system/storage/migrate', { type, targetPath, backup }),
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),
   getJobStatus: (jobId) => api.get(`/system/storage/job-status/${jobId}`),
-  pickFolder: () => api.post('/system/storage/pick-folder', {}, { timeout: 120000 })
+  pickFolder: () => api.post('/system/storage/pick-folder', {}, { timeout: 120000 }),
+  getCacheInfo: () => api.get('/system/cache'),
+  clearCache: (keys) => api.delete('/system/cache', { data: keys ? { keys } : {} })
 };
 
 export const remoteConfigService = {
