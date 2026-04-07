@@ -598,11 +598,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       !isDownloadingDefault &&
       !isDefaultDownloadFailed &&
       !isRedownloadingActive;
-  
-  // 旧的下载状态判断（兼容）
-  const isDownloaded = model.downloaded
-    || (model.downloaded_quantizations && model.downloaded_quantizations.length > 0)
-    || isDefaultDownloadCompleted;
 
   // 格式化文件大小
   const formatSize = (bytes) => {

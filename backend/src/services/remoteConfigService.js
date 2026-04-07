@@ -11,13 +11,14 @@ import engineManager from './engineManager.js';
 const USER_FIELDS = [
   'selected_quantization', 'user_parameter_mapping',
   'downloaded_files', 'downloaded_quantizations',
-  'local_path', 'downloaded', 'status'
+  'local_path'
 ];
 
 // 远程控制字段（版本升级时从远端覆盖）
 const REMOTE_FIELDS = [
   'name', 'description', 'modelscope_id', 'quantizations',
-  'required_models', 'workflow', 'parameter_mapping', 'default_parameters'
+  'required_models', 'workflow', 'parameter_mapping', 'default_parameters',
+  'mmproj_options', 'capabilities'
 ];
 
 /**

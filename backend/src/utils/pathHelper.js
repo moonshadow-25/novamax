@@ -167,6 +167,18 @@ export function getPythonScriptPath(scriptName) {
 }
 
 /**
+ * 获取辅助脚本路径
+ * - 开发环境: backend/src/<relativePath>
+ * - 生产环境: backend/dist/<relativePath>
+ */
+export function getAuxiliaryScriptPath(relativePath) {
+  if (isProduction) {
+    return path.join(getProjectRoot(), 'backend', 'dist', relativePath);
+  }
+  return path.join(getProjectRoot(), 'backend', 'src', relativePath);
+}
+
+/**
  * 获取前端静态文件目录
  */
 export function getFrontendDistPath() {

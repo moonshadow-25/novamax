@@ -19,9 +19,9 @@ router.get('/engines', async (req, res) => {
       const broken = engineManager.getBrokenVersions(id);
       const defaultVersion = engineManager.getDefaultVersion(id);
 
-      // 查找该引擎是否有进行中的下载
+      // 查找该引擎所有进行中的下载（可能同时下载多个版本）
       const allStates = downloadStateManager.getAllStates();
-      const downloadState = Object.values(allStates).find(
+      const downloadStates = Object.values(allStates).filter(
         s => s.type === 'engine' && (s.engineId === id || s.id === id)
       );
 
@@ -31,7 +31,9 @@ router.get('/engines', async (req, res) => {
         installed_versions: installed,
         broken_versions: broken,
         default_version: defaultVersion,
-        download_state: downloadState || null
+        download_states: downloadStates,
+        // 兼容旧字段：取第一个活跃下载
+        download_state: downloadStates[0] || null
       };
     }
 

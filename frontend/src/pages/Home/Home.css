@@ -127,6 +127,10 @@
   opacity: 1;
 }
 
+.engine-update-banner {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
 /* 深色主题 */
 [data-theme='dark'] .home-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);

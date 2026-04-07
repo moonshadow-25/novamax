@@ -234,8 +234,12 @@ class ModelscopeParser {
         ? `${parseFloat((totalSize / (1024 * 1024 * 1024)).toFixed(2))} GB`
         : '文件夹';
 
-      // 保存每个文件的 name+size，供下载时计算累计进度用
-      const folderFileList = filesInFolder.map(f => ({ name: f.Name, size: f.Size || 0 }));
+      // 保存每个文件的 name+size+download_url，供下载时使用
+      const folderFileList = filesInFolder.map(f => ({
+        name: f.Name,
+        size: f.Size || 0,
+        download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${f.Path || folder.Name + '/' + f.Name}`
+      }));
 
       quantizations.push({
         name: quantType,
@@ -346,8 +350,6 @@ class ModelscopeParser {
       type: type,
       source: 'modelscope',
       modelscope_id: modelId,
-      downloaded: false,
-      status: 'stopped',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

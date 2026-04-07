@@ -64,19 +64,19 @@ const backendDest = path.join(RELEASE_DIR, 'backend');
 const distDest = path.join(backendDest, 'dist');
 fs.mkdirSync(distDest, { recursive: true });
 
+// 读取 package.json 获取所有依赖名（标记为 external）
+const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'backend/package.json'), 'utf-8'));
+const externalDeps = Object.keys(pkg.dependencies || {});
+
+const banner = [
+  'import{fileURLToPath as __banner_fileURLToPath}from"url";',
+  'import{dirname as __banner_dirname}from"path";',
+  'const __filename=__banner_fileURLToPath(import.meta.url);',
+  'const __dirname=__banner_dirname(__filename);',
+].join('');
+
 try {
-  // 读取 package.json 获取所有依赖名（标记为 external）
-  const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'backend/package.json'), 'utf-8'));
-  const externalDeps = Object.keys(pkg.dependencies || {});
-
   // esbuild JS API 打包：src/index.js -> dist/index.js
-  const banner = [
-    'import{fileURLToPath as __banner_fileURLToPath}from"url";',
-    'import{dirname as __banner_dirname}from"path";',
-    'const __filename=__banner_fileURLToPath(import.meta.url);',
-    'const __dirname=__banner_dirname(__filename);',
-  ].join('');
-
   await esbuildBuild({
     entryPoints: [path.join(PROJECT_ROOT, 'backend/src/index.js')],
     bundle: true,
@@ -112,11 +112,63 @@ for (const script of pyScripts) {
 }
 console.log('✅ Python 脚本已复制');
 
+// 打包 auxiliary scripts 为独立发布文件
+console.log('🔨 打包辅助脚本...');
+const auxiliaryManifestPath = path.join(PROJECT_ROOT, 'backend/src/auxiliary-scripts.json');
+let auxiliaryScripts = [];
+if (fs.existsSync(auxiliaryManifestPath)) {
+  try {
+    auxiliaryScripts = JSON.parse(fs.readFileSync(auxiliaryManifestPath, 'utf-8'));
+  } catch (error) {
+    console.error('❌ 读取 auxiliary-scripts.json 失败:', error.message);
+    process.exit(1);
+  }
+}
+
+if (auxiliaryScripts.length > 0) {
+  for (const scriptEntry of auxiliaryScripts) {
+    const srcPath = path.join(PROJECT_ROOT, 'backend', scriptEntry.source);
+    const destPath = path.join(distDest, scriptEntry.target);
+
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+
+    if (!fs.existsSync(srcPath)) {
+      console.warn(`⚠️ 辅助脚本未找到，跳过: ${scriptEntry.source}`);
+      continue;
+    }
+
+    try {
+      await esbuildBuild({
+        entryPoints: [srcPath],
+        bundle: true,
+        platform: 'node',
+        format: 'esm',
+        minify: true,
+        treeShaking: true,
+        outfile: destPath,
+        external: [
+          ...externalDeps,
+          ...builtinModules,
+          ...builtinModules.map(m => `node:${m}`),
+        ],
+        banner: { js: banner },
+      });
+      console.log(`✅ 已打包辅助脚本: ${scriptEntry.target}`);
+    } catch (error) {
+      console.error(`❌ 打包辅助脚本失败: ${scriptEntry.source}`, error.message);
+      process.exit(1);
+    }
+  }
+} else {
+  console.log('ℹ️ auxiliary-scripts.json 未配置，跳过辅助脚本打包');
+}
+
 // 复制 package.json 和 package-lock.json
 fs.copyFileSync(
   path.join(PROJECT_ROOT, 'backend/package.json'),
   path.join(backendDest, 'package.json')
 );
+
 
 if (fs.existsSync(path.join(PROJECT_ROOT, 'backend/package-lock.json'))) {
   fs.copyFileSync(

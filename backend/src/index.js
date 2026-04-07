@@ -70,13 +70,16 @@ async function init() {
   // 在 modelManager 初始化完成后，临时状态已经不需要清理了
   await downloadService.cleanupStaleDownloads();
 
+  // 同步已下载文件记录（迁移：确保 downloaded_files 基于磁盘实际文件）
+  await modelManager.syncAllDownloadedFiles();
+
   // 同步所有模型的已下载量化版本
   await modelManager.syncAllDownloadedQuantizations();
 
   // 自动启动标记了 auto_start 的 LLM 模型
   const autoStartModels = modelManager.getAll().filter(
     m => m.type === 'llm' && m.auto_start === true &&
-         (m.downloaded_files?.some(f => f.is_active) || m.downloaded)
+         m.downloaded_files?.some(f => f.is_active)
   );
   if (autoStartModels.length > 0) {
     console.log(`自动启动 ${autoStartModels.length} 个 LLM 模型...`);
@@ -118,7 +121,15 @@ async function init() {
   Promise.all([
     remoteConfigService.syncModels(),
     remoteConfigService.syncEngines()
-  ]).catch(err => console.warn('[remoteConfig] 启动同步失败:', err.message));
+  ]).then(() => {
+    // 启动时若开启了自动检查更新，在引擎配置同步完成后执行一次
+    const cfg = configManager.get();
+    if (cfg?.update_settings?.auto_check !== false) {
+      remoteConfigService.checkUpdate().catch(err =>
+        console.warn('[update] 自动检查更新失败:', err.message)
+      );
+    }
+  }).catch(err => console.warn('[remoteConfig] 启动同步失败:', err.message));
 }
 
 app.use('/api', modelsRouter);

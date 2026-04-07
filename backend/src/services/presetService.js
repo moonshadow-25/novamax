@@ -77,7 +77,7 @@ class PresetService {
 
     // 每个模型的特定配置
     models.forEach(model => {
-      if (!model.downloaded && !model.files) {
+      if (!model.downloaded_files?.length && !model.files) {
         return; // 跳过未配置的模型
       }
 

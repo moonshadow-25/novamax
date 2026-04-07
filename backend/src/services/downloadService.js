@@ -10,12 +10,14 @@ import engineManager from './engineManager.js';
 import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
 import { getModelPath } from '../utils/pathHelper.js';
-import { isQuantizationIncomplete } from '../utils/fileIntegrity.js';
+import { isQuantizationIncomplete, checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 
 class DownloadService extends EventEmitter {
   constructor() {
     super();
     // activeDownloads 已被 downloadStateManager 替代
+    // _activeFileDownloads: 记录当前正在写入的文件路径，防止并发下载同一共享文件（如 mmproj）
+    this._activeFileDownloads = new Map(); // finalPath → Promise
     this.ensureDownloadDir();
   }
 
@@ -87,7 +89,6 @@ class DownloadService extends EventEmitter {
           await modelManager.update(modelId, {
             downloaded_files: cleanedFiles,
             downloaded_quantizations: cleanedQuants,
-            downloaded: cleanedFiles.some(f => f.is_active) || cleanedQuants.length > 0,
             selected_quantization: targetQuantization
           });
         } else {
@@ -96,7 +97,7 @@ class DownloadService extends EventEmitter {
       }
     } else {
       // 没有量化版本，检查整体下载状态
-      if (model.downloaded) {
+      if (checkActiveFileIntegrity(model)) {
         throw new Error('模型已下载');
       }
     }
@@ -232,7 +233,6 @@ class DownloadService extends EventEmitter {
         const hasOtherDownloaded = downloadedQuantizations.length > 0;
 
         await modelManager.update(modelId, {
-          downloaded: hasOtherDownloaded,
           local_path: hasOtherDownloaded ? model.local_path : null
         });
       }
@@ -291,7 +291,6 @@ class DownloadService extends EventEmitter {
       const hasOtherDownloaded = downloadedQuantizations.length > 0;
 
       await modelManager.update(modelId, {
-        downloaded: hasOtherDownloaded,
         local_path: hasOtherDownloaded ? model.local_path : null
       });
     }
@@ -395,7 +394,15 @@ class DownloadService extends EventEmitter {
 
     if (targetQuantization) {
       const quantInfo = model.quantizations?.find(q => q.name === targetQuantization);
-      if (quantInfo?.file?.download_url) {
+      if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
+        // 文件夹型量化（多分片大模型，如 122B）
+        for (const ff of quantInfo.folder_files) {
+          // 优先用解析时存好的 URL；旧数据库中的模型没有该字段，降级拼接
+          const url = ff.download_url || `https://www.modelscope.cn/models/${modelscopeId}/resolve/master/${quantInfo.folder_path}/${ff.name}`;
+          files.push({ name: ff.name, url, size: ff.size || 0, sha256: null });
+          console.log(`添加文件夹量化文件: ${ff.name}`);
+        }
+      } else if (quantInfo?.file?.download_url) {
         files.push({ name: quantInfo.file.name, url: quantInfo.file.download_url, size: quantInfo.file.size, sha256: quantInfo.file.sha256 || null });
       }
       addMmproj();
@@ -442,6 +449,19 @@ class DownloadService extends EventEmitter {
       return { sha256: null, wasResumed: false, skipped: true };
     }
 
+    // 如果另一个并发下载任务正在下载同一文件（如 mmproj），等待其完成后跳过
+    if (this._activeFileDownloads.has(finalPath)) {
+      console.log(`文件正在被其他任务下载，等待: ${fileInfo.name}`);
+      await this._activeFileDownloads.get(finalPath);
+      console.log(`等待完成，跳过: ${fileInfo.name}`);
+      return { sha256: null, wasResumed: false, skipped: true };
+    }
+
+    let resolveLock;
+    const lockPromise = new Promise(resolve => { resolveLock = resolve; });
+    this._activeFileDownloads.set(finalPath, lockPromise);
+
+    try {
     const resumePos = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0;
     const isFresh   = resumePos === 0;
 
@@ -490,6 +510,10 @@ class DownloadService extends EventEmitter {
     console.log(`✓ 下载完成: ${fileInfo.name}`);
 
     return { sha256: hash ? hash.digest('hex') : null, wasResumed: !isFresh, skipped: false };
+    } finally {
+      resolveLock();
+      this._activeFileDownloads.delete(finalPath);
+    }
   }
 
   /**
@@ -511,10 +535,27 @@ class DownloadService extends EventEmitter {
       console.log(`文件列表: ${filesToDownload.map(f => f.name).join(', ')}`);
 
       const totalBytes = filesToDownload.reduce((s, f) => s + (f.size || 0), 0);
-      let globalDownloaded = 0;
+
+      // 计算已在磁盘上的字节数（.part 文件 + 已完成文件），用于续传时恢复正确进度
+      let alreadyDownloaded = 0;
+      for (const fileInfo of filesToDownload) {
+        const finalPath = path.join(modelDir, fileInfo.name);
+        const partPath  = finalPath + '.part';
+        if (fs.existsSync(finalPath)) {
+          alreadyDownloaded += fileInfo.size || 0;
+        } else if (fs.existsSync(partPath)) {
+          alreadyDownloaded += fs.statSync(partPath).size;
+        }
+      }
+
+      let globalDownloaded = alreadyDownloaded;
       let lastProgressTime  = Date.now();
-      let lastProgressBytes = 0;
-      downloadStateManager.updateBytes(downloadState.modelId, 0, totalBytes, downloadState.targetQuantization);
+      let lastProgressBytes = alreadyDownloaded;
+      downloadStateManager.updateBytes(downloadState.modelId, alreadyDownloaded, totalBytes, downloadState.targetQuantization);
+      if (alreadyDownloaded > 0 && totalBytes > 0) {
+        const initialProgress = Math.min(99, alreadyDownloaded / totalBytes * 100);
+        downloadStateManager.updateProgress(downloadState.modelId, initialProgress, 0, downloadState.targetQuantization);
+      }
 
       const sha256Map    = {}; // filename → sha256
       const resumedFiles = new Set();
@@ -577,7 +618,7 @@ class DownloadService extends EventEmitter {
         }
         if (!matchedPreset) matchedPreset = downloadState?.targetQuantization || null;
 
-        return { filename, size: stats.size, sha256: sha256Map[filename] || null, downloaded_at: new Date().toISOString(), matched_preset: matchedPreset, is_active: false };
+        return { filename, size: stats.size, sha256: sha256Map[filename] || null, file_mtime: sha256Map[filename] ? stats.mtimeMs : null, downloaded_at: new Date().toISOString(), matched_preset: matchedPreset, is_active: false };
       });
 
       const mergedFiles = [...existingFiles];
@@ -600,7 +641,7 @@ class DownloadService extends EventEmitter {
         downloadedQuantizations.push(targetQuantization);
       }
 
-      const updateData = { downloaded: true, downloaded_files: mergedFiles, downloaded_quantizations: downloadedQuantizations, local_path: modelDir };
+      const updateData = { downloaded_files: mergedFiles, downloaded_quantizations: downloadedQuantizations, local_path: modelDir };
       if (shouldClearSelectedQuantization) updateData.selected_quantization = null;
       await modelManager.update(model.id, updateData);
 
@@ -747,7 +788,6 @@ class DownloadService extends EventEmitter {
 
       // 只更新持久字段到数据库
       const updateData = {
-        downloaded: true,
         downloaded_files: mergedFiles,
         downloaded_quantizations: downloadedQuantizations,
         local_path: targetDir
@@ -886,16 +926,30 @@ class DownloadService extends EventEmitter {
    * @param {string} modelDir      - .gguf 文件所在目录
    */
   async _verifySHA256InBackground(modelId, files, quantizations, modelDir) {
-    const sha256Map = {}; // filename -> sha256 hex string
+    // updateMap: filename -> { sha256, file_mtime, size }
+    const updateMap = {};
 
-    for (const fileRec of files) {
-      if (!fileRec.filename.endsWith('.gguf')) continue;
+    const ggufFiles = files.filter(f => {
+      if (!f.filename?.endsWith('.gguf')) return false;
+      return fs.existsSync(path.join(modelDir, f.filename));
+    });
+
+    if (ggufFiles.length === 0) return;
+
+    const processFile = async (fileRec) => {
       const filePath = path.join(modelDir, fileRec.filename);
-      if (!fs.existsSync(filePath)) continue;
-
       try {
+        const stat = await fs.promises.stat(filePath);
+        const currentMtime = stat.mtimeMs;
+        const currentSize = stat.size;
+
+        // B: mtime + size 指纹检查 → 未变化则跳过，无需读文件
+        if (fileRec.sha256 && fileRec.file_mtime === currentMtime && fileRec.size === currentSize) {
+          return;
+        }
+
         const sha256 = await this._calculateSHA256(filePath);
-        sha256Map[fileRec.filename] = sha256;
+        updateMap[fileRec.filename] = { sha256, file_mtime: currentMtime, size: currentSize };
 
         const quantInfo = quantizations?.find(q => q.name === fileRec.matched_preset);
         if (quantInfo?.file?.sha256) {
@@ -910,17 +964,29 @@ class DownloadService extends EventEmitter {
       } catch (err) {
         console.warn(`[SHA256] 计算失败: ${fileRec.filename}`, err.message);
       }
-    }
+    };
 
-    if (Object.keys(sha256Map).length === 0) return;
+    // A: 并发 worker 池，限制并发数为 2（SSD 加速，HDD 不显著劣化）
+    const CONCURRENCY = 2;
+    let taskIdx = 0;
+    const runWorker = async () => {
+      while (taskIdx < ggufFiles.length) {
+        const fileRec = ggufFiles[taskIdx++];
+        await processFile(fileRec);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ggufFiles.length) }, runWorker));
+
+    if (Object.keys(updateMap).length === 0) return;
 
     // 重新读取当前最新 model 数据，避免覆盖并发更新
     const currentModel = modelManager.getById(modelId);
     if (!currentModel) return;
 
-    const updatedFiles = (currentModel.downloaded_files || []).map(f =>
-      sha256Map[f.filename] !== undefined ? { ...f, sha256: sha256Map[f.filename] } : f
-    );
+    const updatedFiles = (currentModel.downloaded_files || []).map(f => {
+      const upd = updateMap[f.filename];
+      return upd !== undefined ? { ...f, sha256: upd.sha256, file_mtime: upd.file_mtime, size: upd.size } : f;
+    });
 
     await modelManager.update(modelId, { downloaded_files: updatedFiles });
     console.log(`[SHA256] 已写入 ${modelId} 的 sha256 记录`);
@@ -933,12 +999,12 @@ class DownloadService extends EventEmitter {
   async verifyMissingSHA256() {
     const models = modelManager.getAll().filter(m => m.downloaded_files?.length > 0);
     const pending = models.filter(m =>
-      m.downloaded_files.some(f => f.filename?.endsWith('.gguf') && !f.sha256) &&
+      m.downloaded_files.some(f => f.filename?.endsWith('.gguf')) &&
       m.local_path
     );
     if (pending.length === 0) return;
 
-    console.log(`[SHA256] 发现 ${pending.length} 个模型需要补算 sha256，后台处理中...`);
+    console.log(`[SHA256] 检查 ${pending.length} 个模型的文件完整性（mtime 指纹加速）...`);
     for (const model of pending) {
       this._verifySHA256InBackground(model.id, model.downloaded_files, model.quantizations, model.local_path)
         .catch(err => console.error(`[SHA256] 补算失败: ${model.id}`, err));

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { generateId } from '../utils/fileHelper.js';
-import { DB_PATH, MODELS_RUN_DIR, MODEL_STATUS } from '../config/constants.js';
+import { DB_PATH, MODELS_RUN_DIR } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
 
 class ModelManager {
@@ -159,8 +159,6 @@ class ModelManager {
     const model = {
       id: generateId(),
       type,
-      downloaded: false,
-      status: MODEL_STATUS.STOPPED,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       ...normalizedModelData
@@ -220,8 +218,7 @@ class ModelManager {
 
     // 检查目录是否存在
     if (!fs.existsSync(modelDir)) {
-      console.log(`  ⚠ 模型目录不存在: ${modelDir}`);
-      return [];
+      return null; // 返回 null 表示目录不存在，与空数组（目录存在但无文件）区分
     }
 
     const files = fs.readdirSync(modelDir);
@@ -270,7 +267,6 @@ class ModelManager {
 
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
     if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {
-      console.log(`  ⚠ 模型目录不存在: ${modelDir}`);
       return [];
     }
 
@@ -313,36 +309,38 @@ class ModelManager {
    * 扫描所有模型，同步已下载的文件列表（新版本）
    */
   async syncAllDownloadedFiles() {
-    console.log('同步所有模型的下载文件...');
-
     for (const model of this.getAll()) {
       const scannedFiles = await this.scanDownloadedFiles(model.id);
+
+      // 目录不存在（null）：保留现有记录不覆写，避免外接盘/离线场景丢失数据
+      if (scannedFiles === null) continue;
+
       const existingFiles = model.downloaded_files || [];
       const activeFile = existingFiles.find(f => f.is_active);
 
+      // 把现有记录的 sha256 / file_mtime 等字段合并进扫描结果，避免丢失
+      const mergedFiles = scannedFiles.map(f => {
+        const prev = existingFiles.find(e => e.filename === f.filename);
+        return prev ? { ...prev, ...f } : f;
+      });
+
       if (activeFile) {
-        const file = scannedFiles.find(f => f.filename === activeFile.filename);
+        const file = mergedFiles.find(f => f.filename === activeFile.filename);
         if (file) file.is_active = true;
-      } else if (scannedFiles.length > 0 && !model.selected_quantization) {
-        scannedFiles[0].is_active = true;
+      } else if (mergedFiles.length > 0 && !model.selected_quantization) {
+        mergedFiles[0].is_active = true;
       }
 
       await this.update(model.id, {
-        downloaded_files: scannedFiles,
-        downloaded: scannedFiles.length > 0
+        downloaded_files: mergedFiles
       });
     }
-
-    console.log('✓ 文件同步完成');
   }
 
   /**
    * 扫描所有模型，同步已下载的量化版本列表（旧版本，兼容保留）
    */
   async syncAllDownloadedQuantizations() {
-    console.log('开始扫描所有模型的已下载量化版本...');
-    let updatedCount = 0;
-
     for (const model of this.getAll()) {
       if (model.quantizations && model.quantizations.length > 0) {
         const scannedQuantizations = await this.scanDownloadedQuantizations(model.id);
@@ -351,19 +349,10 @@ class ModelManager {
 
         if (needsUpdate) {
           await this.update(model.id, {
-            downloaded_quantizations: scannedQuantizations,
-            downloaded: scannedQuantizations.length > 0
+            downloaded_quantizations: scannedQuantizations
           });
-          updatedCount++;
-          console.log(`  ✓ 更新模型 ${model.id}: ${scannedQuantizations.join(', ')}`);
         }
       }
-    }
-
-    if (updatedCount > 0) {
-      console.log(`✓ 已同步 ${updatedCount} 个模型的量化版本信息`);
-    } else {
-      console.log('✓ 所有模型的量化版本信息已是最新');
     }
   }
 }

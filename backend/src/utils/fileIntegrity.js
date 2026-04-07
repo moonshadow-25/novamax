@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const SIZE_TOLERANCE = 0.01; // 1% 容差
+const SIZE_TOLERANCE = 0; // 0 容差：文件大小必须精确匹配
 
 /**
  * 检查一组文件是否都存在且大小匹配（底层原语）
@@ -52,6 +52,26 @@ export function checkActiveFileIntegrity(model) {
   const filesToCheck = relatedFiles.length > 0 ? relatedFiles : [activeFile];
 
   const quantizations = model.quantizations || [];
+  const quantInfo = quantizations.find(q => q.name === activeFile.matched_preset);
+
+  // 文件夹型量化：必须验证 folder_files 中每个文件都完整存在，不能只依赖<br>  // downloaded_files 记录——避免部分文件下载完（如 00001）后程序重启被误判为完整
+  if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
+    for (const ff of quantInfo.folder_files) {
+      const ffPath = path.join(model.local_path, ff.name);
+      if (!fs.existsSync(ffPath)) {
+        console.warn(`[integrity] 文件夹量化缺少文件: ${ff.name}`);
+        return false;
+      }
+      if (ff.size) {
+        const actualSize = fs.statSync(ffPath).size;
+        if (actualSize !== ff.size) {
+          console.warn(`[integrity] 文件大小不符: ${ff.name} 期望=${ff.size} 实际=${actualSize}`);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
 
   for (const fileRec of filesToCheck) {
     const filePath = path.join(model.local_path, fileRec.filename);
@@ -61,8 +81,6 @@ export function checkActiveFileIntegrity(model) {
       console.warn(`[integrity] 文件不存在: ${fileRec.filename}`);
       return false;
     }
-
-    const quantInfo = quantizations.find(q => q.name === fileRec.matched_preset);
 
     // 2. SHA256 校验：downloaded_files 记录了 sha256 且配置中有期望值
     if (fileRec.sha256 && quantInfo?.file?.sha256) {
@@ -74,23 +92,16 @@ export function checkActiveFileIntegrity(model) {
       continue;
     }
 
-    // 3. 大小校验（兜底）：优先用配置中的精确期望大小（0 容差），防止部分下载误判通过
+    // 3. 大小校验（兜底）：优先用配置中的精确期望大小，防止部分下载误判通过
     const actualSize = fs.statSync(filePath).size;
-    if (quantInfo && !quantInfo.is_folder && quantInfo.file?.size) {
+    if (quantInfo?.file?.size) {
       // 单文件量化：配置里的是精确字节数，0 容差
       if (actualSize !== quantInfo.file.size) {
         console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 期望=${quantInfo.file.size} 实际=${actualSize}`);
         return false;
       }
-    } else if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
-      // 文件夹型量化：从 folder_files 找对应文件的精确期望大小，0 容差
-      const folderFile = quantInfo.folder_files.find(f => f.name === fileRec.filename);
-      if (folderFile?.size && actualSize !== folderFile.size) {
-        console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 期望=${folderFile.size} 实际=${actualSize}`);
-        return false;
-      }
     } else if (fileRec.size) {
-      // 无配置期望值（本地模型等）：回退到记录大小，保留 1% 容差
+      // 无配置期望值（本地模型等）：回退到记录大小
       if (Math.abs(actualSize - fileRec.size) / fileRec.size > SIZE_TOLERANCE) {
         console.warn(`[integrity] 文件大小不符: ${fileRec.filename} 记录=${fileRec.size} 实际=${actualSize}`);
         return false;

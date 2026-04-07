@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme } from 'antd';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge } from 'antd';
 import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
@@ -113,6 +113,11 @@ const GlobalSettings = () => {
     if (selectedMenu === 'cache') loadCacheInfo();
   }, [selectedMenu]);
 
+  // 切换到更新标签时自动检查
+  useEffect(() => {
+    if (selectedMenu === 'update') handleCheckUpdate();
+  }, [selectedMenu]);
+
   // 日志定时刷新
   useEffect(() => {
     if (selectedMenu !== 'logs') {
@@ -176,6 +181,8 @@ const GlobalSettings = () => {
     try {
       const result = await engineService.getAll();
       setEngines(result);
+      // 抽屉在开时同步刷新，让抽屉进度实时更新
+      setSelectedEngine(prev => prev ? { ...prev, ...result[prev.id] } : null);
     } catch (error) {
       message.error('加载引擎列表失败');
       console.error('Failed to load engines:', error);
@@ -581,29 +588,45 @@ const GlobalSettings = () => {
         // tts、whisper 功能暂未完成，先隐藏，后续完善后再放出来
         dataSource={Object.values(engines).filter(e => e.category !== 'app' && e.id !== 'tts' && e.id !== 'whisper')}
         renderItem={engine => {
-          const downloadState = engine.download_state;
+          const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
+          const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));
+          const isDownloading = activeStates.length > 0;
           const latestVersion = engine.versions?.[0];
-          const isDownloading = downloadState && ['downloading', 'unpacking', 'installing'].includes(downloadState.status);
+          const hasNewerVersion = engine.installed && latestVersion &&
+            !engine.installed_versions?.some(v => v.version === latestVersion.version);
 
           return (
             <List.Item
               actions={[
                 isDownloading ? (
-                  <Progress
-                    type="circle"
-                    percent={downloadState.progress || 0}
-                    width={40}
-                    status={downloadState.status === 'failed' ? 'exception' : 'active'}
-                  />
+                  activeStates.length === 1 ? (
+                    <Progress
+                      type="circle"
+                      percent={activeStates[0].progress || 0}
+                      width={40}
+                      status="active"
+                    />
+                  ) : (
+                    <Badge count={activeStates.length} color="blue">
+                      <Progress
+                        type="circle"
+                        percent={Math.round(activeStates.reduce((s, x) => s + (x.progress || 0), 0) / activeStates.length)}
+                        width={40}
+                        status="active"
+                      />
+                    </Badge>
+                  )
                 ) : engine.installed ? (
                   <Space>
                     <Tag icon={<CheckCircleOutlined />} color="success">已安装</Tag>
-                    <Button
-                      icon={<HistoryOutlined />}
-                      onClick={() => openVersionDrawer(engine)}
-                    >
-                      管理版本
-                    </Button>
+                    <Badge dot={hasNewerVersion} color="orange" offset={[-4, 4]}>
+                      <Button
+                        icon={<HistoryOutlined />}
+                        onClick={() => openVersionDrawer(engine)}
+                      >
+                        管理版本{hasNewerVersion ? ' · 有新版本' : ''}
+                      </Button>
+                    </Badge>
                   </Space>
                 ) : (
                   <Button
@@ -647,17 +670,21 @@ const GlobalSettings = () => {
                     )}
                     {isDownloading && (
                       <div style={{ marginTop: 8 }}>
-                        <Progress
-                          percent={downloadState.progress || 0}
-                          size="small"
-                          status={downloadState.status === 'unpacking' ? 'active' : 'normal'}
-                        />
-                        <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                          {downloadState.status === 'downloading' && '下载中...'}
-                          {downloadState.status === 'unpacking' && '解压中...'}
-                          {downloadState.status === 'installing' && '安装中...'}
-                          {downloadState.speed > 0 && ` ${formatBytes(downloadState.speed)}/s`}
-                        </div>
+                        {activeStates.map(ds => (
+                          <div key={ds.targetQuantization} style={{ marginBottom: 4 }}>
+                            <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>
+                              {ds.targetQuantization}
+                              {ds.status === 'downloading' && ` — 下载中${ds.speed > 0 ? ` ${formatBytes(ds.speed)}/s` : ''}`}
+                              {ds.status === 'unpacking' && ' — 解压中...'}
+                              {ds.status === 'installing' && ' — 安装中...'}
+                            </div>
+                            <Progress
+                              percent={ds.progress || 0}
+                              size="small"
+                              status="active"
+                            />
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1232,10 +1259,20 @@ const GlobalSettings = () => {
                 const isInstalled = selectedEngine.installed_versions?.some(
                   v => v.version === version.version
                 );
+                const allDs = selectedEngine.download_states || (selectedEngine.download_state ? [selectedEngine.download_state] : []);
+                const ds = allDs.find(s => s.targetQuantization === version.version);
+                const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
                 return (
                   <List.Item
                     actions={[
-                      isInstalled ? (
+                      isThisDownloading ? (
+                        <Progress
+                          type="circle"
+                          percent={ds.progress || 0}
+                          width={36}
+                          status="active"
+                        />
+                      ) : isInstalled ? (
                         <Tag color="success">已安装</Tag>
                       ) : (
                         <Button
@@ -1244,7 +1281,6 @@ const GlobalSettings = () => {
                           icon={<DownloadOutlined />}
                           onClick={() => {
                             handleDownloadEngine(selectedEngine.id, version.version);
-                            setVersionDrawerVisible(false);
                           }}
                         >
                           下载
@@ -1254,7 +1290,15 @@ const GlobalSettings = () => {
                   >
                     <List.Item.Meta
                       title={version.version}
-                      description={`大小: ${formatBytes(version.size)}`}
+                      description={
+                        isThisDownloading ? (
+                          <div style={{ fontSize: 12, color: '#888' }}>
+                            {ds.status === 'downloading' && `下载中${ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : ''}`}
+                            {ds.status === 'unpacking' && '解压中...'}
+                            {ds.status === 'installing' && '安装中...'}
+                          </div>
+                        ) : `大小: ${formatBytes(version.size)}`
+                      }
                     />
                   </List.Item>
                 );

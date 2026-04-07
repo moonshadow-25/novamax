@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined } from '@ant-design/icons';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService } from '../../services/api';
+import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
@@ -68,6 +68,9 @@ function Home() {
 
   // 应用更新
   const [updateInfo, setUpdateInfo] = useState(null);
+  // 引擎更新
+  const [engineUpdates, setEngineUpdates] = useState([]);
+  const [dismissedEngineUpdates, setDismissedEngineUpdates] = useState(new Set());
 
   useEffect(() => {
     configService.getFavorites().then(res => {
@@ -80,6 +83,21 @@ function Home() {
     // 检查应用更新
     updateService.check().then(res => {
       if (res.hasUpdate) setUpdateInfo(res);
+    }).catch(() => {});
+
+    // 检查引擎更新
+    engineService.getAll().then(engines => {
+      const updates = [];
+      for (const [id, engine] of Object.entries(engines)) {
+        if (engine.category === 'app') continue;
+        if (!engine.installed) continue;
+        if (!engine.versions?.length) continue;
+        const latestVersion = engine.versions[0].version;
+        if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
+          updates.push({ id, name: engine.name, latestVersion });
+        }
+      }
+      setEngineUpdates(updates);
     }).catch(() => {});
   }, []);
 
@@ -134,8 +152,7 @@ function Home() {
   };
 
   const isModelDownloaded = (model) =>
-    model.downloaded ||
-    (model.downloaded_quantizations && model.downloaded_quantizations.length > 0) ||
+    model.active_file_ok === true ||
     model.download_status === 'completed';
 
   const activeTabRef = useRef(activeTab);
@@ -266,6 +283,28 @@ function Home() {
           <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
         </div>
       )}
+      {engineUpdates.filter(e => !dismissedEngineUpdates.has(e.id)).map(engine => (
+        <div key={engine.id} className="update-banner engine-update-banner">
+          <div className="update-banner-content">
+            <ToolOutlined className="update-banner-icon" />
+            <span className="update-banner-text">
+              <strong>{engine.name}</strong> 有新版本 <strong>{engine.latestVersion}</strong> 可用
+            </span>
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => navigate('/global-settings?menu=engines')}
+              className="update-banner-btn"
+            >
+              前往更新
+            </Button>
+          </div>
+          <CloseOutlined
+            className="update-banner-close"
+            onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, engine.id]))}
+          />
+        </div>
+      ))}
       <Content className="home-content">
         <div className="home-toolbar">
           <Tabs

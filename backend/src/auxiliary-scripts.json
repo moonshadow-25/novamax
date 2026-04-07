@@ -1,0 +1,6 @@
+[
+  {
+    "source": "src/utils/cloudApiProxy.js",
+    "target": "utils/cloudApiProxy.js"
+  }
+]

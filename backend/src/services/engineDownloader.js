@@ -17,6 +17,8 @@ class EngineDownloader {
   constructor() {
     this.pythonPath = getPythonPath();
     this.msScript = getPythonScriptPath('modelscope_downloader.py');
+    // _activeEngineDownloads: 记录正在下载的引擎，防止并发下载同一引擎（如 rocm 被多个链同时触发）
+    this._activeEngineDownloads = new Map(); // `${engineId}::${version}` → Promise
   }
 
   /**
@@ -46,7 +48,10 @@ class EngineDownloader {
       const depVersion = versionInfo.rocm_version || depEngine.versions[0].version;
       const taskId = `${missing.id}::${depVersion}`;
 
-      downloadStateManager.createState(missing.id, depVersion, 'engine');
+      // 若该依赖已在另一条链中下载，不重置其状态，仅加入任务等待
+      if (!downloadStateManager.hasDownload(missing.id, depVersion)) {
+        downloadStateManager.createState(missing.id, depVersion, 'engine');
+      }
       tasks.push({ taskId, engineId: missing.id, version: depVersion });
     }
 
@@ -110,6 +115,27 @@ class EngineDownloader {
    */
   async _runDownloadChain(tasks) {
     for (const taskInfo of tasks) {
+      const lockKey = `${taskInfo.engineId}::${taskInfo.version}`;
+
+      // 若另一条链正在下载同一引擎（如 rocm），等待其完成后跳过重复下载
+      if (this._activeEngineDownloads.has(lockKey)) {
+        console.log(`[engineDownloader] 等待已有下载任务: ${lockKey}`);
+        try {
+          await this._activeEngineDownloads.get(lockKey);
+        } catch (_) {
+          // 已有下载失败，当前链也标记失败
+          downloadStateManager.setState(taskInfo.engineId, 'failed', '依赖下载失败', taskInfo.version);
+          eventBus.broadcast('download-progress', { engineId: taskInfo.engineId, status: 'failed', error: '依赖下载失败' });
+          return;
+        }
+        // 已由其他链下载完成，继续下一个任务
+        continue;
+      }
+
+      let resolveLock, rejectLock;
+      const lockPromise = new Promise((res, rej) => { resolveLock = res; rejectLock = rej; });
+      this._activeEngineDownloads.set(lockKey, lockPromise);
+
       try {
         downloadStateManager.setState(taskInfo.engineId, 'downloading', null, taskInfo.version);
         eventBus.broadcast('download-progress', {
@@ -125,6 +151,7 @@ class EngineDownloader {
           engineId: taskInfo.engineId,
           status: 'completed'
         });
+        resolveLock();
       } catch (error) {
         downloadStateManager.setState(taskInfo.engineId, 'failed', error.message, taskInfo.version);
         eventBus.broadcast('download-progress', {
@@ -132,6 +159,10 @@ class EngineDownloader {
           status: 'failed',
           error: error.message
         });
+        rejectLock(error);
+        return; // 依赖下载失败，中止整条链
+      } finally {
+        this._activeEngineDownloads.delete(lockKey);
       }
     }
   }

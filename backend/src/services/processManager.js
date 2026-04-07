@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT } from '../config/constants.js';
+import { getAuxiliaryScriptPath } from '../utils/pathHelper.js';
 import { decrypt } from '../utils/crypto.js';
 import modelManager from './modelManager.js';
 import configManager from './configManager.js';
@@ -17,7 +18,7 @@ import comfyuiRunner from './comfyuiRunner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CLOUD_API_PROXY_SCRIPT = path.join(__dirname, '../utils/cloudApiProxy.js');
+const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
 
 class ProcessManager {
   constructor() {
@@ -202,7 +203,7 @@ class ProcessManager {
       const line = data.toString();
       processInfo.logs.push(line);
       logStream.write(line);
-      console.error(`[cloudapi:${modelId}] ${line}`);
+      console.log(`[cloudapi:${modelId}] ${line}`);
     });
 
     proc.on('error', (err) => {
@@ -332,7 +333,7 @@ class ProcessManager {
         if (!processInfo) return;
         processInfo.logs.push(log);
         logStream.write(log);
-        console.error(`[${modelId}] ${log}`);
+        console.log(`[${modelId}] ${log}`);
 
         // stderr 也可能包含就绪信号（llama.cpp 日志走 stderr）
         if (!processInfo.ready && (log.includes('server is listening') || log.includes('all slots are idle'))) {
@@ -377,7 +378,7 @@ class ProcessManager {
 
     // 2. 获取所有已下载的模型
     const allModels = modelManager.getByType(type);
-    const downloadedModels = allModels.models.filter(m => m.downloaded);
+    const downloadedModels = allModels.filter(m => m.downloaded_files?.some(f => f.is_active));
 
     console.log(`准备加载 ${downloadedModels.length} 个模型到路由...`);
 
@@ -514,7 +515,7 @@ class ProcessManager {
       process.stderr.on('data', (data) => {
         const log = data.toString();
         routerInfo.logs.push(log);
-        console.error(`[Router-${type}] ${log}`);
+        console.log(`[Router-${type}] ${log}`);
       });
 
       process.on('error', (error) => {
@@ -662,7 +663,7 @@ class ProcessManager {
       process.stderr.on('data', (data) => {
         const log = data.toString();
         this.processes.get(modelId).logs.push(log);
-        console.error(`[${modelId}] ${log}`);
+        console.log(`[${modelId}] ${log}`);
       });
 
       process.on('exit', (code) => {

@@ -48,7 +48,7 @@ async function repairDownloadedFiles(model) {
   }
   try {
     const scannedFiles = await modelManager.scanDownloadedFiles(model.id);
-    if (scannedFiles.length === 0) return model;
+    if (!scannedFiles || scannedFiles.length === 0) return model;
 
     // 根据 selected_quantization 确定激活文件，否则激活第一个
     const selectedQuant = model.selected_quantization;
@@ -63,7 +63,6 @@ async function repairDownloadedFiles(model) {
     const updates = {
       downloaded_files: scannedFiles,
       downloaded_quantizations: downloadedQuantizations,
-      downloaded: true,
       local_path: modelDir,
     };
     // 激活文件与 selected_quantization 匹配时，清除 selected_quantization
@@ -222,7 +221,6 @@ router.post('/models/custom', async (req, res) => {
       description: description?.trim() || trimmedName,
       source: 'custom',
       local_path,
-      downloaded: true,
       downloaded_files,
       quantizations,
       files: { model: downloaded_files[0], mmproj: null },
@@ -267,8 +265,6 @@ router.post('/models/cloudapi', async (req, res) => {
       name: trimmedName,
       description: description?.trim() || trimmedName,
       source: 'cloudapi',
-      downloaded: true,
-      active_file_ok: true,
       cloud_platform: cloud_platform || '',
       api_base_url: api_base_url.trim(),
       api_key: encrypt(api_key.trim()),
@@ -492,7 +488,6 @@ router.delete('/models/:id/quantization', async (req, res) => {
     await modelManager.update(req.params.id, {
       downloaded_files: updatedFiles,
       downloaded_quantizations: updatedQuantizations,
-      downloaded: updatedFiles.length > 0,
       selected_quantization: newSelectedQuantization
     });
 
@@ -530,7 +525,7 @@ router.delete('/models/:id/files', async (req, res) => {
 
     // 只更新持久字段（不涉及临时下载状态）
     await modelManager.update(req.params.id, {
-      downloaded: false,
+      downloaded_files: [],
       downloaded_quantizations: [],
       local_path: null
     });
@@ -624,7 +619,7 @@ router.get('/models/:id/downloaded-quantizations', async (req, res) => {
 router.get('/models/:id/scan-files', async (req, res) => {
   try {
     const downloadedFiles = await modelManager.scanDownloadedFiles(req.params.id);
-    res.json({ downloadedFiles });
+    res.json({ downloadedFiles: downloadedFiles || [] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -663,7 +658,7 @@ router.post('/models/:id/set-active-file', async (req, res) => {
     }
 
     // 重新扫描文件以获取正确的 matched_preset（修正历史数据中的错误匹配）
-    const scannedFiles = await modelManager.scanDownloadedFiles(req.params.id);
+    const scannedFiles = await modelManager.scanDownloadedFiles(req.params.id) || [];
 
     // 检查文件是否存在
     const fileExists = scannedFiles.some(f => f.filename === filename);

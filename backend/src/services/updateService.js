@@ -29,7 +29,7 @@ async function applyUpdate() {
 
   console.log('[updateService] 已检测到 pending 标记，准备重启...');
 
-  const entryScript = path.join(PROJECT_ROOT, 'backend', 'src', 'index.js').replace(/\\/g, '/');
+  const entryScript = path.join(PROJECT_ROOT, 'backend', process.env.NODE_ENV === 'production' ? 'dist' : 'src', 'index.js').replace(/\\/g, '/');
   const nodeExe = process.execPath.replace(/\\/g, '/');
   const cwd = path.join(PROJECT_ROOT, 'backend').replace(/\\/g, '/');
 
