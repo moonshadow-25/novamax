@@ -52,6 +52,11 @@ export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');
 
+/**
+ * 参数映射：LLM 模型的默认参数（与 llama-server 路由模式兼容）
+ * 注意：远端配置使用 default_parameters，本地配置使用 parameters 字段
+ * 这样可以避免直接覆盖用户参数，同时保持与远端配置的兼容性
+ */ 
 export const DEFAULT_LLM_PARAMETERS = {
   version: '1.0.0',
   context_length: 0,

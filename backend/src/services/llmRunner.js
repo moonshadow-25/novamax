@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS } from '../config/constants.js';
+import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import presetService from './presetService.js';
 import parameterService from './parameterService.js';
 
@@ -70,11 +70,8 @@ export function generateSingleModelCommand(model, port) {
 
   // 默认参数值（当用户未设置时使用）
   const defaults = {
-    context_length: 8192,
-    port: port || 1234,
-    parallel: 1,
-    'no-mmap': true,
-    'n-gpu-layers': 100
+    ...DEFAULT_LLM_PARAMETERS,
+    port: port || 1234
   };
 
   // 动态添加参数
