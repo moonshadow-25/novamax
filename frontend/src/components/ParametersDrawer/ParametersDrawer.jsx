@@ -25,7 +25,6 @@ import {
   PlusOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
-  UndoOutlined,
   FolderOpenOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
@@ -343,31 +342,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         rootClassName="parameters-drawer"
         extra={
           <Space>
-            {model?.source === 'remote' && (
-              <Popconfirm
-                title="恢复远程默认参数？"
-                description="将重置量化选择（LLM）或参数映射（ComfyUI）为默认值"
-                onConfirm={async () => {
-                  try {
-                    await modelService.restoreDefaults(modelId);
-                    message.success('已恢复默认');
-                  } catch (e) {
-                    message.error('恢复失败');
-                  }
-                }}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button icon={<UndoOutlined />}>恢复默认</Button>
-              </Popconfirm>
-            )}
             <Popconfirm
               title="确定重置为默认参数？"
               onConfirm={handleReset}
               okText="确定"
               cancelText="取消"
             >
-              <Button icon={<ReloadOutlined />}>重置</Button>
+              <Button icon={<ReloadOutlined />}>恢复默认</Button>
             </Popconfirm>
             <Button
               type="primary"

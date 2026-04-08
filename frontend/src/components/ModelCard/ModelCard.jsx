@@ -15,6 +15,7 @@ import {
   StarFilled,
   StarOutlined,
   UndoOutlined,
+  CloudSyncOutlined,
   LoadingOutlined,
   CloseCircleOutlined,
   WarningOutlined,
@@ -516,16 +517,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     }
   };
 
-  const handleRestoreDefaults = async () => {
-    try {
-      await modelService.restoreDefaults(model.id);
-      message.success('已恢复默认');
-      onUpdate();
-    } catch (error) {
-      message.error('恢复失败');
-    }
-  };
-
   const handleSaveName = async () => {
     const trimmed = nameValue.trim();
     if (!trimmed) {
@@ -684,12 +675,35 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               title={isFavorited ? '取消收藏' : '收藏'}
             />
           )}
-          {model.source === 'remote' && (
+          {!!model.modelscope_id && (
             <Button
               size="small"
-              icon={<UndoOutlined />}
-              onClick={handleRestoreDefaults}
-              title="恢复默认"
+              icon={<CloudSyncOutlined />}
+              title="从远端刷新模型配置"
+              onClick={() => {
+                Modal.confirm({
+                  title: '刷新远端模型配置',
+                  content: (
+                    <div>
+                      <p>将从模型仓库获取该模型的最新配置（量化列表、文件 SHA256 等）并更新本地数据库。</p>
+                      <p style={{ color: '#faad14', marginTop: 8 }}>
+                        ⚠️ 注意：如果你已下载旧版本文件，刷新后 SHA256 校验将失败，建议重新下载以获取最新版本。
+                      </p>
+                    </div>
+                  ),
+                  okText: '确认刷新',
+                  cancelText: '取消',
+                  onOk: async () => {
+                    try {
+                      await modelService.refreshRemote(model.id);
+                      message.success('模型配置已更新');
+                      onUpdate();
+                    } catch (e) {
+                      message.error('刷新失败');
+                    }
+                  }
+                });
+              }}
             />
           )}
           <Button
@@ -1046,25 +1060,46 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         onClose={() => setComfyuiSettingsVisible(false)}
         destroyOnClose
         extra={
-          <Popconfirm
-            title="删除卡片"
-            description="删除此卡片配置及对应的工作流文件，已下载的模型文件不受影响。"
-            onConfirm={async () => {
-              try {
-                await modelService.delete(model.id);
-                message.success('卡片已删除');
-                setComfyuiSettingsVisible(false);
-                onUpdate();
-              } catch (e) {
-                message.error('删除失败');
-              }
-            }}
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-          >
-            <Button danger icon={<DeleteOutlined />}>删除卡片</Button>
-          </Popconfirm>
+          <Space>
+            {!!model.modelscope_id && (
+              <Popconfirm
+                title="恢复默认映射？"
+                description="将清除自定义参数映射，恢复为远程默认值。"
+                onConfirm={async () => {
+                  try {
+                    await modelService.restoreDefaults(model.id);
+                    message.success('已恢复默认');
+                    onUpdate();
+                  } catch (e) {
+                    message.error('恢复失败');
+                  }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button icon={<UndoOutlined />}>恢复默认</Button>
+              </Popconfirm>
+            )}
+            <Popconfirm
+              title="删除卡片"
+              description="删除此卡片配置及对应的工作流文件，已下载的模型文件不受影响。"
+              onConfirm={async () => {
+                try {
+                  await modelService.delete(model.id);
+                  message.success('卡片已删除');
+                  setComfyuiSettingsVisible(false);
+                  onUpdate();
+                } catch (e) {
+                  message.error('删除失败');
+                }
+              }}
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button danger icon={<DeleteOutlined />}>删除卡片</Button>
+            </Popconfirm>
+          </Space>
         }
       >
         <UserMappingPanel

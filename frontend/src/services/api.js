@@ -27,6 +27,7 @@ export const modelService = {
   setActiveFile: (id, filename) => api.post(`/models/${id}/set-active-file`, { filename }),
   deleteQuantization: (id, filename) => api.delete(`/models/${id}/quantization`, { data: { filename } }),
   restoreDefaults: (id) => api.post(`/models/${id}/restore-defaults`),
+  refreshRemote: (id) => api.post(`/models/${id}/refresh-remote`),
   deleteConfig: (id) => api.delete(`/models/${id}/config`),
   addCustomModel: (data) => api.post('/models/custom', data),
   addCloudApiModel: (data) => api.post('/models/cloudapi', data),

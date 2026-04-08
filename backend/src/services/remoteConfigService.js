@@ -115,15 +115,22 @@ async function syncModels() {
           const localOverwrite = mapRemoteToLocal(overwrite);
           localOverwrite.remote_version = remoteVersion;
           localOverwrite.remote_snapshot = remoteFields;
+          localOverwrite.modelscope_refreshed = false; // 官方版本升级，清除手动刷新标记
           await modelManager.update(id, localOverwrite);
           updated++;
         } else {
           // 同版本：只刷新非用户字段
+          // 如果用户已通过 ModelScope 手动刷新过，跳过 quantizations/mmproj_options/files
+          // 避免用 models.json 的旧 SHA256 覆盖刚从 ModelScope 拉取的最新数据
+          const skipFileFields = !!existing.modelscope_refreshed;
           const refresh = {};
           REMOTE_FIELDS.forEach(f => {
+            if (skipFileFields && (f === 'quantizations' || f === 'mmproj_options')) return;
             if (remoteFields[f] !== undefined) refresh[f] = remoteFields[f];
           });
-          await modelManager.update(id, mapRemoteToLocal(refresh));
+          const localRefresh = mapRemoteToLocal(refresh);
+          if (skipFileFields) delete localRefresh.files;
+          await modelManager.update(id, localRefresh);
         }
       }
     }

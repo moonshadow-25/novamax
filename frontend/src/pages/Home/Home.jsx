@@ -85,16 +85,22 @@ function Home() {
       if (res.hasUpdate) setUpdateInfo(res);
     }).catch(() => {});
 
-    // 检查引擎更新
+    // 检查引擎更新/未安装
     engineService.getAll().then(engines => {
       const updates = [];
       for (const [id, engine] of Object.entries(engines)) {
         if (engine.category === 'app') continue;
-        if (!engine.installed) continue;
+        if (id === 'tts' || id === 'whisper') continue;
         if (!engine.versions?.length) continue;
         const latestVersion = engine.versions[0].version;
-        if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
-          updates.push({ id, name: engine.name, latestVersion });
+        const isDownloading = engine.download_states?.some(
+          s => s.status === 'downloading' || s.status === 'paused'
+        );
+        if (isDownloading) continue;
+        if (!engine.installed) {
+          updates.push({ id, name: engine.name, latestVersion, installed: false });
+        } else if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
+          updates.push({ id, name: engine.name, latestVersion, installed: true });
         }
       }
       setEngineUpdates(updates);
@@ -288,15 +294,25 @@ function Home() {
           <div className="update-banner-content">
             <ToolOutlined className="update-banner-icon" />
             <span className="update-banner-text">
-              <strong>{engine.name}</strong> 有新版本 <strong>{engine.latestVersion}</strong> 可用
+              {engine.installed
+                ? <><strong>{engine.name}</strong> 有新版本 <strong>{engine.latestVersion}</strong> 可用</>
+                : <><strong>{engine.name}</strong> 尚未安装</>}
             </span>
             <Button
               type="primary"
               size="small"
-              onClick={() => navigate('/global-settings?menu=engines')}
+              onClick={async () => {
+                setDismissedEngineUpdates(prev => new Set([...prev, engine.id]));
+                try {
+                  await engineService.download(engine.id, engine.latestVersion);
+                  message.success(`${engine.name} 开始下载`);
+                } catch (e) {
+                  message.error(`下载失败: ${e.response?.data?.error || e.message}`);
+                }
+              }}
               className="update-banner-btn"
             >
-              前往更新
+              {engine.installed ? '立即更新' : '立即安装'}
             </Button>
           </div>
           <CloseOutlined

@@ -10,6 +10,8 @@ import { MODELS_RUN_DIR, DOWNLOADS_DIR, DEFAULT_LLM_PARAMETERS } from '../config
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
+import remoteConfigService from '../services/remoteConfigService.js';
+import modelscopeParser from '../services/modelscopeParser.js';
 
 const router = express.Router();
 
@@ -640,6 +642,35 @@ router.post('/models/:id/restore-defaults', async (req, res) => {
     }
 
     const updated = await modelManager.update(req.params.id, updates);
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 从远端刷新单个模型的最新配置（量化列表、sha256 等）
+router.post('/models/:id/refresh-remote', async (req, res) => {
+  try {
+    const model = modelManager.getById(req.params.id);
+    if (!model) return res.status(404).json({ error: 'Model not found' });
+    if (!model.modelscope_id) return res.status(400).json({ error: '仅 ModelScope 模型支持刷新' });
+
+    // 直接从 ModelScope API 拉取最新文件列表（含 SHA256）
+    const { modelData, files, description } = await modelscopeParser.fetchModelInfo(model.modelscope_id);
+    const quantizations = modelscopeParser.generateQuantizations(files, model.modelscope_id, model.filter_folder || null);
+    const mmprojOptions = modelscopeParser.generateMmprojOptions(files, model.modelscope_id);
+
+    // 重新计算 files 字段（指向当前选择的量化版本）
+    const selectedQuant = quantizations.find(q => q.name === model.selected_quantization) || quantizations.find(q => q.recommended) || quantizations[0];
+    const filesField = selectedQuant && !selectedQuant.is_folder ? {
+      model: selectedQuant.file,
+      mmproj: mmprojOptions.length > 0 ? mmprojOptions.find(m => m.name === model.files?.mmproj?.name) || mmprojOptions[0] : null
+    } : model.files;
+
+    await modelManager.update(model.id, { quantizations, mmproj_options: mmprojOptions, files: filesField, modelscope_refreshed: true });
+
+    const updated = modelManager.getById(req.params.id);
     eventBus.broadcast('model-updated', { modelId: req.params.id });
     res.json(updated);
   } catch (error) {

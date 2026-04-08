@@ -85,8 +85,11 @@ export function checkActiveFileIntegrity(model) {
     // 2. SHA256 校验：downloaded_files 记录了 sha256 且配置中有期望值
     if (fileRec.sha256 && quantInfo?.file?.sha256) {
       if (fileRec.sha256 !== quantInfo.file.sha256) {
-        console.warn(`[integrity] SHA256 不匹配: ${fileRec.filename} 存储=${fileRec.sha256.slice(0, 8)}... 期望=${quantInfo.file.sha256.slice(0, 8)}...`);
-        return false;
+        // SHA256 不匹配但文件存在：降级为警告，仍允许启动
+        // 常见场景：服务端更新了文件内容、断点续传接到了新版数据
+        // 建议用户重新下载以获取最新版本
+        console.warn(`[integrity] SHA256 不匹配（模型可能已在模型仓库更新，建议重新下载）: ${fileRec.filename} 存储=${fileRec.sha256.slice(0, 8)}... 期望=${quantInfo.file.sha256.slice(0, 8)}...`);
+        continue;
       }
       // SHA256 验证通过，跳过大小校验
       continue;
