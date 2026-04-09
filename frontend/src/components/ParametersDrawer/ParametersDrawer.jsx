@@ -52,6 +52,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   // 自动启动 & 多机互连
   const [autoStart, setAutoStart] = useState(false);
   const [multiHost, setMultiHost] = useState(false);
+  const [reasoningOn, setReasoningOn] = useState(false);
 
   const isCloudApi = model?.source === 'cloudapi';
 
@@ -89,6 +90,31 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       await modelService.update(modelId, { multi_host: checked });
       setMultiHost(checked);
     } catch (e) {
+      message.error('设置失败');
+    }
+  };
+
+  const handleReasoningChange = async (checked) => {
+    setReasoningOn(checked);
+
+    if (isCloudApi) return;
+    if (!parameters) {
+      message.error('参数尚未加载，无法保存');
+      return;
+    }
+
+    try {
+      const newParams = {
+        ...parameters,
+        reasoning: checked ? 'on' : 'off'
+      };
+      await axios.put(`/api/parameters/${modelId}`, {
+        parameters: newParams
+      });
+      setParameters(prev => prev ? { ...prev, reasoning: checked ? 'on' : 'off' } : prev);
+      message.success(checked ? '已开启思考' : '已关闭思考');
+    } catch (error) {
+      setReasoningOn(!checked);
       message.error('设置失败');
     }
   };
@@ -134,7 +160,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         ? ['port']
         : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
-           'repeat_penalty', 'version'];
+           'repeat_penalty', 'version', 'reasoning'];
 
       const custom = [];
       const formValues = {};
@@ -156,6 +182,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       }
 
       setCustomParams(isCloudApi ? [] : custom);
+      setReasoningOn(params.reasoning === 'on');
       form.setFieldsValue(formValues);
     } catch (error) {
       message.error('加载参数失败');
@@ -181,7 +208,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         ? ['port']
         : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
-           'repeat_penalty'];
+           'repeat_penalty', 'reasoning'];
 
       // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
       const allParams = {};
@@ -204,6 +231,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         customParams.forEach(({ key, value }) => {
           allParams[key] = value;
         });
+        // reasoning 开关始终保存为 on/off
+        allParams.reasoning = reasoningOn ? 'on' : 'off';
       }
 
       await axios.put(`/api/parameters/${modelId}`, {
@@ -224,6 +253,9 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       setLoading(true);
       await axios.post(`/api/parameters/${modelId}/reset`);
       message.success('已重置为默认参数');
+      // 同步重置引擎版本和自动启动状态
+      setSelectedEngineVersion(null);
+      setAutoStart(false);
       loadParameters();
     } catch (error) {
       message.error('重置失败');
@@ -442,7 +474,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                   <Space style={{ marginRight: 12 }}>
                     <span>自动启动</span>
-                    <Tooltip title="后端启动时自动运行此模型">
+                    <Tooltip title="程序启动时自动运行此模型">
                       <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                     </Tooltip>
                   </Space>
@@ -453,6 +485,22 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     unCheckedChildren="关"
                   />
                 </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                  <Space style={{ marginRight: 12 }}>
+                    <span>思考开关</span>
+                    <Tooltip title="切换模型的思考模式，开启后模型会在回答前先输出思考过程（如果模型支持）">
+                      <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                    </Tooltip>
+                  </Space>
+                  <Switch
+                    checked={reasoningOn}
+                    onChange={handleReasoningChange}
+                    checkedChildren="开"
+                    unCheckedChildren="关"
+                  />
+                </div>
+
                 {/* <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                   <Space style={{ marginRight: 12 }}>
                     <span>多机互连</span>

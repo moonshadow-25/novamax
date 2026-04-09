@@ -198,13 +198,15 @@ class ModelscopeParser {
 
     // 处理文件夹类型（大模型）
     for (const folder of folderFiles) {
+      const folderPath = folder.Path || folder.Name;
+
       // 如果指定了筛选文件夹，只处理匹配的文件夹
-      if (filterFolder && folder.Name !== filterFolder) {
+      if (filterFolder && folderPath !== filterFolder) {
         continue;
       }
 
       // 统计文件夹内所有文件，并按文件名排序
-      const folderPrefix = folder.Name + '/';
+      const folderPrefix = folderPath + '/';
       const filesInFolder = blobFiles
         .filter(f => f.Path && f.Path.startsWith(folderPrefix))
         .sort((a, b) => a.Name.localeCompare(b.Name));
@@ -238,14 +240,14 @@ class ModelscopeParser {
       const folderFileList = filesInFolder.map(f => ({
         name: f.Name,
         size: f.Size || 0,
-        download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${f.Path || folder.Name + '/' + f.Name}`
+        download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${f.Path || folderPath + '/' + f.Name}`
       }));
 
       quantizations.push({
         name: quantType,
         label: `${quantType} - ${sizeLabel}`,
         is_folder: true,
-        folder_path: folder.Name,
+        folder_path: folderPath,
         total_size: totalSize,
         folder_files: folderFileList,
         category: info.category,

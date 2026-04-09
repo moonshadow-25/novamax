@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import axios from 'axios';
+import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -29,7 +30,16 @@ class ProcessManager {
   }
 
   async isPortAvailable(port) {
-    return !this.allocatedPorts.has(port);
+    if (this.allocatedPorts.has(port)) {
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      const server = net.createServer();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => server.close(() => resolve(true)));
+      server.listen(port, '127.0.0.1');
+    });
   }
 
   async allocatePort(type) {
@@ -141,8 +151,8 @@ class ProcessManager {
     const effectiveParams = parameterService.getEffectiveParameters(model);
     const port = effectiveParams.port || model.port || 1234;
 
-    if (this.allocatedPorts.has(port)) {
-      throw new Error(`端口 ${port} 已被其他模型占用，请在模型参数中修改端口号`);
+    if (!(await this.isPortAvailable(port))) {
+      throw new Error(`端口 ${port} 已被占用，请在模型参数中修改端口号或停止占用该端口后重试`);
     }
     this.allocatedPorts.add(port);
 
@@ -254,9 +264,9 @@ class ProcessManager {
     const isEmbedding = /embedding/i.test(model.name || model.id || '');
     const port = effectiveParams.port || (isEmbedding ? 1278 : 1234);
 
-    // 检查端口是否已被占用
-    if (this.allocatedPorts.has(port)) {
-      throw new Error(`端口 ${port} 已被其他模型占用，请在模型参数中修改端口号`);
+    // 检查端口是否本地可用
+    if (!(await this.isPortAvailable(port))) {
+      throw new Error(`端口 ${port} 已被占用，请在模型参数中修改端口号或停止占用该端口后重试`);
     }
     this.allocatedPorts.add(port);
 
@@ -343,20 +353,49 @@ class ProcessManager {
         }
       });
 
-      process.on('error', async (error) => {
-        console.error(`[${modelId}] Process error: ${error.message}`);
-        this.cleanup(modelId);
-        eventBus.broadcast('model-updated', { modelId });
+      const startupResult = new Promise((resolve, reject) => {
+        const checkReady = () => {
+          const processInfo = this.processes.get(modelId);
+          if (processInfo?.ready) {
+            cleanupStartupListeners();
+            resolve();
+          }
+        };
+
+        const onError = (error) => {
+          cleanupStartupListeners();
+          reject(new Error(`启动失败：${error.message}`));
+        };
+
+        const onExit = (code) => {
+          const processInfo = this.processes.get(modelId);
+          if (!processInfo || processInfo.ready) {
+            return;
+          }
+          cleanupStartupListeners();
+          reject(new Error(`启动失败：llama-server 进程提前退出（code=${code}）`));
+        };
+
+        const timeout = setTimeout(() => {
+          cleanupStartupListeners();
+          resolve();
+        }, 1200);
+
+        const cleanupStartupListeners = () => {
+          process.off('error', onError);
+          process.off('exit', onExit);
+          process.stdout.off('data', checkReady);
+          process.stderr.off('data', checkReady);
+          clearTimeout(timeout);
+        };
+
+        process.on('error', onError);
+        process.on('exit', onExit);
+        process.stdout.on('data', checkReady);
+        process.stderr.on('data', checkReady);
       });
 
-      process.on('exit', (code) => {
-        console.log(`[${modelId}] Process exited with code ${code}`);
-        logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
-        logStream.end();
-        this.cleanup(modelId);
-        eventBus.broadcast('model-updated', { modelId });
-      });
-
+      await startupResult;
       return { port, status: MODEL_STATUS.STARTING, mode: 'single' };
     } catch (error) {
       this.allocatedPorts.delete(port);

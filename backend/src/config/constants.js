@@ -60,11 +60,13 @@ export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');
 export const DEFAULT_LLM_PARAMETERS = {
   version: '1.0.0',
   context_length: 0,
+  port: 1234,
   parallel: 1,
   'no-mmap': true,
   'n-gpu-layers': 100,
   temperature: 0.7,
   top_p: 0.9,
   top_k: 40,
-  repeat_penalty: 1.1
+  repeat_penalty: 1.1,
+  reasoning: 'off'
 };

@@ -68,9 +68,10 @@ export function generateSingleModelCommand(model, port) {
     '--host', '0.0.0.0',
   ];
 
-  // 默认参数值（当用户未设置时使用）
+  // 默认参数值（当用户未设置时使用）解构默认参数，去掉 version 字段（不需要传递给 llama-server）
+  const { version: _version, ...defaultLlmParams } = DEFAULT_LLM_PARAMETERS;
   const defaults = {
-    ...DEFAULT_LLM_PARAMETERS,
+    ...defaultLlmParams,
     port: port || 1234
   };
 

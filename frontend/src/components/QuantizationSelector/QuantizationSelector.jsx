@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, Button, Space, Tag, Divider, Alert, Progress, Tooltip, Collapse } from 'antd';
 import {
   StarOutlined,
@@ -8,8 +8,10 @@ import {
   PauseCircleOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
-  CaretRightOutlined
+  CaretRightOutlined,
+  WarningFilled
 } from '@ant-design/icons';
+import { systemService } from '../../services/api';
 import './QuantizationSelector.css';
 
 const CATEGORY_LABELS = {
@@ -50,6 +52,18 @@ function QuantizationSelector({
   const files = downloadedFiles || [];
   const oldQuants = downloadedQuantizations || [];
 
+  // 系统内存总量（RAM + VRAM），用于判断是否超出设备可用内存
+  const [systemMemoryTotal, setSystemMemoryTotal] = useState(0);
+
+  useEffect(() => {
+    if (!visible) return;
+    systemService.getInfo().then(data => {
+      const ram = data?.hardware?.memory?.total || 0;
+      const vram = (data?.hardware?.gpus || []).reduce((sum, gpu) => sum + (gpu.total || 0), 0);
+      setSystemMemoryTotal(ram + vram);
+    }).catch(() => {});
+  }, [visible]);
+
   // 组合视图：预设 + 已下载文件
   const allItems = [
     // 1. 预设中的项
@@ -73,7 +87,8 @@ function QuantizationSelector({
         recommended: preset.recommended,
         isDownloaded,
         file: matchedFile,
-        isActive
+        isActive,
+        presetFileSize: preset?.total_size || preset?.file?.size || 0
       };
     }),
 
@@ -214,6 +229,14 @@ function QuantizationSelector({
               />
             )}
 
+            {/* 内存不足警告图标 - 仅未下载且文件大小超过设备可用内存时显示 */}
+            {!item.isDownloaded && !isDownloading && !isPaused && !isCompleted && !isFailed && item.type === 'preset' &&
+              systemMemoryTotal > 0 && item.presetFileSize > 0 && item.presetFileSize > systemMemoryTotal && (
+              <Tooltip title="此模型文件所需内存超过设备可用内存，不推荐下载此文件">
+                <WarningFilled style={{ color: '#faad14', fontSize: 20, cursor: 'default' }} />
+              </Tooltip>
+            )}
+
             {/* 下载按钮 - 仅未下载的预设时显示 */}
             {!item.isDownloaded && !isDownloading && !isPaused && !isCompleted && !isFailed && item.type === 'preset' && (
               <Button
@@ -336,14 +359,21 @@ function QuantizationSelector({
             {recommendedDownloaded ? (
               <CheckCircleFilled style={{ color: '#52c41a', fontSize: 20 }} />
             ) : !recommendedDownloading && !recommendedPaused && (
-              <Button
-                type="primary"
-                icon={<DownloadOutlined />}
-                size="small"
-                onClick={() => onDownload(recommended.name)}
-              >
-                下载
-              </Button>
+              <>
+                {systemMemoryTotal > 0 && (recommended?.total_size || recommended?.file?.size || 0) > systemMemoryTotal && (
+                  <Tooltip title="此模型文件所需内存超过设备可用内存，不推荐下载此文件">
+                    <WarningFilled style={{ color: '#faad14', fontSize: 20, cursor: 'default' }} />
+                  </Tooltip>
+                )}
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  size="small"
+                  onClick={() => onDownload(recommended.name)}
+                >
+                  下载
+                </Button>
+              </>
             )}
             {recommendedDownloading && (
               <span style={{ fontSize: 12, color: '#1890ff' }}>{(recommendedState?.progress || 0).toFixed(0)}% 下载中</span>

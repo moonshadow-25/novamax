@@ -1001,8 +1001,8 @@ const GlobalSettings = () => {
       <Card title="运行状态">
         {systemLoading && !systemInfo ? (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-              {[1, 2, 3].map(i => (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
+              {[1, 2, 3, 4].map(i => (
                 <div key={i} style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
                   <Skeleton active paragraph={{ rows: 2 }} />
                 </div>
@@ -1015,19 +1015,51 @@ const GlobalSettings = () => {
         ) : (
           <>
             {hw && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
+                {/* CPU */}
                 <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
                   <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>CPU</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 6 }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+                  <Progress percent={hw.cpu.usagePercent ?? 0} size="small"
+                    strokeColor={(hw.cpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#1890ff'}
+                    format={(p) => `${p}%`} />
                 </div>
+                {/* RAM */}
                 <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存</div>
+                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存 (RAM)</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
                   <Progress percent={hw.memory.usagePercent} size="small"
                     strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
                     format={(p) => `${p}%`} />
                 </div>
+                {/* VRAM */}
+                {hw.gpus && hw.gpus.length > 0 ? (
+                  <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>显存 (VRAM)</div>
+                    {hw.gpus.map((gpu, i) => (
+                      <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
+                        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
+                        {gpu.used != null ? (
+                          <>
+                            <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
+                            <Progress percent={gpu.usagePercent ?? 0} size="small"
+                              strokeColor={(gpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#722ed1'}
+                              format={(p) => `${p}%`} />
+                          </>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>容量: {formatBytes(gpu.total)}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>显存 (VRAM)</div>
+                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.25)', marginTop: 8 }}>未检测到 GPU 信息</div>
+                  </div>
+                )}
+                {/* 系统 */}
                 <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
                   <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>系统</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>

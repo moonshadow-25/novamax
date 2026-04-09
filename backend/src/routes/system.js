@@ -16,6 +16,100 @@ import { PROJECT_ROOT, MODELS_RUN_DIR, DATA_DIR } from '../config/constants.js';
 const execAsync = promisify(exec);
 const router = express.Router();
 
+// CPU 利用率计算：存储上次采样值
+let _prevCpuInfo = null;
+
+function getCpuUsagePercent() {
+  const cpus = os.cpus();
+  let idle = 0, total = 0;
+  cpus.forEach(cpu => {
+    for (const t in cpu.times) total += cpu.times[t];
+    idle += cpu.times.idle;
+  });
+  if (!_prevCpuInfo) {
+    _prevCpuInfo = { idle, total };
+    return 0;
+  }
+  const idleDiff = idle - _prevCpuInfo.idle;
+  const totalDiff = total - _prevCpuInfo.total;
+  _prevCpuInfo = { idle, total };
+  if (totalDiff === 0) return 0;
+  return Math.round(100 - (100 * idleDiff / totalDiff));
+}
+
+/**
+ * 获取 GPU / VRAM 信息
+ * 优先 nvidia-smi，Windows 下用 PowerShell（过滤虚拟适配器 + 注册表读 64 位 VRAM）
+ */
+async function getGpuInfo() {
+  // 1. NVIDIA nvidia-smi
+  try {
+    const { stdout } = await execAsync(
+      'nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits',
+      { encoding: 'utf-8', timeout: 3000 }
+    );
+    const lines = stdout.trim().split('\n').filter(l => l.trim());
+    if (lines.length > 0) {
+      return lines.map(line => {
+        const [name, totalMB, usedMB, freeMB] = line.split(',').map(s => s.trim());
+        const total = parseInt(totalMB) * 1024 * 1024;
+        const used = parseInt(usedMB) * 1024 * 1024;
+        const free = parseInt(freeMB) * 1024 * 1024;
+        return { name, total, used, free, usagePercent: total ? Math.round((used / total) * 100) : 0 };
+      });
+    }
+  } catch (e) { /* no NVIDIA */ }
+
+  // 2. Windows: 只取 PCI 真实 GPU
+  //   - 直接遍历注册表 0000-000F（避免 Get-ChildItem 在 Properties 子键上权限报错）
+  //   - 用 DriverDesc 匹配 WMI GPU 名称，读 qwMemorySize (64 位 QWORD)
+  //   - 性能计数器只保留 _phys_0 后缀（物理 GPU，过滤虚拟适配器 LUID）
+  if (os.platform() === 'win32') {
+    try {
+      const psLines = [
+        '$ErrorActionPreference="SilentlyContinue"',
+        '$base="HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}"',
+        // PCI 真实 GPU 列表
+        '$vc=@(Get-CimInstance Win32_VideoController|Where-Object{$_.PNPDeviceID -like "PCI\\*"})',
+        // 枚举所有数字子键（通用，不限数量），-EA SilentlyContinue 跳过受保护的子键
+        '$allReg=@(Get-ChildItem $base -EA SilentlyContinue|Where-Object{$_.PSChildName -match "^\\d{4}$"}|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+        // 只取物理 _phys_0 适配器，按 Name 排序
+        '$perf=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory -EA SilentlyContinue|Where-Object{$_.Name -match "_phys_0$"}|Sort-Object Name)',
+        '$out=@($vc|ForEach-Object{',
+        '  $v=$_; $total=$null',
+        '  $reg=$allReg|Where-Object{$_.DriverDesc -eq $v.Name}|Select-Object -First 1',
+        '  if($reg){$q=[long]$reg."HardwareInformation.qwMemorySize";if($q -gt 0){$total=$q}}',
+        '  if(-not $total -and $v.AdapterRAM -gt 0){$total=[long]$v.AdapterRAM}',
+        '  @{n=$v.Name;t=$total}',
+        '})',
+        '@{g=$out;p=@($perf|ForEach-Object{@{u=$_.DedicatedUsage}})}|ConvertTo-Json -Depth 4 -Compress'
+      ];
+      const encoded = Buffer.from(psLines.join('\n'), 'utf16le').toString('base64');
+      const { stdout } = await execAsync(
+        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        { encoding: 'utf-8', timeout: 10000 }
+      );
+      const data = JSON.parse(stdout.trim());
+      const gpus = Array.isArray(data.g) ? data.g : (data.g ? [data.g] : []);
+      const perfs = Array.isArray(data.p) ? data.p : (data.p ? [data.p] : []);
+
+      return gpus.filter(g => g && g.n).map((g, i) => {
+        const total = g.t ? Number(g.t) : null;
+        const used = (perfs[i]?.u > 0) ? Number(perfs[i].u) : null;
+        return {
+          name: g.n,
+          total,
+          used,
+          free: (total != null && used != null) ? total - used : null,
+          usagePercent: (total && used) ? Math.round((used / total) * 100) : null
+        };
+      });
+    } catch (e) { /* PowerShell failed */ }
+  }
+
+  return null;
+}
+
 /**
  * 通过 tasklist 批量查询进程内存占用（Windows）
  */
@@ -49,6 +143,8 @@ router.get('/system/info', async (req, res) => {
     const cpus = os.cpus();
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
+    const cpuUsage = getCpuUsagePercent();
+    const gpus = await getGpuInfo();
 
     const memMap = await getProcessMemoryMap();
 
@@ -99,7 +195,8 @@ router.get('/system/info', async (req, res) => {
         cpu: {
           model: cpus[0]?.model || 'Unknown',
           cores: cpus.length,
-          speed: cpus[0]?.speed || 0
+          speed: cpus[0]?.speed || 0,
+          usagePercent: cpuUsage
         },
         memory: {
           total: totalMem,
@@ -109,6 +206,7 @@ router.get('/system/info', async (req, res) => {
             ((totalMem - freeMem) / totalMem) * 100
           )
         },
+        gpus: gpus,
         platform: os.platform(),
         arch: os.arch(),
         hostname: os.hostname(),

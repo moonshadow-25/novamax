@@ -1,4 +1,5 @@
 import modelManager from './modelManager.js';
+import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 
 class ParameterService {
   /**
@@ -59,16 +60,53 @@ class ParameterService {
     // 移除 version 字段（版本号由默认参数控制）
     const { version, _source, _version, _note, ...cleanParams } = userParams;
 
-    await modelManager.update(modelId, {
-      user_parameters: cleanParams,
-      user_parameters_version: defaultVersion // 记录基于哪个版本
-    });
+    // 判断提交的参数是否与默认完全一致，若是则存 null（显示"默认配置"）
+    // 注意：折叠面板未展开时 Ant Design Form 不挂载字段，port 等 key 可能不在 cleanParams 里，
+    //       因此只检查前端实际发来的 key，未发来的 key 视为与默认一致。
+    const defaultRaw = model.parameters || {};
+    // 用 DEFAULT_LLM_PARAMETERS 兜底，兼容旧数据库记录里 model.parameters 缺字段的情况
+    const { version: _dlpV, ...defaultLlmBase } = DEFAULT_LLM_PARAMETERS;
+    const defaultComparable = Object.fromEntries(
+      Object.entries({ ...defaultLlmBase, ...defaultRaw })
+        .filter(([k]) => k !== 'version' && !k.startsWith('_'))
+    );
+    const _isNeutralValue = (v) => {
+      if (v === undefined || v === null || v === '') return true;
+      const s = String(v).toLowerCase();
+      return s === 'false' || s === '0' || s === 'off';
+    };
+    const isIdenticalToDefault = (() => {
+      for (const k of Object.keys(cleanParams)) {
+        const defaultVal = defaultComparable[k];
+        if (defaultVal !== undefined) {
+          // 该 key 在默认里有，值必须相同
+          if (String(cleanParams[k]) !== String(defaultVal)) return false;
+        } else {
+          // 该 key 不在默认里，若为非零值则视为用户自定义
+          if (!_isNeutralValue(cleanParams[k])) return false;
+        }
+      }
+      return true;
+    })();
+
+    if (isIdenticalToDefault) {
+      await modelManager.update(modelId, {
+        user_parameters: null,
+        user_parameters_version: null,
+        deleted_parameters: []
+      });
+    } else {
+      await modelManager.update(modelId, {
+        user_parameters: cleanParams,
+        user_parameters_version: defaultVersion // 记录基于哪个版本
+      });
+    }
 
     return this.getEffectiveParameters(modelManager.getById(modelId));
   }
 
   /**
-   * 重置为默认参数
+   * 重置为默认参数（同时重置引擎版本和自动启动）
    */
   async resetToDefault(modelId) {
     const model = modelManager.getById(modelId);
@@ -79,7 +117,9 @@ class ParameterService {
     await modelManager.update(modelId, {
       user_parameters: null,
       user_parameters_version: null,
-      deleted_parameters: []   // 清空删除记录，让 models.json 的参数完全恢复
+      deleted_parameters: [],  // 清空删除记录，让 models.json 的参数完全恢复
+      engine_version: null,    // 恢复为默认（最新）引擎版本
+      auto_start: false        // 关闭自动启动
     });
 
     return this.getEffectiveParameters(modelManager.getById(modelId));

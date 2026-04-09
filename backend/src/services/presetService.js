@@ -128,10 +128,13 @@ class PresetService {
       if (params.repeat_penalty) {
         lines.push(`repeat-penalty = ${params.repeat_penalty}`);
       }
+      if (params.reasoning !== undefined) {
+        lines.push(`reasoning = ${params.reasoning}`);
+      }
 
       // 自定义参数（所有其他非标准参数）
       const standardKeys = ['context_length', 'port', 'parallel',
-                            'temperature', 'top_p', 'top_k', 'repeat_penalty'];
+                            'temperature', 'top_p', 'top_k', 'repeat_penalty', 'reasoning'];
       Object.entries(params).forEach(([key, value]) => {
         if (!standardKeys.includes(key)) {
           lines.push(`${key} = ${value}`);

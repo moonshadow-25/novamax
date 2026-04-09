@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import open from 'open';
+// import open from 'open';
 
 // 尽早初始化日志收集器，拦截所有 console 输出
 import logCollector from './services/logCollector.js';
@@ -192,11 +192,12 @@ init().then(() => {
         console.log('检测到已有浏览器页面，发送刷新信号...');
         eventBus.broadcast('server-restarted', { action: 'reload' });
       } else {
-        // 没有客户端连接，打开新浏览器窗口
-        console.log('未检测到浏览器页面，打开新窗口...');
-        open(`http://localhost:${PORT}`).catch(() => {
-          console.log(`Please open http://localhost:${PORT} in your browser`);
-        });
+        // 未检测到浏览器页面，默认不自动打开浏览器
+        console.log(`Please open http://localhost:${PORT} in your browser`);
+        // 注释掉自动打开浏览器的逻辑：
+        // open(`http://localhost:${PORT}`).catch(() => {
+        //   console.log(`Please open http://localhost:${PORT} in your browser`);
+        // });
       }
     }, 2000);
   });
