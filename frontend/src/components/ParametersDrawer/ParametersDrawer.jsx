@@ -486,6 +486,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                   />
                 </div>
 
+                {!isCloudApi && (
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                   <Space style={{ marginRight: 12 }}>
                     <span>思考开关</span>
@@ -500,6 +501,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     unCheckedChildren="关"
                   />
                 </div>
+                )}
 
                 {/* <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                   <Space style={{ marginRight: 12 }}>

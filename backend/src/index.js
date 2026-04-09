@@ -79,7 +79,7 @@ async function init() {
   // 自动启动标记了 auto_start 的 LLM 模型
   const autoStartModels = modelManager.getAll().filter(
     m => m.type === 'llm' && m.auto_start === true &&
-         m.downloaded_files?.some(f => f.is_active)
+         (m.source === 'cloudapi' || m.downloaded_files?.some(f => f.is_active))
   );
   if (autoStartModels.length > 0) {
     console.log(`自动启动 ${autoStartModels.length} 个 LLM 模型...`);
