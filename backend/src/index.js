@@ -178,11 +178,24 @@ console.log(`
 `);
 console.log("=".repeat(50));
 
+async function gracefulShutdown(signal) {
+  console.log(`\n[${signal}] Shutting down, deregistering services...`);
+  try {
+    await processManager.shutdown();
+  } catch (err) {
+    console.warn('[shutdown] Error during deregistration:', err.message);
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
 init().then(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n${'='.repeat(50)}`);
     console.log(`NovaMax is running!`);
-    console.log(`URL: http://localhost:${PORT}`);
+    console.log(`URL: http://localhost:${PORT} (accessible from LAN on this machine's IP)`);
     console.log(`${'='.repeat(50)}\n`);
 
     // 等待 2 秒，检测是否有已存在的浏览器页面连接
@@ -193,7 +206,7 @@ init().then(() => {
         eventBus.broadcast('server-restarted', { action: 'reload' });
       } else {
         // 未检测到浏览器页面，默认不自动打开浏览器
-        console.log(`Please open http://localhost:${PORT} in your browser`);
+        console.log(`Please open http://localhost:${PORT} in your browser or use this machine's LAN IP address`);
         // 注释掉自动打开浏览器的逻辑：
         // open(`http://localhost:${PORT}`).catch(() => {
         //   console.log(`Please open http://localhost:${PORT} in your browser`);

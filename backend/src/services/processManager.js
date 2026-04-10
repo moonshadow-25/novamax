@@ -16,10 +16,15 @@ import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
+import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices } from '../utils/serviceRegistrar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
+
+function isEmbeddingModel(model) {
+  return model?.embedding === true || /embedding/i.test(model?.name || model?.id || '');
+}
 
 class ProcessManager {
   constructor() {
@@ -206,6 +211,11 @@ class ProcessManager {
         processInfo.ready = true;
         console.log(`[cloudapi:${modelId}] 代理已就绪`);
         eventBus.broadcast('model-updated', { modelId });
+        const embedding = isEmbeddingModel(model);
+        const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+        register(port).catch((err) =>
+          console.warn(`[service-registrar] CloudAPI registration failed: ${err.message}`)
+        );
       }
     });
 
@@ -239,8 +249,11 @@ class ProcessManager {
   async stopCloudApiProxy(modelId) {
     const processInfo = this.processes.get(modelId);
     if (!processInfo) throw new Error('Backend not running');
+    const model = modelManager.getById(modelId);
+    const embedding = isEmbeddingModel(model);
     processInfo.process.kill();
     this.cleanup(modelId);
+    await stopServiceRegistration(processInfo.port, embedding);
     return { status: MODEL_STATUS.STOPPED };
   }
 
@@ -261,7 +274,7 @@ class ProcessManager {
 
     // 从模型参数中读取端口
     const effectiveParams = parameterService.getEffectiveParameters(model);
-    const isEmbedding = /embedding/i.test(model.name || model.id || '');
+    const isEmbedding = isEmbeddingModel(model);
     const port = effectiveParams.port || (isEmbedding ? 1278 : 1234);
 
     // 检查端口是否本地可用
@@ -396,6 +409,11 @@ class ProcessManager {
       });
 
       await startupResult;
+      const embedding = isEmbeddingModel(model);
+      const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+      register(port).catch((err) =>
+        console.warn(`[service-registrar] Single model registration failed: ${err.message}`)
+      );
       return { port, status: MODEL_STATUS.STARTING, mode: 'single' };
     } catch (error) {
       this.allocatedPorts.delete(port);
@@ -440,6 +458,19 @@ class ProcessManager {
       }
     }
 
+    const hasEmbedding = downloadedModels.some(isEmbeddingModel);
+    const hasChat = downloadedModels.some((model) => !isEmbeddingModel(model));
+    if (hasEmbedding) {
+      registerEmbeddingsService(router.port).catch((err) =>
+        console.warn(`[service-registrar] Router embeddings registration failed: ${err.message}`)
+      );
+    }
+    if (hasChat) {
+      registerChatCompletionService(router.port).catch((err) =>
+        console.warn(`[service-registrar] Router chat registration failed: ${err.message}`)
+      );
+    }
+
     return {
       port: router.port,
       mode: 'router',
@@ -476,7 +507,11 @@ class ProcessManager {
       const loadedModel = response.data.data.find(m => m.id === modelId);
 
       if (loadedModel?.status?.value === 'loaded') {
-
+        const embedding = isEmbeddingModel(model);
+        const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+        register(router.port).catch((err) =>
+          console.warn(`[service-registrar] Router model registration failed: ${err.message}`)
+        );
         return { port: router.port, status: MODEL_STATUS.RUNNING, mode: 'router' };
       } else {
         throw new Error('Model failed to load');
@@ -567,6 +602,9 @@ class ProcessManager {
         console.log(`[Router-${type}] Process exited with code ${code}`);
         this.routers.delete(type);
         this.allocatedPorts.delete(port);
+        // 注销该路由端口上注册的所有服务（chat + embedding）
+        stopServiceRegistration(port, false).catch(() => {});
+        stopServiceRegistration(port, true).catch(() => {});
       });
 
       // 等待服务器启动
@@ -640,8 +678,12 @@ class ProcessManager {
       throw new Error('Process not running');
     }
 
+    const model = modelManager.getById(modelId);
+    const embedding = isEmbeddingModel(model);
+    const port = processInfo.port;
     processInfo.process.kill();
     this.cleanup(modelId);
+    await stopServiceRegistration(port, embedding);
 
     return { status: MODEL_STATUS.STOPPED };
   }
@@ -864,6 +906,27 @@ class ProcessManager {
     }
 
     return running;
+  }
+
+  /**
+   * 关闭所有进程并注销全部服务（用于主进程退出）
+   */
+  async shutdown() {
+    // 先注销所有已注册服务
+    await deregisterAllServices();
+
+    // 终止所有单模型进程
+    for (const [modelId, info] of this.processes) {
+      try { info.process.kill(); } catch (_) {}
+    }
+    this.processes.clear();
+
+    // 终止所有路由进程
+    for (const [, info] of this.routers) {
+      try { info.process.kill(); } catch (_) {}
+    }
+    this.routers.clear();
+    this.allocatedPorts.clear();
   }
 
   getLogs(modelId) {

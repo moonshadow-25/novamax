@@ -232,6 +232,15 @@ router.delete('/system/logs', (req, res) => {
   res.json({ success: true });
 });
 
+// ========== 关闭NovaMax服务器 ==========
+router.post('/system/quit', (req, res) => {
+  res.json({ success: true, message: 'NovaMax Server will quit shortly' });
+  setTimeout(() => {
+    console.log('[system/quit] Quit API called, exiting process');
+    process.exit(0);
+  }, 100);
+});
+
 // ========== 模型存储管理 ==========
 
 /** 存储迁移/还原异步任务状态 */
