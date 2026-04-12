@@ -392,7 +392,10 @@ class ModelscopeParser {
           completion: true
         },
 
-        parameters: { ...DEFAULT_LLM_PARAMETERS },
+        parameters: {
+          ...DEFAULT_LLM_PARAMETERS,
+          port: /embedding/i.test(baseConfig.name) || /embedding/i.test(modelId) ? 1278 : DEFAULT_LLM_PARAMETERS.port
+        },
 
         user_parameters: null,
         user_parameters_version: null,

@@ -226,7 +226,10 @@ router.post('/models/custom', async (req, res) => {
       downloaded_files,
       quantizations,
       files: { model: downloaded_files[0], mmproj: null },
-      parameters: { ...DEFAULT_LLM_PARAMETERS },
+      parameters: {
+        ...DEFAULT_LLM_PARAMETERS,
+        port: /embedding/i.test(trimmedName) ? 1278 : DEFAULT_LLM_PARAMETERS.port
+      },
       user_parameters: null,
       user_parameters_version: null
     });
