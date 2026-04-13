@@ -5,6 +5,7 @@
 
 import axios from 'axios';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
+import { EMBEDDING_PATTERN } from '../utils/embeddingHelper.js';
 
 // 量化类型元数据
 const QUANTIZATION_INFO = {
@@ -394,7 +395,7 @@ class ModelscopeParser {
 
         parameters: {
           ...DEFAULT_LLM_PARAMETERS,
-          port: /embedding/i.test(baseConfig.name) || /embedding/i.test(modelId) ? 1278 : DEFAULT_LLM_PARAMETERS.port
+          port: EMBEDDING_PATTERN.test(baseConfig.name) || EMBEDDING_PATTERN.test(modelId) ? 1278 : DEFAULT_LLM_PARAMETERS.port
         },
 
         user_parameters: null,

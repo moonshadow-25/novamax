@@ -176,9 +176,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       });
 
       // 如果 port 没有值，或 Embedding 模型使用了非 Embedding 默认端口，填入正确默认值
-      const isEmbedding = /embedding/i.test(model?.name || model?.id || '');
+      const EMBEDDING_PATTERN = /(?:embedding|embed|sentence[-_ ]?transformer|text2vec|semantic|vector|dpr|contriever|simcse|sbert)/i;
+      const hasEmbeddingFlag = model?.embedding === true || model?.parameters?.embedding === true;
+      const hasEmbeddingKeyword = EMBEDDING_PATTERN.test(model?.name || model?.id || '');
+      const isEmbedding = hasEmbeddingFlag || hasEmbeddingKeyword;
+      const DEFAULT_PORT = isEmbedding ? 1278 : 1234;
       if (formValues.port === undefined || (isEmbedding && formValues.port === 1234)) {
-        formValues.port = isEmbedding ? 1278 : 1234;
+        formValues.port = DEFAULT_PORT;
       }
 
       setCustomParams(isCloudApi ? [] : custom);

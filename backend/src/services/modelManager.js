@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { generateId } from '../utils/fileHelper.js';
 import { DB_PATH, MODELS_RUN_DIR } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
+import { isEmbeddingModelData } from '../utils/embeddingHelper.js';
 
 class ModelManager {
   constructor() {
@@ -127,33 +128,33 @@ class ModelManager {
 
   _isEmbeddingModel(type, modelData) {
     if (type !== 'llm') return false;
-
-    const keywords = [
-      modelData?.name,
-      modelData?.id,
-      modelData?.modelscope_id,
-      modelData?.api_model
-    ].filter(v => typeof v === 'string' && v.trim().length > 0);
-
-    return keywords.some(v => /embedding/i.test(v));
+    return isEmbeddingModelData(modelData);
   }
 
   async create(type, modelData) {
     const normalizedModelData = { ...modelData };
 
-    // Embedding 模型默认注入 embedding=true，统一覆盖所有新增模型入口。
-    if (this._isEmbeddingModel(type, normalizedModelData)) {
-      const baseParams =
-        normalizedModelData.parameters &&
-        typeof normalizedModelData.parameters === 'object' &&
-        !Array.isArray(normalizedModelData.parameters)
-          ? normalizedModelData.parameters
-          : {};
+    if (type === 'llm') {
+      if (normalizedModelData.parameters && typeof normalizedModelData.parameters === 'object' && !Array.isArray(normalizedModelData.parameters)) {
+        if (normalizedModelData.parameters.embedding === true) {
+          normalizedModelData.embedding = true;
+        }
+      }
 
-      normalizedModelData.parameters = {
-        ...baseParams,
-        ...(baseParams.embedding === undefined ? { embedding: true } : {})
-      };
+      if (this._isEmbeddingModel(type, normalizedModelData)) {
+        const baseParams =
+          normalizedModelData.parameters &&
+          typeof normalizedModelData.parameters === 'object' &&
+          !Array.isArray(normalizedModelData.parameters)
+            ? normalizedModelData.parameters
+            : {};
+
+        normalizedModelData.parameters = {
+          ...baseParams,
+          ...(baseParams.embedding === undefined ? { embedding: true } : {})
+        };
+        normalizedModelData.embedding = true;
+      }
     }
 
     const model = {
@@ -178,6 +179,15 @@ class ModelManager {
           ...updates,
           updated_at: new Date().toISOString()
         };
+
+        if (type === 'llm') {
+          if (this._isEmbeddingModel(type, updated)) {
+            updated.embedding = true;
+          } else {
+            delete updated.embedding;
+          }
+        }
+
         this._stmtUpdate.run(JSON.stringify(updated), updated.updated_at, id);
         this.models[type][index] = updated;
         return updated;

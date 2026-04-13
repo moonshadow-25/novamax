@@ -17,14 +17,13 @@ import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
 import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices } from '../utils/serviceRegistrar.js';
+import { isEmbeddingModelData } from '../utils/embeddingHelper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
 
-function isEmbeddingModel(model) {
-  return model?.embedding === true || /embedding/i.test(model?.name || model?.id || '');
-}
+const isEmbeddingModel = isEmbeddingModelData;
 
 class ProcessManager {
   constructor() {
