@@ -12,7 +12,7 @@ import { getModelPath } from '../utils/pathHelper.js';
 import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
 import remoteConfigService from '../services/remoteConfigService.js';
 import modelscopeParser from '../services/modelscopeParser.js';
-import { isEmbeddingModelData, EMBEDDING_PATTERN } from '../utils/embeddingHelper.js';
+import { isEmbeddingModelData, EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
 
 const router = express.Router();
 

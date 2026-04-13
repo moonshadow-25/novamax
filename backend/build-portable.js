@@ -11,7 +11,21 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const RELEASE_DIR = path.join(PROJECT_ROOT, 'release');
 
+// ── 解析 --variant 参数 ──────────────────────────────────────
+// stable（默认）= 正式版，发布 ModelScope
+// beta           = 测试版，上传服务器
+const variantArg = process.argv.find(a => a.startsWith('--variant='));
+const VARIANT = variantArg ? variantArg.split('=')[1] : 'stable';
+if (!['stable', 'beta'].includes(VARIANT)) {
+  console.error(`❌ 未知 variant: ${VARIANT}，可选值: stable | beta`);
+  process.exit(1);
+}
+
+const ARCHIVE_NAME = VARIANT === 'beta' ? 'novamax-beta.7z' : 'novamax.7z';
+
 console.log('\n🚀 开始打包 NovaMax (便携版)...\n');
+console.log(`📌 Variant : ${VARIANT} (${VARIANT === 'beta' ? '测试版 / 上传服务器' : '正式版 / ModelScope'})`);
+console.log(`📦 输出包  : ${ARCHIVE_NAME}\n`);
 
 // 1. 清理旧的发布目录
 console.log('📁 清理发布目录...');
@@ -91,6 +105,9 @@ try {
       ...builtinModules.map(m => `node:${m}`),
     ],
     banner: { js: banner },
+    define: {
+      __BUILD_VARIANT__: JSON.stringify(VARIANT),
+    },
   });
 
   console.log('✅ 后端 esbuild 打包完成');
@@ -152,6 +169,9 @@ if (auxiliaryScripts.length > 0) {
           ...builtinModules.map(m => `node:${m}`),
         ],
         banner: { js: banner },
+        define: {
+          __BUILD_VARIANT__: JSON.stringify(VARIANT),
+        },
       });
       console.log(`✅ 已打包辅助脚本: ${scriptEntry.target}`);
     } catch (error) {
@@ -446,7 +466,7 @@ console.log('');
 
 // 11. 压缩打包
 console.log('\n📦 正在压缩打包...');
-const archiveName = 'novamax.7z';
+const archiveName = ARCHIVE_NAME;
 const archivePath = path.join(PROJECT_ROOT, archiveName);
 
 // 删除旧的压缩包

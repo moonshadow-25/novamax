@@ -17,7 +17,7 @@ import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
 import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices } from '../utils/serviceRegistrar.js';
-import { isEmbeddingModelData } from '../utils/embeddingHelper.js';
+import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

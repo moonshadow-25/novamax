@@ -5,7 +5,7 @@
 
 import axios from 'axios';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
-import { EMBEDDING_PATTERN } from '../utils/embeddingHelper.js';
+import { EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
 
 // 量化类型元数据
 const QUANTIZATION_INFO = {

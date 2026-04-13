@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { generateId } from '../utils/fileHelper.js';
 import { DB_PATH, MODELS_RUN_DIR } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
-import { isEmbeddingModelData } from '../utils/embeddingHelper.js';
+import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
 
 class ModelManager {
   constructor() {

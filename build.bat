@@ -17,13 +17,22 @@ echo  Version : !VERSION!
 :: Parse mode (first argument)
 set "MODE=%~1"
 if /i "!MODE!"=="update" goto :update_mode
+if /i "!MODE!"=="beta"   goto :beta_mode
 
-:: ── Initial Package (default, double-click) ────────────────
+:: ── Initial Package - stable/正式版 (default) ────────────────
 :initial_mode
-echo  Mode    : Initial Package (full 7z)
+echo  Mode    : Initial Package - stable (正式版 / ModelScope)
 echo.
 cd /d "!ROOT!\backend"
-node build-portable.js
+node build-portable.js --variant=stable
+goto :done
+
+:: ── Beta Package - 测试版 ────────────────────────────────────
+:beta_mode
+echo  Mode    : Beta Package (测试版 / 上传服务器)
+echo.
+cd /d "!ROOT!\backend"
+node build-portable.js --variant=beta
 goto :done
 
 :: ── Update Package ─────────────────────────────────────────
@@ -46,7 +55,7 @@ if "!ARG_MINVER!"==""  set "ARG_MINVER=1.0.0"
 echo.
 echo  Building release directory...
 cd /d "!ROOT!\backend"
-node build-portable.js
+node build-portable.js --variant=stable
 if errorlevel 1 (
     echo.
     echo  ERROR: Build failed, aborting.

@@ -6,6 +6,13 @@ import { writeJSON } from '../utils/fileHelper.js';
 import configManager from './configManager.js';
 import modelManager from './modelManager.js';
 import engineManager from './engineManager.js';
+import {
+  BUILD_VARIANT,
+  REMOTE_SERVER_URL_STABLE,
+  REMOTE_SERVER_URL_BETA,
+  REMOTE_MODELS_PATH,
+  REMOTE_ENGINES_PATH,
+} from '../config/appConfig.js';
 
 // 用户可自定义字段（同版本 sync 时保留）
 const USER_FIELDS = [
@@ -35,15 +42,21 @@ function mapRemoteToLocal(remoteFields) {
 }
 
 
+const CHANNEL_URLS = {
+  stable: REMOTE_SERVER_URL_STABLE,
+  beta:   REMOTE_SERVER_URL_BETA,
+};
+
 function getServerUrl() {
-  const channel = getChannel(); // stable | beta | dev
-  const channelKey = `REMOTE_SERVER_URL_${channel.toUpperCase()}`;
-  return process.env[channelKey] || process.env.REMOTE_SERVER_URL_STABLE || 'https://www.firstarpc.com/download/novamax/';
+  const channel = getChannel();
+  return CHANNEL_URLS[channel] || REMOTE_SERVER_URL_STABLE;
 }
 
 function getChannel() {
   const config = configManager.get();
-  return config?.update_settings?.channel || 'stable';
+  // 正式版默认 stable，测试版默认 beta
+  const defaultChannel = BUILD_VARIANT === 'beta' ? 'beta' : 'stable';
+  return config?.update_settings?.channel || defaultChannel;
 }
 
 /**
@@ -66,7 +79,7 @@ function compareVersions(a, b) {
  */
 async function syncModels() {
   const serverUrl = getServerUrl();
-  const modelsPath = process.env.REMOTE_MODELS_PATH || 'models.json';
+  const modelsPath = REMOTE_MODELS_PATH;
   const url = `${serverUrl}${modelsPath}`;
 
   let remoteData;
@@ -150,7 +163,7 @@ async function syncModels() {
  */
 async function syncEngines() {
   const serverUrl = getServerUrl();
-  const enginesPath = process.env.REMOTE_ENGINES_PATH || 'engines.json';
+  const enginesPath = REMOTE_ENGINES_PATH;
   const url = `${serverUrl}${enginesPath}`;
 
   let remoteData;

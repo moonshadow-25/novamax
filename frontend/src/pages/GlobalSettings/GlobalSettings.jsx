@@ -857,7 +857,6 @@ const GlobalSettings = () => {
             >
               <Option value="stable">稳定版</Option>
               <Option value="beta">测试版</Option>
-              <Option value="dev">开发版</Option>
             </Select>
           </Form.Item>
           <Button onClick={handleCheckUpdate} loading={checking}>
