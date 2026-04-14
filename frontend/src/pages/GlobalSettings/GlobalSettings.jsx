@@ -25,6 +25,8 @@ const GlobalSettings = () => {
   // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState(null);
   const [restarting, setRestarting] = useState(false);
+  const [restartCountdown, setRestartCountdown] = useState(5);
+  const [autoUpdate, setAutoUpdate] = useState(false);
 
   // 引擎相关状态
   const [engines, setEngines] = useState({});
@@ -85,7 +87,25 @@ const GlobalSettings = () => {
 
     // SSE 监听下载进度
     const es = new EventSource('/api/events');
-    es.addEventListener('download-progress', () => loadEngines());
+    es.addEventListener('download-progress', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        if (data.engineId === 'app' && data.status === 'restarting') {
+          setRestarting(true);
+        }
+      } catch {}
+      loadEngines();
+    });
+    // SSE 断开时，若 app 正在下载/重启中，进入重启等待
+    es.onerror = () => {
+      setEngines(prev => {
+        const appState = prev['app']?.download_state;
+        if (appState && ['downloading', 'unpacking', 'restarting'].includes(appState.status)) {
+          setRestarting(true);
+        }
+        return prev;
+      });
+    };
 
     return () => es.close();
   }, []);
@@ -146,28 +166,41 @@ const GlobalSettings = () => {
 
   // 监听 app 下载状态变化
   useEffect(() => {
-    if (!appDownloadState) return;
-    if (appDownloadState.status === 'restarting') {
-      // 下载完成，后端自动重启中
+    if (appDownloadState?.status === 'restarting') {
       setRestarting(true);
-      const poll = setInterval(async () => {
-        try {
-          await fetch('/api/health');
-          clearInterval(poll);
-          window.location.href = '/';
-        } catch {}
-      }, 2000);
-    } else if (appDownloadState.status === 'failed') {
+    } else if (appDownloadState?.status === 'failed') {
       message.error(`下载失败: ${appDownloadState.error || '未知错误'}`);
     }
   }, [appDownloadState?.status]);
+
+  // restarting 变为 true 时启动倒计时 + 轮询
+  useEffect(() => {
+    if (!restarting) return;
+    let countdown = 5;
+    setRestartCountdown(countdown);
+    const countTimer = setInterval(() => {
+      countdown--;
+      setRestartCountdown(Math.max(0, countdown));
+      if (countdown <= 0) clearInterval(countTimer);
+    }, 1000);
+    const poll = setInterval(async () => {
+      try {
+        await fetch('/api/health');
+        clearInterval(poll);
+        clearInterval(countTimer);
+        window.location.href = '/';
+      } catch {}
+    }, 2000);
+    return () => { clearInterval(poll); clearInterval(countTimer); };
+  }, [restarting]);
 
   const loadSettings = async () => {
     try {
       const updateResult = await configService.getUpdateSettings();
       const s = updateResult.updateSettings || {};
+      const autoCheckVal = s.auto_check ?? false;
+      setAutoUpdate(autoCheckVal);
       form.setFieldsValue({
-        auto_check: s.auto_check ?? true,
         channel: s.channel || 'stable',
         server_url: s.server_url || ''
       });
@@ -505,9 +538,8 @@ const GlobalSettings = () => {
     if (!updateInfo?.engineId || !updateInfo?.version) return;
     try {
       await engineService.download(updateInfo.engineId, updateInfo.version);
-      // 进度由 engines.app.download_state 驱动，SSE + 轮询已在 useEffect 中处理
     } catch (err) {
-      message.error('启动下载失败');
+      message.error(`启动下载失败: ${err?.response?.data?.error || err.message}`);
     }
   };
 
@@ -824,16 +856,19 @@ const GlobalSettings = () => {
   const renderUpdateContent = () => (
     <Card title="更新设置">
       <Form form={form} layout="vertical">
-        <Form.Item name="auto_check" valuePropName="checked">
+        <Form.Item>
           <Space>
-            <span>自动检查更新</span>
-            <Switch onChange={async (val) => {
-              await configService.setUpdateSettings({
-                auto_check: val,
-                channel: form.getFieldValue('channel'),
-                last_check: null
-              });
-            }} />
+            <span>自动更新</span>
+            <Switch
+              checked={autoUpdate}
+              onChange={async (val) => {
+                setAutoUpdate(val);
+                await configService.setUpdateSettings({
+                  auto_check: val,
+                  channel: form.getFieldValue('channel') || 'stable',
+                });
+              }}
+            />
           </Space>
         </Form.Item>
 
@@ -848,9 +883,8 @@ const GlobalSettings = () => {
               style={{ width: 160 }}
               onChange={async (val) => {
                 await configService.setUpdateSettings({
-                  auto_check: form.getFieldValue('auto_check'),
+                  auto_check: autoUpdate,
                   channel: val,
-                  last_check: null
                 });
                 handleCheckUpdate();
               }}
@@ -1352,7 +1386,9 @@ const GlobalSettings = () => {
         }}>
           <Spin size="large" />
           <span style={{ color: '#fff', fontSize: 16 }}>
-            {restarting ? '正在更新重启中，请稍候...' : '正在解压安装，即将重启...'}
+            {restarting
+              ? `更新完成，应用将在 ${restartCountdown} 秒后重启...`
+              : '正在解压安装，即将重启...'}
           </span>
         </div>
       )}

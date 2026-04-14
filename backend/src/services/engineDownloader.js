@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import * as tar from 'tar';
+import axios from 'axios';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 import engineManager from './engineManager.js';
@@ -169,6 +170,9 @@ class EngineDownloader {
 
   /**
    * 下载单个引擎
+   * 支持两种方式：
+   *   - download_url：直接 HTTP 下载（测试版）
+   *   - modelscope_repo + modelscope_file：ModelScope 下载（正式版）
    */
   async _downloadEngine(engineId, version) {
     const engine = engineManager.getEngine(engineId);
@@ -177,9 +181,13 @@ class EngineDownloader {
     const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
     fs.mkdirSync(downloadDir, { recursive: true });
 
-    const filePath = path.join(downloadDir, path.basename(versionInfo.modelscope_file));
+    // 确定文件名
+    const filename = versionInfo.download_url
+      ? path.basename(new URL(versionInfo.download_url).pathname)
+      : path.basename(versionInfo.modelscope_file);
+    const filePath = path.join(downloadDir, filename);
 
-    // 清理上次可能残留的不完整压缩包，确保每次都是全新下载
+    // 清理上次可能残留的不完整压缩包
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       console.log(`[engineDownloader] Removed stale archive before download: ${filePath}`);
@@ -187,9 +195,12 @@ class EngineDownloader {
 
     // 下载
     try {
-      await this._execDownload(engineId, version, engine.modelscope_repo, versionInfo.modelscope_file, downloadDir);
+      if (versionInfo.download_url) {
+        await this._execHttpDownload(engineId, version, versionInfo.download_url, filePath);
+      } else {
+        await this._execDownload(engineId, version, engine.modelscope_repo, versionInfo.modelscope_file, downloadDir);
+      }
     } catch (err) {
-      // 下载失败时清理不完整的压缩包
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         console.log(`[engineDownloader] Cleaned up incomplete archive after download failure: ${filePath}`);
@@ -289,6 +300,37 @@ class EngineDownloader {
       proc.on('error', (error) => {
         reject(error);
       });
+    });
+  }
+
+  /**
+   * HTTP 直接下载（测试版 download_url 方式）
+   */
+  async _execHttpDownload(engineId, version, url, filePath) {
+    console.log(`[engineDownloader] HTTP download: ${url}`);
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      timeout: 0,
+    });
+
+    const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+    let downloadedBytes = 0;
+
+    await new Promise((resolve, reject) => {
+      const writer = fs.createWriteStream(filePath);
+      response.data.on('error', reject);
+      response.data.on('data', (chunk) => {
+        downloadedBytes += chunk.length;
+        if (totalBytes > 0) {
+          const progress = Math.floor((downloadedBytes / totalBytes) * 100);
+          downloadStateManager.updateProgress(engineId, progress, 0, version);
+          downloadStateManager.updateBytes(engineId, downloadedBytes, totalBytes, version);
+          eventBus.broadcast('download-progress', { engineId });
+        }
+      });
+      response.data.pipe(writer);
+      writer.on('finish', resolve);
+      writer.on('error', reject);
     });
   }
 

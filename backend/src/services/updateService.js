@@ -6,21 +6,9 @@ import { DATA_DIR, PROJECT_ROOT } from '../config/constants.js';
 const UPDATES_DIR = path.join(DATA_DIR, 'updates');
 const PENDING_FILE = path.join(UPDATES_DIR, 'pending');
 
-let downloadState = {
-  status: 'idle',
-  progress: 0,
-  error: null
-};
-
-function getState() {
-  return { ...downloadState };
-}
-
 /**
  * 应用更新并重启：
- * 1. 生成临时重启脚本（等旧进程释放端口后启动新进程）
- * 2. 以 detached 方式运行脚本
- * 3. 退出当前进程
+ * 直接 spawn 新 node 进程（detached + windowsHide），旧进程延迟退出
  */
 async function applyUpdate() {
   if (!fs.existsSync(PENDING_FILE)) {
@@ -29,34 +17,21 @@ async function applyUpdate() {
 
   console.log('[updateService] 已检测到 pending 标记，准备重启...');
 
-  const entryScript = path.join(PROJECT_ROOT, 'backend', process.env.NODE_ENV === 'production' ? 'dist' : 'src', 'index.js').replace(/\\/g, '/');
-  const nodeExe = process.execPath.replace(/\\/g, '/');
-  const cwd = path.join(PROJECT_ROOT, 'backend').replace(/\\/g, '/');
+  const srcDir = fs.existsSync(path.join(PROJECT_ROOT, 'backend', 'dist', 'index.js')) ? 'dist' : 'src';
+  const entryScript = path.join(PROJECT_ROOT, 'backend', srcDir, 'index.js');
+  const nodeExe = process.execPath;
+  const cwd = path.join(PROJECT_ROOT, 'backend');
 
-  // 写一个临时 bat 脚本：等待 2 秒后启动新进程
-  const restartScript = path.join(DATA_DIR, 'updates', '_restart.bat');
-  fs.mkdirSync(path.dirname(restartScript), { recursive: true });
-  fs.writeFileSync(restartScript, [
-    '@echo off',
-    'timeout /t 2 /nobreak >nul',
-    `cd /d "${cwd}"`,
-    `start "" "${nodeExe}" "${entryScript}"`,
-    `del "%~f0"`,
-    ''
-  ].join('\r\n'), 'utf-8');
-
-  // detached 运行重启脚本
-  const child = spawn('cmd', ['/c', restartScript], {
+  const child = spawn(nodeExe, [entryScript], {
+    cwd,
     detached: true,
     stdio: 'ignore',
-    windowsHide: true
+    windowsHide: true,
   });
   child.unref();
 
-  console.log('[updateService] 重启脚本已启动，即将退出当前进程...');
-
-  // 延迟退出，让 HTTP 响应先发出
+  console.log('[updateService] 新进程已启动，即将退出当前进程...');
   setTimeout(() => process.exit(0), 500);
 }
 
-export default { applyUpdate, getState };
+export default { applyUpdate, getState: () => ({ status: 'idle' }) };

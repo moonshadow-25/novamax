@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -68,9 +68,40 @@ function Home() {
 
   // 应用更新
   const [updateInfo, setUpdateInfo] = useState(null);
-  // 引擎更新
-  const [engineUpdates, setEngineUpdates] = useState([]);
+  // 引擎列表（含下载状态，SSE 变化时刷新）
+  const [allEngines, setAllEngines] = useState({});
   const [dismissedEngineUpdates, setDismissedEngineUpdates] = useState(new Set());
+
+  // 从引擎列表派生需要提示的 banner（下载中的引擎及其依赖自动隐藏）
+  const engineUpdates = useMemo(() => {
+    const downloadingIds = new Set(
+      Object.entries(allEngines)
+        .filter(([, e]) => e.download_states?.some(
+          s => ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status)
+        ))
+        .map(([id]) => id)
+    );
+    for (const [id, engine] of Object.entries(allEngines)) {
+      if (downloadingIds.has(id)) {
+        (engine.dependencies || []).forEach(depId => downloadingIds.add(depId));
+      }
+    }
+    const updates = [];
+    for (const [id, engine] of Object.entries(allEngines)) {
+      if (engine.category === 'app') continue;
+      if (id === 'tts' || id === 'whisper') continue;
+      if (!engine.versions?.length) continue;
+      if (downloadingIds.has(id)) continue;
+      if (dismissedEngineUpdates.has(id)) continue;
+      const latestVersion = engine.versions[0].version;
+      if (!engine.installed) {
+        updates.push({ id, name: engine.name, latestVersion, installed: false, dependencies: engine.dependencies || [] });
+      } else if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
+        updates.push({ id, name: engine.name, latestVersion, installed: true, dependencies: engine.dependencies || [] });
+      }
+    }
+    return updates;
+  }, [allEngines, dismissedEngineUpdates]);
 
   useEffect(() => {
     configService.getFavorites().then(res => {
@@ -86,25 +117,13 @@ function Home() {
     }).catch(() => {});
 
     // 检查引擎更新/未安装
-    engineService.getAll().then(engines => {
-      const updates = [];
-      for (const [id, engine] of Object.entries(engines)) {
-        if (engine.category === 'app') continue;
-        if (id === 'tts' || id === 'whisper') continue;
-        if (!engine.versions?.length) continue;
-        const latestVersion = engine.versions[0].version;
-        const isDownloading = engine.download_states?.some(
-          s => s.status === 'downloading' || s.status === 'paused'
-        );
-        if (isDownloading) continue;
-        if (!engine.installed) {
-          updates.push({ id, name: engine.name, latestVersion, installed: false });
-        } else if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
-          updates.push({ id, name: engine.name, latestVersion, installed: true });
-        }
-      }
-      setEngineUpdates(updates);
-    }).catch(() => {});
+    const loadEngines = () => engineService.getAll().then(engines => setAllEngines(engines)).catch(() => {});
+    loadEngines();
+
+    // SSE 监听引擎下载状态变化，实时更新 banner
+    const es = new EventSource('/api/events');
+    es.addEventListener('download-progress', () => loadEngines());
+    return () => es.close();
   }, []);
 
   // 加载 ComfyUI 实例列表
@@ -289,7 +308,7 @@ function Home() {
           <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
         </div>
       )}
-      {engineUpdates.filter(e => !dismissedEngineUpdates.has(e.id)).map(engine => (
+      {engineUpdates.map(engine => (
         <div key={engine.id} className="update-banner engine-update-banner">
           <div className="update-banner-content">
             <ToolOutlined className="update-banner-icon" />
@@ -302,7 +321,8 @@ function Home() {
               type="primary"
               size="small"
               onClick={async () => {
-                setDismissedEngineUpdates(prev => new Set([...prev, engine.id]));
+                const deps = allEngines[engine.id]?.dependencies || [];
+                setDismissedEngineUpdates(prev => new Set([...prev, engine.id, ...deps]));
                 try {
                   await engineService.download(engine.id, engine.latestVersion);
                   message.success(`${engine.name} 开始下载`);

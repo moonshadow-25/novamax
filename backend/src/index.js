@@ -11,6 +11,7 @@ import configManager from './services/configManager.js';
 import modelManager from './services/modelManager.js';
 import downloadService from './services/downloadService.js';
 import engineManager from './services/engineManager.js';
+import engineDownloader from './services/engineDownloader.js';
 import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
@@ -121,13 +122,20 @@ async function init() {
   Promise.all([
     remoteConfigService.syncModels(),
     remoteConfigService.syncEngines()
-  ]).then(() => {
-    // 启动时若开启了自动检查更新，在引擎配置同步完成后执行一次
+  ]).then(async () => {
     const cfg = configManager.get();
-    if (cfg?.update_settings?.auto_check !== false) {
-      remoteConfigService.checkUpdate().catch(err =>
-        console.warn('[update] 自动检查更新失败:', err.message)
-      );
+    const autoUpdate = cfg?.update_settings?.auto_check === true;
+    if (!autoUpdate) return;
+
+    // 启动时静默检查更新，有新版本则自动下载安装
+    try {
+      const result = await remoteConfigService.checkUpdate();
+      if (result?.hasUpdate) {
+        console.log(`[update] 发现新版本 ${result.latestVersion}，开始自动更新...`);
+        await engineDownloader.startDownloadWithDependencies('app', result.latestVersion);
+      }
+    } catch (err) {
+      console.warn('[update] 自动更新失败:', err.message);
     }
   }).catch(err => console.warn('[remoteConfig] 启动同步失败:', err.message));
 }

@@ -41,7 +41,14 @@ class ConfigManager {
     if (row) {
       // DB 中已有配置
       try {
-        this.config = JSON.parse(row.value);
+        const parsed = JSON.parse(row.value);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          this.config = parsed;
+        } else {
+          console.warn('[ConfigDB] 配置格式异常（非对象），重置为默认配置');
+          this.config = this.getDefaultConfig();
+          this._persist();
+        }
       } catch (e) {
         console.error('[ConfigDB] 解析配置失败，使用默认配置:', e.message);
         this.config = this.getDefaultConfig();
