@@ -302,7 +302,7 @@ class ProcessManager {
           rpcArg = allDevices.join(',');
           console.log(`[RPC] 启用多机互联: ${rpcArg}`);
         } catch (rpcErr) {
-          console.warn(`[RPC] 启动本地 rpc-server 失败，跳过 RPC: ${rpcErr.message}`);
+          throw new Error(`RPC 多机互联启动失败: ${rpcErr.message}`);
         }
       }
 

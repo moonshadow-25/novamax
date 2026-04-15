@@ -3,7 +3,7 @@ import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Bad
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
-import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService } from '../../services/api';
+import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
@@ -260,6 +260,51 @@ function Home() {
   const customModels = models.filter(m => m.source === 'custom');
   const cloudApiModels = models.filter(m => m.source === 'cloudapi');
 
+  useEffect(() => {
+    if (activeTab !== 'llm') return;
+
+    const checkSlaveModeStatus = async () => {
+      try {
+        const status = await multiConnectService.getStatus();
+        const isEnabled = status?.status === 'enabled' || status?.status === 1 || status?.status === true;
+        if (isEnabled) {
+          setMultiConnectVisible(true);
+        }
+      } catch {
+        // 忽略检测失败，避免影响首页加载
+      }
+    };
+
+    checkSlaveModeStatus();
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleSlaveModeEnabled = () => {
+      setMultiConnectVisible(true);
+    };
+
+    window.addEventListener('slaveModeEnabled', handleSlaveModeEnabled);
+    return () => window.removeEventListener('slaveModeEnabled', handleSlaveModeEnabled);
+  }, []);
+
+  const handleCloseMultiConnectModal = async () => {
+    try {
+      const status = await multiConnectService.getStatus();
+      const isEnabled = status?.status === 'enabled' || status?.status === 1 || status?.status === true;
+      if (isEnabled) {
+        setMultiConnectVisible(true);
+      } else {
+        setMultiConnectVisible(false);
+      }
+    } catch {
+      setMultiConnectVisible(false);
+    }
+  };
+
+  const handleOpenMultiConnectModal = () => {
+    setMultiConnectVisible(true);
+  };
+
   return (
     <Layout className="home-layout">
       <Header className="home-header">
@@ -277,7 +322,7 @@ function Home() {
               <Button
                 type="text"
                 icon={<WifiOutlined />}
-                onClick={() => setMultiConnectVisible(true)}
+                onClick={handleOpenMultiConnectModal}
                 title="多机互联"
               >
                 多机互联
@@ -460,7 +505,7 @@ function Home() {
       />
       <MultiConnectModal
         visible={multiConnectVisible}
-        onClose={() => setMultiConnectVisible(false)}
+        onClose={handleCloseMultiConnectModal}
       />
     </Layout>
   );

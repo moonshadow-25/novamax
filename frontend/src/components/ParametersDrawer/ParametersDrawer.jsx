@@ -25,12 +25,10 @@ import {
   PlusOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
-  FolderOpenOutlined,
-  WifiOutlined
+  FolderOpenOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
-import { engineService, modelService, backendService, multiConnectService } from '../../services/api';
-import MultiConnectModal from '../MultiConnectModal/MultiConnectModal';
+import { engineService, modelService, backendService } from '../../services/api';
 import './ParametersDrawer.css';
 
 const { Panel } = Collapse;
@@ -56,13 +54,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   const [multiHost, setMultiHost] = useState(false);
   const [reasoningOn, setReasoningOn] = useState(false);
 
+  const isCloudApi = model?.source === 'cloudapi';
+
   // RPC 多机互联（主机端）
+  const showRpcSettings = model?.type === 'llm' && !isCloudApi;
   const [rpcEnable, setRpcEnable] = useState(false);
   const [rpcDevices, setRpcDevices] = useState([]); // string[]
   const [newRpcDevice, setNewRpcDevice] = useState('');
-  const [slaveModalVisible, setSlaveModalVisible] = useState(false);
-
-  const isCloudApi = model?.source === 'cloudapi';
 
   useEffect(() => {
     if (visible && modelId) {
@@ -212,7 +210,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options = {}) => {
+    const {
+      rpcEnableOverride,
+      rpcDevicesOverride,
+      successText = '参数已保存',
+      silentSuccess = false
+    } = options;
+
     try {
       setLoading(true);
       const values = await form.validateFields();
@@ -247,16 +252,18 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         // reasoning 开关始终保存为 on/off
         allParams.reasoning = reasoningOn ? 'on' : 'off';
         // RPC 多机互联
-        allParams.rpc_enable = rpcEnable;
-        allParams.rpc_devices = rpcDevices.filter(Boolean);
+        allParams.rpc_enable = rpcEnableOverride ?? rpcEnable;
+        allParams.rpc_devices = (rpcDevicesOverride ?? rpcDevices).filter(Boolean);
       }
 
       await axios.put(`/api/parameters/${modelId}`, {
         parameters: allParams
       });
 
-      message.success('参数已保存');
-      loadParameters();
+      if (!silentSuccess) {
+        message.success(successText);
+      }
+      await loadParameters();
     } catch (error) {
       message.error('保存失败');
     } finally {
@@ -307,6 +314,36 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     } catch (error) {
       message.error('添加失败');
     }
+  };
+
+  const addRpcDevice = async () => {
+    const candidate = newRpcDevice.trim();
+    if (!candidate) return;
+
+    const exists = rpcDevices.some(device => device.trim().toLowerCase() === candidate.toLowerCase());
+    if (exists) {
+      message.warning('该从机地址已存在');
+      return;
+    }
+
+    const nextDevices = [...rpcDevices, candidate];
+    setRpcDevices(nextDevices);
+    setNewRpcDevice('');
+    await handleSave({
+      rpcEnableOverride: rpcEnable,
+      rpcDevicesOverride: nextDevices,
+      successText: '已添加从机地址'
+    });
+  };
+
+  const removeRpcDevice = async (index) => {
+    const nextDevices = rpcDevices.filter((_, i) => i !== index);
+    setRpcDevices(nextDevices);
+    await handleSave({
+      rpcEnableOverride: rpcEnable,
+      rpcDevicesOverride: nextDevices,
+      successText: '已删除从机地址'
+    });
   };
 
   const handleDeleteCustom = async (key) => {
@@ -537,6 +574,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 {/* <Divider style={{ margin: '4px 0 16px' }} /> */}
 
                 {/* RPC 多机互联（主机端） */}
+                {showRpcSettings && (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
                     <Space style={{ marginRight: 12 }}>
@@ -547,18 +585,17 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     </Space>
                     <Switch
                       checked={rpcEnable}
-                      onChange={v => setRpcEnable(v)}
+                      onChange={async (v) => {
+                        setRpcEnable(v);
+                        await handleSave({
+                          rpcEnableOverride: v,
+                          rpcDevicesOverride: rpcDevices,
+                          successText: v ? '已开启 RPC 多机互联' : '已关闭 RPC 多机互联'
+                        });
+                      }}
                       checkedChildren="开"
                       unCheckedChildren="关"
                     />
-                    <Button
-                      size="small"
-                      icon={<WifiOutlined />}
-                      style={{ marginLeft: 12 }}
-                      onClick={() => setSlaveModalVisible(true)}
-                    >
-                      从机设置
-                    </Button>
                   </div>
 
                   {rpcEnable && (
@@ -583,7 +620,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                             <Button
                               danger
                               icon={<DeleteOutlined />}
-                              onClick={() => setRpcDevices(rpcDevices.filter((_, i) => i !== idx))}
+                              onClick={() => removeRpcDevice(idx)}
                             />
                           </Col>
                         </Row>
@@ -594,30 +631,21 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                             placeholder="添加从机地址"
                             value={newRpcDevice}
                             onChange={e => setNewRpcDevice(e.target.value)}
-                            onPressEnter={() => {
-                              if (newRpcDevice.trim()) {
-                                setRpcDevices([...rpcDevices, newRpcDevice.trim()]);
-                                setNewRpcDevice('');
-                              }
-                            }}
+                            onPressEnter={addRpcDevice}
                           />
                         </Col>
                         <Col>
                           <Button
                             type="dashed"
                             icon={<PlusOutlined />}
-                            onClick={() => {
-                              if (newRpcDevice.trim()) {
-                                setRpcDevices([...rpcDevices, newRpcDevice.trim()]);
-                                setNewRpcDevice('');
-                              }
-                            }}
+                            onClick={addRpcDevice}
                           />
                         </Col>
                       </Row>
                     </div>
                   )}
                 </div>
+                )}
               </>
             )}
 
@@ -746,11 +774,6 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       </Space>
     </Modal>
 
-    {/* 从机模式设置弹窗 */}
-    <MultiConnectModal
-      visible={slaveModalVisible}
-      onClose={() => setSlaveModalVisible(false)}
-    />
   </>
   );
 }

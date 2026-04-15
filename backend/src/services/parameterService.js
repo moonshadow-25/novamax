@@ -2,6 +2,14 @@ import modelManager from './modelManager.js';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 
 class ParameterService {
+  _sanitizeByModelSource(model, params) {
+    if (model?.source === 'cloudapi') {
+      const { rpc_enable, rpc_devices, ...rest } = params;
+      return rest;
+    }
+    return params;
+  }
+
   /**
    * 获取模型的有效参数（用户参数优先，带版本控制）
    */
@@ -58,7 +66,21 @@ class ParameterService {
     const defaultVersion = model.parameters?.version || '1.0.0';
 
     // 移除 version 字段（版本号由默认参数控制）
-    const { version, _source, _version, _note, ...cleanParams } = userParams;
+    const { version, _source, _version, _note, ...cleanParamsRaw } = userParams;
+    const cleanParams = this._sanitizeByModelSource(model, cleanParamsRaw);
+
+    // 归一化 RPC 参数：关闭且无设备时视为“未配置”，避免仅开关来回导致进入用户自定义状态
+    if (cleanParams.rpc_enable !== true) {
+      delete cleanParams.rpc_enable;
+    }
+    const normalizedRpcDevices = Array.isArray(cleanParams.rpc_devices)
+      ? cleanParams.rpc_devices.map(v => String(v).trim()).filter(Boolean)
+      : [];
+    if (normalizedRpcDevices.length === 0) {
+      delete cleanParams.rpc_devices;
+    } else {
+      cleanParams.rpc_devices = normalizedRpcDevices;
+    }
 
     // 判断提交的参数是否与默认完全一致，若是则存 null（显示"默认配置"）
     // 注意：折叠面板未展开时 Ant Design Form 不挂载字段，port 等 key 可能不在 cleanParams 里，
@@ -161,7 +183,7 @@ class ParameterService {
     }
 
     // 从 user_parameters 里移除
-    const currentParams = model.user_parameters || {};
+    const currentParams = this._sanitizeByModelSource(model, model.user_parameters || {});
     const { [key]: removed, ...remainingParams } = currentParams;
 
     // 同时从 parameters（默认参数）里移除，防止它通过 defaultParams 合并回来

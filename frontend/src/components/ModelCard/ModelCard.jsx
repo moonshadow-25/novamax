@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer, Spin, Popconfirm } from 'antd';
+import { Card, Button, Space, Tag, Progress, message, Modal, Input, Descriptions, Typography, Divider, Drawer, Spin, Popconfirm, Alert } from 'antd';
 import {
   PlayCircleOutlined,
   StopOutlined,
@@ -19,10 +19,13 @@ import {
   LoadingOutlined,
   CloseCircleOutlined,
   WarningOutlined,
-  CloudOutlined
+  CloudOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  RedoOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { backendService, modelService, downloadService, comfyuiService, engineService } from '../../services/api';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
@@ -94,6 +97,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [engineInfo, setEngineInfo] = useState(null);
   const [engineTarget, setEngineTarget] = useState('comfyui'); // 当前引擎目标
 
+  // RPC 启动前验证弹窗
+  const [rpcValidationVisible, setRpcValidationVisible] = useState(false);
+  const [rpcValidationBusy, setRpcValidationBusy] = useState(false);
+  const [rpcValidationError, setRpcValidationError] = useState('');
+  const [rpcValidationDeviceCount, setRpcValidationDeviceCount] = useState(0);
+  const [rpcValidationDevices, setRpcValidationDevices] = useState([]);
+  const [rpcValidationSteps, setRpcValidationSteps] = useState([]);
+
   // 弹框打开时始终轮询，关闭时停止
   useEffect(() => {
     if (!quantizationSelectorVisible) {
@@ -123,6 +134,100 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantizationSelectorVisible]);
 
+  const updateRpcStep = (stepId, status, messageText) => {
+    setRpcValidationSteps(prev => prev.map(step => (
+      step.id === stepId ? { ...step, status, message: messageText } : step
+    )));
+  };
+
+  const runRpcValidation = async (devices) => {
+    setRpcValidationBusy(true);
+    setRpcValidationError('');
+
+    const steps = [
+      { id: 'usb-check', title: '验证USB4网络连接', status: 'pending', message: '等待验证...' },
+      { id: 'ip-config', title: '验证本机IP配置', status: 'pending', message: '等待验证...' },
+      ...devices.map((device, index) => ({
+        id: `device-${index}`,
+        title: `验证设备 ${device}`,
+        status: 'pending',
+        message: '等待验证...'
+      }))
+    ];
+    setRpcValidationSteps(steps);
+
+    try {
+      updateRpcStep('usb-check', 'loading', '验证中...');
+      const usbStatus = await multiConnectService.getUSBNetworkStatus();
+      if (!usbStatus?.connected) {
+        updateRpcStep('usb-check', 'error', '验证失败');
+        setRpcValidationError('验证失败：未检测到 USB4/直连网卡连接');
+        return false;
+      }
+      updateRpcStep('usb-check', 'success', '验证通过');
+
+      updateRpcStep('ip-config', 'loading', '验证中...');
+      const ipResult = await multiConnectService.configureUSBNetwork('169.254.30.100', '255.255.0.0');
+      if (ipResult?.success === false) {
+        updateRpcStep('ip-config', 'error', '验证失败');
+        setRpcValidationError(ipResult?.error || '验证失败：本机IP配置失败');
+        return false;
+      }
+      updateRpcStep('ip-config', 'success', '验证通过');
+
+      for (let i = 0; i < devices.length; i++) {
+        const device = devices[i];
+        const stepId = `device-${i}`;
+        updateRpcStep(stepId, 'loading', '验证中...');
+        const result = await multiConnectService.validateRpcDevice(device);
+        if (!result?.reachable) {
+          updateRpcStep(stepId, 'error', '验证失败');
+          setRpcValidationError(`验证失败：设备 ${device} 不可达${result?.error ? ` (${result.error})` : ''}`);
+          return false;
+        }
+        updateRpcStep(stepId, 'success', '验证通过');
+      }
+
+      return true;
+    } catch (error) {
+      setRpcValidationError(error?.response?.data?.error || error?.message || '验证过程中发生错误');
+      return false;
+    } finally {
+      setRpcValidationBusy(false);
+    }
+  };
+
+  const prepareRpcValidationAndStart = async () => {
+    const paramData = await parameterService.get(model.id);
+    const params = paramData?.parameters || {};
+    const rpcEnable = params?.rpc_enable === true;
+    const rpcDevices = Array.isArray(params?.rpc_devices) ? params.rpc_devices.map(v => String(v).trim()).filter(Boolean) : [];
+
+    if (!rpcEnable) {
+      return true;
+    }
+
+    if (rpcDevices.length === 0) {
+      message.warning('请先添加至少一个从机地址');
+      return false;
+    }
+
+    setRpcValidationDevices(rpcDevices);
+    setRpcValidationDeviceCount(rpcDevices.length);
+    setRpcValidationVisible(true);
+
+    const passed = await runRpcValidation(rpcDevices);
+    if (passed) {
+      setRpcValidationVisible(false);
+    }
+    return passed;
+  };
+
+  const handleRetryRpcValidation = async () => {
+    if (rpcValidationDevices.length === 0) return;
+    await runRpcValidation(rpcValidationDevices);
+  };
+
   const handleStart = async () => {
     setLoading(true);
     try {
@@ -137,6 +242,12 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           return;
         }
       }
+
+      if (model.type === 'llm' && model.source !== 'cloudapi') {
+        const passed = await prepareRpcValidationAndStart();
+        if (!passed) return;
+      }
+
       await doStartModel();
     } catch (error) {
       const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
@@ -641,6 +752,13 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
   const modelSize = currentQuant?.total_size || currentQuant?.file?.size || totalSize || 0;
 
+  const renderRpcStepIcon = (status) => {
+    if (status === 'success') return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
+    if (status === 'error') return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+    if (status === 'loading') return <LoadingOutlined style={{ color: '#1677ff' }} spin />;
+    return <ExclamationCircleOutlined style={{ color: '#bfbfbf' }} />;
+  };
+
   return (
     <Card className="model-card" hoverable>
       <div className="model-header">
@@ -891,6 +1009,65 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </Button>
         </Space>
       )}
+
+      <Modal
+        title="多机互连设备验证"
+        open={rpcValidationVisible}
+        footer={null}
+        closable={!rpcValidationBusy}
+        maskClosable={false}
+        onCancel={() => {
+          if (!rpcValidationBusy) setRpcValidationVisible(false);
+        }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div style={{ color: '#666' }}>
+            正在验证 <strong>{rpcValidationDeviceCount}</strong> 个设备的连接状态
+          </div>
+
+          {rpcValidationSteps.map((step) => (
+            <div
+              key={step.id}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: '1px solid #f0f0f0'
+              }}
+            >
+              <div style={{ marginTop: 2 }}>{renderRpcStepIcon(step.status)}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500 }}>{step.title}</div>
+                <div style={{ color: step.status === 'error' ? '#ff4d4f' : '#8c8c8c', fontSize: 12 }}>
+                  {step.message}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {rpcValidationError ? (
+            <Alert
+              type="error"
+              showIcon
+              message={rpcValidationError}
+            />
+          ) : null}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              type="primary"
+              danger
+              icon={<RedoOutlined />}
+              onClick={handleRetryRpcValidation}
+              loading={rpcValidationBusy}
+            >
+              重新验证
+            </Button>
+          </div>
+        </Space>
+      </Modal>
 
       {/* ComfyUI 启动确认 Modal */}
       <Modal

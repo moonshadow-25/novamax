@@ -105,7 +105,14 @@ export function generateSingleModelCommand(model, port, options = {}) {
 
   for (const [key, value] of Object.entries(effectiveParams)) {
     // 跳过内部字段、已处理的参数、采样参数
-    if (key.startsWith('_') || key === 'version' || defaults.hasOwnProperty(key) || samplingParams.includes(key)) {
+    if (
+      key.startsWith('_') ||
+      key === 'version' ||
+      key === 'rpc_enable' ||
+      key === 'rpc_devices' ||
+      defaults.hasOwnProperty(key) ||
+      samplingParams.includes(key)
+    ) {
       continue;
     }
 
