@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined } from '@ant-design/icons';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
 import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService } from '../../services/api';
@@ -9,6 +9,7 @@ import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
 import ComfyUIInstanceCard from '../../components/ComfyUIInstanceCard/ComfyUIInstanceCard';
 import ComfyUIInstanceSettings from '../../components/ComfyUIInstanceSettings/ComfyUIInstanceSettings';
+import MultiConnectModal from '../../components/MultiConnectModal/MultiConnectModal';
 import './Home.css';
 
 const { Header, Content } = Layout;
@@ -65,6 +66,7 @@ function Home() {
   const [comfyuiInstances, setComfyuiInstances] = useState([]);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [currentInstance, setCurrentInstance] = useState(null);
+  const [multiConnectVisible, setMultiConnectVisible] = useState(false);
 
   // 应用更新
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -271,6 +273,16 @@ function Home() {
             style={{ width: 400 }}
           />
           <Space size={4}>
+            {activeTab === 'llm' && (
+              <Button
+                type="text"
+                icon={<WifiOutlined />}
+                onClick={() => setMultiConnectVisible(true)}
+                title="多机互联"
+              >
+                多机互联
+              </Button>
+            )}
             <Badge count={downloadingCount} size="small">
               <Button
                 type="text"
@@ -445,6 +457,10 @@ function Home() {
         onClose={() => setSettingsVisible(false)}
         onSave={loadComfyUIInstances}
         onDelete={loadComfyUIInstances}
+      />
+      <MultiConnectModal
+        visible={multiConnectVisible}
+        onClose={() => setMultiConnectVisible(false)}
       />
     </Layout>
   );

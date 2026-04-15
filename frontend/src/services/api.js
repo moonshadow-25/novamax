@@ -213,4 +213,14 @@ export const parameterService = {
   getMetadata: () => api.get('/parameters/metadata/all')
 };
 
+export const multiConnectService = {
+  getStatus: () => api.get('/multiconnect/status'),
+  checkUSB4: () => api.get('/multiconnect/check-usb4'),
+  enable: (port, ip, mask = '255.255.0.0') => api.post('/multiconnect/enable', { port, ip, mask }),
+  disable: () => api.post('/multiconnect/disable'),
+  getUSBNetworkStatus: () => api.get('/system/usb-network-status'),
+  configureUSBNetwork: (ip, mask) => api.post('/system/configure-usb-network', { ip, mask }),
+  validateRpcDevice: (device) => api.post('/system/validate-rpc-device', { device })
+};
+
 export default api;

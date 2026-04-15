@@ -25,10 +25,12 @@ import {
   PlusOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
-  FolderOpenOutlined
+  FolderOpenOutlined,
+  WifiOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
-import { engineService, modelService, backendService } from '../../services/api';
+import { engineService, modelService, backendService, multiConnectService } from '../../services/api';
+import MultiConnectModal from '../MultiConnectModal/MultiConnectModal';
 import './ParametersDrawer.css';
 
 const { Panel } = Collapse;
@@ -49,10 +51,16 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   const [engineVersions, setEngineVersions] = useState([]);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
 
-  // 自动启动 & 多机互连
+  // 自动启动 & 多机互联
   const [autoStart, setAutoStart] = useState(false);
   const [multiHost, setMultiHost] = useState(false);
   const [reasoningOn, setReasoningOn] = useState(false);
+
+  // RPC 多机互联（主机端）
+  const [rpcEnable, setRpcEnable] = useState(false);
+  const [rpcDevices, setRpcDevices] = useState([]); // string[]
+  const [newRpcDevice, setNewRpcDevice] = useState('');
+  const [slaveModalVisible, setSlaveModalVisible] = useState(false);
 
   const isCloudApi = model?.source === 'cloudapi';
 
@@ -160,7 +168,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         ? ['port']
         : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
-           'repeat_penalty', 'version', 'reasoning'];
+           'repeat_penalty', 'version', 'reasoning', 'rpc_enable', 'rpc_devices'];
 
       const custom = [];
       const formValues = {};
@@ -187,6 +195,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
       setCustomParams(isCloudApi ? [] : custom);
       setReasoningOn(params.reasoning === 'on');
+      setRpcEnable(params.rpc_enable === true);
+      setRpcDevices(Array.isArray(params.rpc_devices) ? params.rpc_devices : []);
       form.setFieldsValue(formValues);
     } catch (error) {
       message.error('加载参数失败');
@@ -213,7 +223,6 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
            'repeat_penalty', 'reasoning'];
-
       // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
       const allParams = {};
       standardKeys.forEach(key => {
@@ -237,6 +246,9 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         });
         // reasoning 开关始终保存为 on/off
         allParams.reasoning = reasoningOn ? 'on' : 'off';
+        // RPC 多机互联
+        allParams.rpc_enable = rpcEnable;
+        allParams.rpc_devices = rpcDevices.filter(Boolean);
       }
 
       await axios.put(`/api/parameters/${modelId}`, {
@@ -472,7 +484,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               </>
             )}
 
-            {/* 自动启动 & 多机互连（仅 LLM） */}
+            {/* 自动启动 & 多机互联（仅 LLM） */}
             {model?.type === 'llm' && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
@@ -509,7 +521,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
                 {/* <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                   <Space style={{ marginRight: 12 }}>
-                    <span>多机互连</span>
+                    <span>多机互联</span>
                     <Tooltip title="允许局域网内其他设备通过本机 IP 访问（即将支持）">
                       <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                     </Tooltip>
@@ -523,6 +535,89 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                   />
                 </div> */}
                 {/* <Divider style={{ margin: '4px 0 16px' }} /> */}
+
+                {/* RPC 多机互联（主机端） */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                    <Space style={{ marginRight: 12 }}>
+                      <span>RPC 多机互联</span>
+                      <Tooltip title="启用后，模型推理任务将分发到多台从机（需要 Vulkan 后端）">
+                        <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                      </Tooltip>
+                    </Space>
+                    <Switch
+                      checked={rpcEnable}
+                      onChange={v => setRpcEnable(v)}
+                      checkedChildren="开"
+                      unCheckedChildren="关"
+                    />
+                    <Button
+                      size="small"
+                      icon={<WifiOutlined />}
+                      style={{ marginLeft: 12 }}
+                      onClick={() => setSlaveModalVisible(true)}
+                    >
+                      从机设置
+                    </Button>
+                  </div>
+
+                  {rpcEnable && (
+                    <div style={{ paddingLeft: 4 }}>
+                      <div style={{ marginBottom: 6, color: '#999', fontSize: 12 }}>
+                        从机地址列表（格式：IP:端口，如 169.254.30.101:50052）
+                      </div>
+                      {rpcDevices.map((device, idx) => (
+                        <Row key={idx} gutter={8} style={{ marginBottom: 6 }}>
+                          <Col flex="auto">
+                            <Input
+                              value={device}
+                              onChange={e => {
+                                const next = [...rpcDevices];
+                                next[idx] = e.target.value;
+                                setRpcDevices(next);
+                              }}
+                              placeholder="169.254.30.101:50052"
+                            />
+                          </Col>
+                          <Col>
+                            <Button
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={() => setRpcDevices(rpcDevices.filter((_, i) => i !== idx))}
+                            />
+                          </Col>
+                        </Row>
+                      ))}
+                      <Row gutter={8}>
+                        <Col flex="auto">
+                          <Input
+                            placeholder="添加从机地址"
+                            value={newRpcDevice}
+                            onChange={e => setNewRpcDevice(e.target.value)}
+                            onPressEnter={() => {
+                              if (newRpcDevice.trim()) {
+                                setRpcDevices([...rpcDevices, newRpcDevice.trim()]);
+                                setNewRpcDevice('');
+                              }
+                            }}
+                          />
+                        </Col>
+                        <Col>
+                          <Button
+                            type="dashed"
+                            icon={<PlusOutlined />}
+                            onClick={() => {
+                              if (newRpcDevice.trim()) {
+                                setRpcDevices([...rpcDevices, newRpcDevice.trim()]);
+                                setNewRpcDevice('');
+                              }
+                            }}
+                          />
+                        </Col>
+                      </Row>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
@@ -650,6 +745,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         />
       </Space>
     </Modal>
+
+    {/* 从机模式设置弹窗 */}
+    <MultiConnectModal
+      visible={slaveModalVisible}
+      onClose={() => setSlaveModalVisible(false)}
+    />
   </>
   );
 }

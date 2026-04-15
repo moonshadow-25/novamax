@@ -29,6 +29,7 @@ import enginesRouter from './routes/engines.js';
 import systemRouter from './routes/system.js';
 import whisperRouter from './routes/whisper.js';
 import ttsRouter from './routes/tts.js';
+import multiconnectRouter from './routes/multiconnect.js';
 import eventBus from './services/eventBus.js';
 
 const app = express();
@@ -152,6 +153,7 @@ app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
 app.use('/api', whisperRouter);
 app.use('/api', ttsRouter);
+app.use('/api', multiconnectRouter);
 
 // SSE 实时事件推送
 app.get('/api/events', (req, res) => {

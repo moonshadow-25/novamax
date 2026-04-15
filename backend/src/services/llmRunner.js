@@ -48,7 +48,7 @@ const PARAM_MAPPING = {
  * 生成单模型模式启动命令（向后兼容）
  * 已弃用，推荐使用路由模式
  */
-export function generateSingleModelCommand(model, port) {
+export function generateSingleModelCommand(model, port, options = {}) {
   if (!model.local_path) {
     throw new Error('模型文件路径不存在');
   }
@@ -134,6 +134,11 @@ export function generateSingleModelCommand(model, port) {
   const mmprojPath = _findMmprojFile(model.local_path);
   if (mmprojPath) {
     args.push('--mmproj', mmprojPath);
+  }
+
+  // RPC 多机互联：如果传入了 rpcArg，附加 --rpc 参数
+  if (options?.rpcArg) {
+    args.push('--rpc', options.rpcArg);
   }
 
   return {

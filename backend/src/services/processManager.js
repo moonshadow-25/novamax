@@ -18,6 +18,7 @@ import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
 import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices } from '../utils/serviceRegistrar.js';
 import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
+import multiConnectService from './multiConnectService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -289,8 +290,24 @@ class ProcessManager {
     }
 
     try {
+      // RPC 多机互联：如果启用，先启动本地 rpc-server
+      let rpcArg = null;
+      const rpcEnable = effectiveParams.rpc_enable === true;
+      const rpcDevices = Array.isArray(effectiveParams.rpc_devices) ? effectiveParams.rpc_devices.filter(Boolean) : [];
+
+      if (rpcEnable && rpcDevices.length > 0) {
+        try {
+          const localAddr = await multiConnectService.startRpcServer(modelId);
+          const allDevices = [localAddr, ...rpcDevices];
+          rpcArg = allDevices.join(',');
+          console.log(`[RPC] 启用多机互联: ${rpcArg}`);
+        } catch (rpcErr) {
+          console.warn(`[RPC] 启动本地 rpc-server 失败，跳过 RPC: ${rpcErr.message}`);
+        }
+      }
+
       // 使用单模型命令
-      const cmd = generateSingleModelCommand(model, port);
+      const cmd = generateSingleModelCommand(model, port, { rpcArg });
 
       console.log(`启动单模型: ${cmd.command} ${cmd.args.join(' ')}`);
 
@@ -682,6 +699,8 @@ class ProcessManager {
     const port = processInfo.port;
     processInfo.process.kill();
     this.cleanup(modelId);
+    // 停止对应的 RPC server（如果有）
+    multiConnectService.stopRpcServer(modelId);
     await stopServiceRegistration(port, embedding);
 
     return { status: MODEL_STATUS.STOPPED };
@@ -913,6 +932,9 @@ class ProcessManager {
   async shutdown() {
     // 先注销所有已注册服务
     await deregisterAllServices();
+
+    // 清理多机互联（从机模式 + 主机 RPC servers）
+    await multiConnectService.cleanup();
 
     // 终止所有单模型进程
     for (const [modelId, info] of this.processes) {
