@@ -297,9 +297,14 @@ class ProcessManager {
 
       if (rpcEnable && rpcDevices.length > 0) {
         try {
-          const localAddr = await multiConnectService.startRpcServer(modelId);
-          const allDevices = [localAddr, ...rpcDevices];
-          rpcArg = allDevices.join(',');
+          await multiConnectService.startRpcServer(modelId);
+          rpcArg = rpcDevices.join(',');
+
+          // 旧版本（包含主机 IP）切换方式：注释上面两行，取消下面三行注释
+          // const localAddr = await multiConnectService.startRpcServer(modelId);
+          // const allDevices = [localAddr, ...rpcDevices];
+          // rpcArg = allDevices.join(',');
+
           console.log(`[RPC] 启用多机互联: ${rpcArg}`);
         } catch (rpcErr) {
           throw new Error(`RPC 多机互联启动失败: ${rpcErr.message}`);

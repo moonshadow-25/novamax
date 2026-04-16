@@ -32,6 +32,9 @@ const ADMIN_URL = `http://127.0.0.1:${ADMIN_PORT}`;
 /** 心跳间隔（ms），必须小于网关 15 秒超时阈值 */
 const HEARTBEAT_INTERVAL = 5000;
 
+/** 是否输出心跳成功日志（默认关闭，避免刷屏） */
+const HEARTBEAT_LOG_ENABLED = String(process.env.SERVICE_HEARTBEAT_LOG || '').toLowerCase() === 'true';
+
 /**
  * 已注册服务的本地缓存。
  * key: "<port>:<nodePath>"，value: serviceInfo 对象
@@ -103,8 +106,10 @@ function startHeartbeat(serviceId) {
   const timer = setInterval(async () => {
     try {
       await sendHeartbeat(serviceId);
-      // eslint-disable-next-line no-console
-      console.log(`[service-registrar] Heartbeat sent for ${serviceId}`);
+      if (HEARTBEAT_LOG_ENABLED) {
+        // eslint-disable-next-line no-console
+        console.log(`[service-registrar] Heartbeat sent for ${serviceId}`);
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn(`[service-registrar] Heartbeat failed for ${serviceId}: ${error.message}`);

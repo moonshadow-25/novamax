@@ -142,28 +142,93 @@ class MultiConnectService {
     };
   }
 
+  async _getValidationLocalAddresses(targetHost) {
+    const adapters = await this.getUSB4Adapters();
+    const allIps = adapters
+      .flatMap((adapter) => {
+        if (Array.isArray(adapter?.ips)) return adapter.ips;
+        if (adapter?.ip) return [adapter.ip];
+        return [];
+      })
+      .map(ip => String(ip || '').trim())
+      .filter(ip => /^\d+\.\d+\.\d+\.\d+$/.test(ip));
+
+    const uniqueIps = [...new Set(allIps)];
+    if (targetHost.startsWith('169.254.')) {
+      const linkLocalIps = uniqueIps.filter(ip => ip.startsWith('169.254.'));
+      if (linkLocalIps.length > 0) return linkLocalIps;
+    }
+
+    return uniqueIps;
+  }
+
   async validateRpcDevice(device) {
     // device 格式: "IP:port"
-    const [host, portStr] = device.split(':');
-    const port = parseInt(portStr) || DEFAULT_RPC_PORT;
-    return new Promise((resolve) => {
+    const [host, portStr] = String(device || '').trim().split(':');
+    const port = Number.parseInt(portStr, 10) || DEFAULT_RPC_PORT;
+
+    if (!host) {
+      return { device, reachable: false, error: '目标地址无效' };
+    }
+
+    const localAddresses = await this._getValidationLocalAddresses(host);
+    const plans = [...localAddresses, null];
+
+    const tryConnect = (localAddress = null) => new Promise((resolve) => {
       const socket = new net.Socket();
-      const timeout = 3000;
+      const timeout = 3500;
       socket.setTimeout(timeout);
       socket.once('connect', () => {
         socket.destroy();
-        resolve({ device, reachable: true });
+        resolve({ ok: true });
       });
-      socket.once('error', () => {
+      socket.once('error', (err) => {
         socket.destroy();
-        resolve({ device, reachable: false, error: '连接失败' });
+        resolve({
+          ok: false,
+          error: err?.code || '连接失败',
+          localAddress: localAddress || null
+        });
       });
       socket.once('timeout', () => {
         socket.destroy();
-        resolve({ device, reachable: false, error: '连接超时' });
+        resolve({
+          ok: false,
+          error: '连接超时',
+          localAddress: localAddress || null
+        });
       });
-      socket.connect(port, host);
+
+      if (localAddress) {
+        socket.connect({ host, port, localAddress });
+      } else {
+        socket.connect({ host, port });
+      }
     });
+
+    let lastError = '连接失败';
+    for (let round = 0; round < 5; round++) {
+      for (const localAddress of plans) {
+        const result = await tryConnect(localAddress);
+        if (result.ok) {
+          return {
+            device,
+            reachable: true,
+            localAddress: localAddress || undefined
+          };
+        }
+
+        lastError = result.localAddress
+          ? `${result.error} (local=${result.localAddress})`
+          : result.error;
+      }
+
+      if (round < 4) {
+        await new Promise(r => setTimeout(r, 700));
+      }
+    }
+
+    return { device, reachable: false, error: lastError };
   }
 
   // ─── 从机模式 ─────────────────────────────────────────────────────────────────

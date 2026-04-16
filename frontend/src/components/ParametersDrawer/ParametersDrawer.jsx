@@ -521,6 +521,24 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               </>
             )}
 
+            <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16, marginBottom: 8 }}>
+              {/* 运行时参数 */}
+              <Panel header="运行时参数" key="runtime">
+                {runtimeKeys
+                  .filter(key => metadata[key])
+                  .map(key => renderFormItem(key, metadata[key]))}
+              </Panel>
+
+              {/* 采样参数 */}
+              {samplingKeys.length > 0 && (
+                <Panel header="采样参数" key="sampling">
+                  {samplingKeys
+                    .filter(key => metadata[key])
+                    .map(key => renderFormItem(key, metadata[key]))}
+                </Panel>
+              )}
+            </Collapse>
+
             {/* 自动启动 & 多机互联（仅 LLM） */}
             {model?.type === 'llm' && (
               <>
@@ -578,8 +596,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
                     <Space style={{ marginRight: 12 }}>
-                      <span>RPC 多机互联</span>
-                      <Tooltip title="启用后，模型推理任务将分发到多台从机（需要 Vulkan 后端）">
+                      <span>多机互联</span>
+                      <Tooltip title="启用后，模型推理任务将分发到多台从机">
                         <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                       </Tooltip>
                     </Space>
@@ -648,24 +666,6 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 )}
               </>
             )}
-
-            <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16 }}>
-              {/* 运行时参数 */}
-              <Panel header="运行时参数" key="runtime">
-                {runtimeKeys
-                  .filter(key => metadata[key])
-                  .map(key => renderFormItem(key, metadata[key]))}
-              </Panel>
-
-              {/* 采样参数 */}
-              {samplingKeys.length > 0 && (
-                <Panel header="采样参数" key="sampling">
-                  {samplingKeys
-                    .filter(key => metadata[key])
-                    .map(key => renderFormItem(key, metadata[key]))}
-                </Panel>
-              )}
-            </Collapse>
 
             {!isCloudApi && (
               <>

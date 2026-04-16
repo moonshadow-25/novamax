@@ -15,20 +15,46 @@ async function runPowerShell(script, timeout = 10000) {
   return stdout;
 }
 
+async function getNetshInterfaceNames() {
+  if (process.platform !== 'win32') return [];
+
+  try {
+    const { stdout } = await execAsync('netsh interface show interface', {
+      timeout: 10000,
+      encoding: 'utf-8'
+    });
+
+    const lines = String(stdout || '').split(/\r?\n/);
+    const names = [];
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.includes('---')) continue;
+      const parts = line.split(/\s{2,}/).map(v => v.trim()).filter(Boolean);
+      if (parts.length >= 4) {
+        names.push(parts[parts.length - 1]);
+      }
+    }
+
+    return [...new Set(names)];
+  } catch {
+    return [];
+  }
+}
+
 export async function getUSB4Adapters() {
   if (process.platform !== 'win32') return [];
 
+  const interfaceNames = await getNetshInterfaceNames();
+  const netshNameSet = new Set(interfaceNames);
+
   const script = [
     '$ErrorActionPreference="SilentlyContinue"',
-    '$adapters = Get-NetAdapter | Where-Object {',
-    '  $_.InterfaceDescription -match "USB|RNDIS|P2P|Thunderbolt|USB4" -or',
-    '  $_.InterfaceDescription -match "Remote NDIS|USB Ethernet"',
+    '$adapters = Get-NetAdapter | ForEach-Object {',
+    '  $ips = @(Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -EA SilentlyContinue | Select-Object -ExpandProperty IPAddress)',
+    '  @{ name=$_.Name; ifIndex=$_.ifIndex; description=$_.InterfaceDescription; status=$_.Status; ips=$ips }',
     '}',
-    '$result = @($adapters | ForEach-Object {',
-    '  $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -EA SilentlyContinue | Select-Object -First 1).IPAddress',
-    '  @{ name=$_.Name; ifIndex=$_.ifIndex; description=$_.InterfaceDescription; status=$_.Status; ip=$ip }',
-    '})',
-    '$result | ConvertTo-Json -Compress'
+    '$adapters | ConvertTo-Json -Compress'
   ].join('\n');
 
   const raw = (await runPowerShell(script, 12000)).trim();
@@ -36,7 +62,35 @@ export async function getUSB4Adapters() {
 
   const parsed = JSON.parse(raw);
   const arr = Array.isArray(parsed) ? parsed : [parsed];
-  return arr.filter(a => a && a.name);
+
+  const includeKeyword = /(usb|rndis|remote\s*ndis|usb\s*ethernet|thunderbolt|usb4|p2p\s*network)/i;
+  const excludeKeyword = /(vmware|hyper-v|loopback|bluetooth|wireless|wi-fi|wlan|tap|vpn|virtualbox)/i;
+
+  const filterAdapters = (items, requireNetshMatch) => items.filter((a) => {
+    if (!a || !a.name) return false;
+    const description = String(a.description || '');
+    const status = String(a.status || '').toLowerCase();
+
+    if (!includeKeyword.test(description)) return false;
+    if (excludeKeyword.test(description)) return false;
+    if (status.includes('disabled')) return false;
+
+    if (requireNetshMatch && netshNameSet.size > 0 && !netshNameSet.has(a.name)) {
+      return false;
+    }
+    return true;
+  });
+
+  let filtered = filterAdapters(arr, true);
+  // 某些系统下 netsh 输出编码/命名与 Get-NetAdapter 不一致，放宽匹配避免误判“未检测到”
+  if (filtered.length === 0) {
+    filtered = filterAdapters(arr, false);
+  }
+
+  return filtered.map((a) => ({
+    ...a,
+    ip: Array.isArray(a.ips) ? (a.ips[0] || null) : null
+  }));
 }
 
 async function runCommand(command, timeout = 10000) {
@@ -149,6 +203,27 @@ export async function getAdapterIPv4List(adapterName) {
   }
 }
 
+async function getAdapterIPv4ListByIfIndex(ifIndex) {
+  if (process.platform !== 'win32' || !Number.isInteger(ifIndex)) return [];
+
+  const script = [
+    '$ErrorActionPreference="SilentlyContinue"',
+    `$ips = @(Get-NetIPAddress -InterfaceIndex ${ifIndex} -AddressFamily IPv4 -EA SilentlyContinue | Select-Object -ExpandProperty IPAddress)`,
+    '$ips | ConvertTo-Json -Compress'
+  ].join('\n');
+
+  const out = (await runPowerShell(script, 10000)).trim();
+  if (!out) return [];
+
+  try {
+    const parsed = JSON.parse(out);
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    return arr.map(normalizeIPv4).filter(Boolean);
+  } catch {
+    return out ? [normalizeIPv4(out)] : [];
+  }
+}
+
 export async function setNetworkIP(adapterName, ip, mask = DEFAULT_MASK, mtu = DEFAULT_MTU, adapterIfIndex = null, logger = null) {
   if (process.platform !== 'win32') {
     throw new Error('仅支持 Windows 网络配置');
@@ -229,7 +304,9 @@ export async function setNetworkIP(adapterName, ip, mask = DEFAULT_MASK, mtu = D
   const targetIp = normalizeIPv4(ip);
   let appliedIpList = [];
   for (let i = 0; i < 12; i++) {
-    appliedIpList = await getAdapterIPv4List(adapterName);
+    const listByAlias = await getAdapterIPv4List(adapterName);
+    const listByIfIndex = await getAdapterIPv4ListByIfIndex(resolvedIfIndex);
+    appliedIpList = [...new Set([...listByAlias, ...listByIfIndex])];
     if (appliedIpList.includes(targetIp)) break;
     await new Promise(r => setTimeout(r, 500));
   }
@@ -262,7 +339,9 @@ export async function setNetworkIP(adapterName, ip, mask = DEFAULT_MASK, mtu = D
     }
 
     for (let i = 0; i < 20; i++) {
-      appliedIpList = await getAdapterIPv4List(adapterName);
+      const listByAlias = await getAdapterIPv4List(adapterName);
+      const listByIfIndex = await getAdapterIPv4ListByIfIndex(resolvedIfIndex);
+      appliedIpList = [...new Set([...listByAlias, ...listByIfIndex])];
       if (appliedIpList.includes(targetIp)) break;
       await new Promise(r => setTimeout(r, 500));
     }
