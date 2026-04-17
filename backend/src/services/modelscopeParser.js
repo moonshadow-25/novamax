@@ -28,6 +28,20 @@ const QUANTIZATION_INFO = {
   'Q2_K': { category: 'ultra_compressed', quality: 60, description: '极限压缩', recommended: false },
   'IQ2_M': { category: 'ultra_compressed', quality: 58, description: '极限压缩', recommended: false },
   'IQ2_XXS': { category: 'ultra_compressed', quality: 55, description: '超极限压缩', recommended: false },
+
+  // 新增：兼容非 Q* 命名的 GGUF 量化/裁剪方案
+  'MXFP4_MOE': { category: 'balanced', quality: 82, description: 'MXFP4 MoE 量化', recommended: false },
+  'MXFP4_MOE_BF16': { category: 'high', quality: 92, description: 'MXFP4 MoE + BF16，高质量', recommended: false },
+  'MXFP4_MOE_F16': { category: 'high', quality: 90, description: 'MXFP4 MoE + F16，高质量', recommended: false },
+  'MXFP4_MOE_16': { category: 'high', quality: 90, description: 'MXFP4 MoE + 16-bit，高质量', recommended: false },
+  'APEX-BALANCED': { category: 'balanced', quality: 84, description: 'APEX 平衡版', recommended: false },
+  'APEX-COMPACT': { category: 'compressed', quality: 76, description: 'APEX 紧凑版', recommended: false },
+  'APEX-MINI': { category: 'compressed', quality: 70, description: 'APEX 迷你版', recommended: false },
+  'APEX-QUALITY': { category: 'high', quality: 88, description: 'APEX 高质量版', recommended: false },
+  'APEX-I-BALANCED': { category: 'balanced', quality: 85, description: 'APEX-I 平衡版', recommended: false },
+  'APEX-I-COMPACT': { category: 'compressed', quality: 77, description: 'APEX-I 紧凑版', recommended: false },
+  'APEX-I-MINI': { category: 'compressed', quality: 71, description: 'APEX-I 迷你版', recommended: false },
+  'APEX-I-QUALITY': { category: 'high', quality: 89, description: 'APEX-I 高质量版', recommended: false },
 };
 
 class ModelscopeParser {
@@ -138,9 +152,9 @@ class ModelscopeParser {
    */
   extractQuantizationType(filename) {
     // 移除 .gguf 后缀
-    const baseName = filename.replace('.gguf', '');
+    const baseName = filename.replace(/\.gguf$/i, '');
 
-    // 匹配量化类型模式（支持破折号或点号作为分隔符，如 Model-Q4_K_M.gguf 或 Model.Q4_K_M.gguf）
+    // 1) 经典量化命名（支持破折号/点号分隔）
     const patterns = [
       /[-\.](BF16)$/i,
       /[-\.](F16)$/i,
@@ -178,6 +192,27 @@ class ModelscopeParser {
       if (match) {
         return match[1].toUpperCase();
       }
+    }
+
+    // 2) 兼容新命名：APEX / MXFP4_MOE 等
+    const upper = baseName.toUpperCase();
+
+    // 形如: ...-MXFP4_MOE_BF16 / ...-MXFP4_MOE_F16 / ...-MXFP4_MOE_16 / ...-MXFP4_MOE
+    const mxfp4Match = upper.match(/(?:^|[-_.])(MXFP4_MOE(?:_(?:BF16|F16|16))?)(?:$|[-_.])/i);
+    if (mxfp4Match) {
+      return mxfp4Match[1].toUpperCase();
+    }
+
+    // 形如: ...-APEX-BALANCED / ...-APEX-I-COMPACT / ...-APEX-QUALITY
+    const apexMatch = upper.match(/(?:^|[-_.])(APEX(?:-I)?-(?:BALANCED|COMPACT|MINI|QUALITY))(?:$|[-_.])/i);
+    if (apexMatch) {
+      return apexMatch[1].toUpperCase();
+    }
+
+    // 3) 最后兜底：取最后一个“-”后的 token，避免整仓被判定“无 GGUF”
+    const fallback = upper.match(/[-_.]([A-Z0-9]+(?:[-_][A-Z0-9]+)*)$/i);
+    if (fallback) {
+      return fallback[1].toUpperCase();
     }
 
     return null;
@@ -302,12 +337,14 @@ class ModelscopeParser {
     quantizations.sort((a, b) => b.quality - a.quality);
 
     // 如果没有推荐的，按优先级自动选择
-    // 优先级：Q4_K_M > Q5_K_M > 其他(quantizations偶数取上中，奇数取中位)
+    // 优先级：Q4_K_M > Q5_K_M > APEX-BALANCED > MXFP4_MOE > 其他(quantizations偶数取上中，奇数取中位)
     const hasRecommended = quantizations.some(q => q.recommended);
     if (!hasRecommended && quantizations.length > 0) {
       const q4km = quantizations.find(q => q.name.includes('Q4_K_M'));
       const q5km = quantizations.find(q => q.name.includes('Q5_K_M'));
-      const picked = q4km || q5km || quantizations[Math.floor((quantizations.length - 1) / 2)];
+      const apexBalanced = quantizations.find(q => q.name.includes('APEX-BALANCED') || q.name.includes('APEX-I-BALANCED'));
+      const mxfp4Moe = quantizations.find(q => q.name.includes('MXFP4_MOE'));
+      const picked = q4km || q5km || apexBalanced || mxfp4Moe || quantizations[Math.floor((quantizations.length - 1) / 2)];
       picked.recommended = true;
     }
 

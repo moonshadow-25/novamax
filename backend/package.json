@@ -1,6 +1,6 @@
 {
   "name": "novamax-backend",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "type": "module",
   "main": "src/index.js",
   "bin": "src/index.js",
