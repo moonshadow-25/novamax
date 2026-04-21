@@ -74,7 +74,7 @@ function compareVersions(a, b) {
 }
 
 /**
- * 拉取并合并远程模型列表（LLM + ComfyUI）
+ * 拉取并合并远程模型列表（LLM + ComfyUI + TTS + Whisper）
  * 返回 { added, updated }
  */
 async function syncModels() {
@@ -95,7 +95,7 @@ async function syncModels() {
   let added = 0;
   let updated = 0;
 
-  for (const type of ['llm', 'comfyui']) {
+  for (const type of ['llm', 'comfyui', 'tts', 'whisper']) {
     const list = remoteModels[type] || [];
     for (const remoteModel of list) {
       const { id, version: remoteVersion, ...remoteFields } = remoteModel;

@@ -178,6 +178,7 @@ app.use((err, req, res, next) => {
 });
 
 console.log("=".repeat(50));
+console.log(`Startup time: ${new Date().toLocaleString()}`);
 // 启动 Logo
 console.log(`
   _   _                   __  __

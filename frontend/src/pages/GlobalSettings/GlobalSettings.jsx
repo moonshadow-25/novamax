@@ -617,8 +617,8 @@ const GlobalSettings = () => {
     <Card title="引擎管理" extra={<Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>}>
       <List
         // 过滤掉 category 为 app 由运行状态页面统一管理
-        // tts、whisper 功能暂未完成，先隐藏，后续完善后再放出来
-        dataSource={Object.values(engines).filter(e => e.category !== 'app' && e.id !== 'tts' && e.id !== 'whisper')}
+        // tts 功能暂未完成，先隐藏，后续完善后再放出来
+        dataSource={Object.values(engines).filter(e => e.category !== 'app' && e.id !== 'tts')}
         renderItem={engine => {
           const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
           const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));

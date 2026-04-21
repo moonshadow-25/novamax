@@ -821,15 +821,37 @@ class ProcessManager {
           '-pp', '-pr',
           '--host', '0.0.0.0'
         ];
+
         // 如果 VAD 模型存在，添加 VAD 参数
         if (fs.existsSync(vadModel)) {
           args.push('--vad', '--vad-model', vadModel);
         }
-        return spawn(
-          `${externalPaths.whispercpp}/whisper-server`,
-          args,
-          { shell: true }
-        );
+
+        // 新路径：优先走引擎版本目录
+        const defaultVersion = engineManager.getDefaultVersion('whisper');
+        const actualVersion = model.engine_version || defaultVersion;
+        if (actualVersion) {
+          const whisperEnginePath = engineManager.getEnginePath('whisper', actualVersion);
+          if (whisperEnginePath) {
+            const serverPath = path.join(whisperEnginePath, 'whisper-server.exe');
+            const serverPathNoExt = path.join(whisperEnginePath, 'whisper-server');
+            const whisperServerPath = fs.existsSync(serverPath) ? serverPath : serverPathNoExt;
+            if (fs.existsSync(whisperServerPath)) {
+              return spawn(whisperServerPath, args, { shell: true });
+            }
+          }
+        }
+
+        // 旧路径 fallback（兼容历史配置）
+        if (externalPaths.whispercpp) {
+          return spawn(
+            `${externalPaths.whispercpp}/whisper-server`,
+            args,
+            { shell: true }
+          );
+        }
+
+        throw new Error('请先安装 whisper 引擎');
       }
 
       default:

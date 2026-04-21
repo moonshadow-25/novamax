@@ -38,9 +38,9 @@ const COMFYUI_FILTER_OPTIONS = [
   { value: 'img2video',  label: '图生视频' },
 ];
 
-// 其他类型暂时使用默认选项，后续可以根据需要调整
-const TTS_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
-const WHISPER_FILTER_OPTIONS = DEFAULT_FILTER_OPTIONS;
+// 其他类型暂时使用空选项，后续可以根据需要调整
+const TTS_FILTER_OPTIONS = () => [];
+const WHISPER_FILTER_OPTIONS = () => [];
 
 function Home() {
   const { theme, toggleTheme } = useTheme();
@@ -402,13 +402,7 @@ function Home() {
         <div className="home-toolbar">
           <Tabs
             activeKey={activeTab}
-            onChange={(key) => {
-              if (key === 'whisper' || key === 'tts') {
-                message.info('该功能正在开发中，敬请期待');
-                return;
-              }
-              setActiveTab(key);
-            }}
+            onChange={setActiveTab}
             items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
             style={{ flex: 1 }}
           />
@@ -478,12 +472,12 @@ function Home() {
               onToggleFavorite={toggleFavorite}
             />
           ))}
-          <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
-            <div className="add-model-content">
-              <div className="add-icon">+</div>
-              <div>添加新模型</div>
+            <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
+              <div className="add-model-content">
+                <div className="add-icon">+</div>
+                <div>添加新模型</div>
+              </div>
             </div>
-          </div>
         </div>
       </Content>
       <AddModelModal
