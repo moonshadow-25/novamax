@@ -159,7 +159,7 @@ class ComfyUIDownloader {
     downloadStateManager.deleteState(task._stateId, task.filename);
 
     // 延迟清理临时文件（等待进程释放文件锁）
-    const targetPath = this._getTargetPath(task.type, task.filename);
+    const targetPath = this._getTargetPath(task.type, task.filename, task._modelInfo?.dest || null);
     this._cleanupTempFiles(targetPath);
 
     // 5秒后清理任务记录
@@ -294,7 +294,7 @@ class ComfyUIDownloader {
    * @param {Function} onProgress - 进度回调 (0-100)
    */
   async download(modelInfo, onProgress = null, abortSignal = null) {
-    const targetPath = this._getTargetPath(modelInfo.type, modelInfo.filename);
+    const targetPath = this._getTargetPath(modelInfo.type, modelInfo.filename, modelInfo.dest || null);
 
     if (fs.existsSync(targetPath)) {
       console.log(`文件已存在，跳过下载: ${targetPath}`);
@@ -423,7 +423,8 @@ class ComfyUIDownloader {
    * 获取模型目标路径
    * type 是 ComfyUI 目录名（text_encoders / vae / diffusion_models / checkpoints 等）
    */
-  _getTargetPath(type, filename) {
+  _getTargetPath(type, filename, dest = null) {
+    if (dest) return path.join(dest, filename);
     const modelsDir = path.join(MODELS_RUN_DIR, 'comfyui', 'models');
     return path.join(modelsDir, type, filename);
   }

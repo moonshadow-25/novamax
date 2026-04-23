@@ -4,6 +4,7 @@ import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined
 import { modelscopeService, modelService, systemService } from '../../services/api';
 import ModelPreviewDialog from './ModelPreviewDialog';
 import AddWorkflowTab from './AddWorkflowTab';
+import AddWhisperModal from './AddWhisperModal';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -330,39 +331,46 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   return (
     <>
-      <Modal
-        title="添加新模型"
-        open={visible}
-        onCancel={handleClose}
-        footer={null}
-        width={700}
-        style={{ top: 20 }}
-        bodyStyle={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}
-        destroyOnClose={true}
-      >
-        {/* ComfyUI类型使用特殊的工作流上传界面 */}
-        {type === 'comfyui' ? (
-          <AddWorkflowTab
-            onSuccess={(model) => {
-              message.success('工作流添加成功');
-              handleClose();
-              if (onSuccess) {
-                onSuccess(model);
-              }
-            }}
-            onClose={handleClose}
-          />
-        ) : (
-          <>
-            <Tabs
-              activeKey={activeTab}
-              onChange={setActiveTab}
-              items={[
-                { key: 'modelscope', label: 'ModelScope' },
-                { key: 'custom', label: '自定义' },
-                { key: 'cloudapi', label: '云API' },
-              ]}
+      {type === 'whisper' ? (
+        <AddWhisperModal
+          visible={visible}
+          onClose={handleClose}
+          onSuccess={onSuccess}
+        />
+      ) : (
+        <Modal
+          title="添加新模型"
+          open={visible}
+          onCancel={handleClose}
+          footer={null}
+          width={700}
+          style={{ top: 20 }}
+          bodyStyle={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}
+          destroyOnClose={true}
+        >
+          {/* ComfyUI类型使用特殊的工作流上传界面 */}
+          {type === 'comfyui' ? (
+            <AddWorkflowTab
+              onSuccess={(model) => {
+                message.success('工作流添加成功');
+                handleClose();
+                if (onSuccess) {
+                  onSuccess(model);
+                }
+              }}
+              onClose={handleClose}
             />
+          ) : (
+            <>
+              <Tabs
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                items={[
+                  { key: 'modelscope', label: 'ModelScope' },
+                  { key: 'custom', label: '自定义' },
+                  { key: 'cloudapi', label: '云API' },
+                ]}
+              />
 
             {activeTab === 'modelscope' && (
               <div>
@@ -628,7 +636,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
             )}
           </>
         )}
-      </Modal>
+        </Modal>
+      )}
 
       {/* 预览对话框 */}
       <ModelPreviewDialog

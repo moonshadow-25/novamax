@@ -1,0 +1,8 @@
+.whisper-models-table {
+  font-size: 13px;
+}
+
+.whisper-models-table .ant-table-thead > tr > th {
+  background: #fafafa;
+  font-weight: 600;
+}

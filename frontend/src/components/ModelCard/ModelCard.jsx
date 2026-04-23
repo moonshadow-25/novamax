@@ -31,6 +31,8 @@ import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
 import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
+import WhisperModelsPanel from '../WhisperModelsPanel/WhisperModelsPanel';
+import WhisperSettingsDrawer from '../WhisperSettingsDrawer/WhisperSettingsDrawer';
 import './ModelCard.css';
 
 const { Text } = Typography;
@@ -75,6 +77,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [parametersVisible, setParametersVisible] = useState(false);
+  const [whisperSettingsVisible, setWhisperSettingsVisible] = useState(false);
   const [quantizationSelectorVisible, setQuantizationSelectorVisible] = useState(false);
   const [realDownloadedQuantizations, setRealDownloadedQuantizations] = useState([]);
   const [realDownloadedFiles, setRealDownloadedFiles] = useState([]);
@@ -85,6 +88,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 名称编辑
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(model.name);
+
+  // whisper 管理弹窗
+  const [whisperModelsVisible, setWhisperModelsVisible] = useState(false);
 
   // ComfyUI 启动相关
   const [comfyuiLaunchVisible, setComfyuiLaunchVisible] = useState(false);
@@ -599,6 +605,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleSettings = () => {
     if (model.type === 'comfyui') {
       setComfyuiSettingsVisible(true);
+    } else if (model.type === 'whisper') {
+      setWhisperSettingsVisible(true);
     } else {
       setParametersVisible(true);
     }
@@ -688,7 +696,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 判断是否可以启动：
   // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi';
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'whisper' && !!model.path);
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
@@ -1010,6 +1018,45 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
+      {/* Whisper 专属按钮 */}
+      {model.type === 'whisper' && model.source !== 'custom' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          {isStarting ? (
+            <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
+              中断启动
+            </Button>
+          ) : isRunning ? (
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
+                停止
+              </Button>
+              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
+                使用
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleStart}
+              loading={loading}
+              block
+              color="green"
+              variant="solid"
+            >
+              启动
+            </Button>
+          )}
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() => setWhisperModelsVisible(true)}
+            block
+          >
+            管理模型
+          </Button>
+        </Space>
+      )}
+
       <Modal
         title="多机互连设备验证"
         open={rpcValidationVisible}
@@ -1145,9 +1192,37 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         />
       </Modal>
 
+      {/* Whisper 模型管理 Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>{model.name}</span>
+          </Space>
+        }
+        open={whisperModelsVisible}
+        onCancel={() => setWhisperModelsVisible(false)}
+        footer={null}
+        width={880}
+        destroyOnClose
+      >
+        <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="模型描述">
+            <Text>{model.description || '暂无描述'}</Text>
+          </Descriptions.Item>
+        </Descriptions>
+        <Divider style={{ margin: '12px 0' }} />
+        <WhisperModelsPanel
+          modelId={model.id}
+          onPathReady={(asrPath) => {
+            if (asrPath && !model.path) onUpdate();
+          }}
+        />
+      </Modal>
 
-      {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI） */}
-      {canStart && model.type !== 'comfyui' && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+
+      {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote） */}
+      {canStart && model.type !== 'comfyui' && !(model.type === 'whisper' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger
@@ -1296,6 +1371,13 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           setParametersVisible(false);
           onUpdate();
         }}
+      />
+
+      <WhisperSettingsDrawer
+        visible={whisperSettingsVisible}
+        model={model}
+        onClose={() => setWhisperSettingsVisible(false)}
+        onSave={onUpdate}
       />
 
       {/* 量化版本选择器 */}

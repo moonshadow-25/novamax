@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import axios from 'axios';
 import net from 'net';
 import path from 'path';
@@ -745,8 +745,11 @@ class ProcessManager {
       throw new Error('Backend already running');
     }
 
-    const port = await this.allocatePort(model.type);
+    if (model.type === 'whisper') {
+      return this._startWhisperLegacyBackend(modelId, model);
+    }
 
+    const port = await this.allocatePort(model.type);
 
     try {
       const process = await this.spawnBackend(model, port);
@@ -755,32 +758,76 @@ class ProcessManager {
         process,
         port,
         type: model.type,
-        logs: []
+        logs: [],
+        ready: true
       });
 
-      process.stdout.on('data', (data) => {
-        const log = data.toString();
-        this.processes.get(modelId).logs.push(log);
-        console.log(`[${modelId}] ${log}`);
-      });
-
-      process.stderr.on('data', (data) => {
-        const log = data.toString();
-        this.processes.get(modelId).logs.push(log);
-        console.log(`[${modelId}] ${log}`);
-      });
-
-      process.on('exit', (code) => {
-        console.log(`[${modelId}] Process exited with code ${code}`);
-        this.cleanup(modelId);
-      });
-
-
+      this._attachLegacyProcessListeners(modelId, process);
       return { port, status: MODEL_STATUS.RUNNING };
     } catch (error) {
       this.allocatedPorts.delete(port);
       throw error;
     }
+  }
+
+  async _startWhisperLegacyBackend(modelId, model) {
+    const cfg = model.whisper_config || {};
+    const port = Number(cfg.flask_port) || 8281;
+
+    if (!(await this.isPortAvailable(port))) {
+      throw new Error(`端口 ${port} 已被占用，请在 Whisper 配置中修改 Flask 端口后重试`);
+    }
+    this.allocatedPorts.add(port);
+
+    try {
+      const process = await this.spawnBackend(model, port);
+
+      this.processes.set(modelId, {
+        process,
+        port,
+        type: model.type,
+        logs: [],
+        ready: false
+      });
+
+      this._attachLegacyProcessListeners(modelId, process, (log) => {
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo?.ready && this._isWhisperReadyLog(log)) {
+          this._monitorWhisperReadiness(modelId, port).catch(() => {});
+        }
+      });
+
+      this._monitorWhisperReadiness(modelId, port).catch(() => {});
+      return { port, status: MODEL_STATUS.RUNNING };
+    } catch (error) {
+      this.allocatedPorts.delete(port);
+      throw error;
+    }
+  }
+
+  _attachLegacyProcessListeners(modelId, process, onLog = null) {
+    process.stdout.on('data', (data) => {
+      const log = data.toString();
+      const processInfo = this.processes.get(modelId);
+      if (!processInfo) return;
+      processInfo.logs.push(log);
+      console.log(`[${modelId}] ${log}`);
+      if (onLog) onLog(log);
+    });
+
+    process.stderr.on('data', (data) => {
+      const log = data.toString();
+      const processInfo = this.processes.get(modelId);
+      if (!processInfo) return;
+      processInfo.logs.push(log);
+      console.log(`[${modelId}] ${log}`);
+      if (onLog) onLog(log);
+    });
+
+    process.on('exit', (code) => {
+      console.log(`[${modelId}] Process exited with code ${code}`);
+      this.cleanup(modelId);
+    });
   }
 
   async spawnBackend(model, port) {
@@ -811,47 +858,72 @@ class ProcessManager {
       }
 
       case 'whisper': {
-        const whisperDir = path.dirname(model.path);
-        const vadModel = path.join(whisperDir, 'ggml-silero-v6.2.0.bin');
+        if (!model.path) {
+          throw new Error('Whisper 模型文件未配置，请先在“管理模型”中下载 ASR 模型');
+        }
+
+        const cfg = model.whisper_config || {};
+        const threadValue = Number(cfg.threads);
+        const threads = Number.isFinite(threadValue) ? Math.max(1, Math.min(8, threadValue)) : 8;
+        const language = String(cfg.language || 'auto');
+        const enableVad = cfg.enable_vad === true;
+        const whisperPort = Number(cfg.whisper_port) || 18181;
+        const flaskPort = Number(cfg.flask_port) || port || 8281;
+
+        const defaultVersion = engineManager.getDefaultVersion('whisper');
+        if (!defaultVersion) {
+          throw new Error('请先安装 whisper 引擎');
+        }
+
+        const whisperEnginePath = engineManager.getEnginePath('whisper', defaultVersion);
+        if (!whisperEnginePath) {
+          throw new Error(`whisper 引擎版本 ${defaultVersion} 未找到`);
+        }
+
+        const whisperPython = path.join(whisperEnginePath, 'venv', 'Scripts', 'python.exe');
+        if (!fs.existsSync(whisperPython)) {
+          throw new Error(`Whisper 引擎 Python 不存在: ${whisperPython}`);
+        }
+
+        const whisperScript = path.join(whisperEnginePath, 'whisper.py');
+        if (!fs.existsSync(whisperScript)) {
+          throw new Error(`Whisper 启动脚本不存在: ${whisperScript}`);
+        }
+
+        const modelPath = path.isAbsolute(model.path)
+          ? model.path
+          : path.join(PROJECT_ROOT, model.path);
+
+        const modelDir = path.dirname(modelPath);
+        const vadFile = Array.isArray(model.models)
+          ? model.models.find(item => item?.role === 'vad' && item?.filename)
+          : null;
+        const vadModelPath = vadFile ? path.join(modelDir, vadFile.filename) : null;
+
         const args = [
-          '-m', model.path,
-          '--port', port.toString(),
-          '-t', '8',
-          '-l', 'auto',
-          '-pp', '-pr',
-          '--host', '0.0.0.0'
+          whisperScript,
+          '-m', modelPath,
+          '-l', language,
+          '-t', String(threads),
+          '--whisper-port', String(whisperPort),
+          '--flask-port', String(flaskPort)
         ];
 
-        // 如果 VAD 模型存在，添加 VAD 参数
-        if (fs.existsSync(vadModel)) {
-          args.push('--vad', '--vad-model', vadModel);
-        }
-
-        // 新路径：优先走引擎版本目录
-        const defaultVersion = engineManager.getDefaultVersion('whisper');
-        const actualVersion = model.engine_version || defaultVersion;
-        if (actualVersion) {
-          const whisperEnginePath = engineManager.getEnginePath('whisper', actualVersion);
-          if (whisperEnginePath) {
-            const serverPath = path.join(whisperEnginePath, 'whisper-server.exe');
-            const serverPathNoExt = path.join(whisperEnginePath, 'whisper-server');
-            const whisperServerPath = fs.existsSync(serverPath) ? serverPath : serverPathNoExt;
-            if (fs.existsSync(whisperServerPath)) {
-              return spawn(whisperServerPath, args, { shell: true });
-            }
+        if (enableVad) {
+          if (!vadModelPath || !fs.existsSync(vadModelPath)) {
+            throw new Error('已启用 VAD，但卡片配置未提供有效的 VAD 模型文件');
           }
+          args.push('--vad', '--vad-model', vadModelPath);
+        } else {
+          args.push('--no-vad');
         }
 
-        // 旧路径 fallback（兼容历史配置）
-        if (externalPaths.whispercpp) {
-          return spawn(
-            `${externalPaths.whispercpp}/whisper-server`,
-            args,
-            { shell: true }
-          );
-        }
+        console.log(`启动Whisper: ${whisperPython} ${args.join(' ')}`);
 
-        throw new Error('请先安装 whisper 引擎');
+        return spawn(whisperPython, args, {
+          cwd: whisperEnginePath,
+          shell: false
+        });
       }
 
       default:
@@ -868,9 +940,8 @@ class ProcessManager {
       throw new Error('Backend not running');
     }
 
-    processInfo.process.kill();
+    this._terminateProcess(processInfo.process?.pid);
     this.cleanup(modelId);
-
 
     return { status: MODEL_STATUS.STOPPED };
   }
@@ -895,6 +966,22 @@ class ProcessManager {
     }
   }
 
+  _terminateProcess(pid) {
+    if (!pid) return;
+
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        process.kill(pid, 'SIGTERM');
+      }
+    } catch (_) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (_) {}
+    }
+  }
+
   getStatus(modelId) {
     const processInfo = this.processes.get(modelId);
     if (!processInfo) {
@@ -915,6 +1002,15 @@ class ProcessManager {
       port: processInfo.port,
       type: processInfo.type
     };
+  }
+
+  getRunningPortByType(type) {
+    for (const [, info] of this.processes) {
+      if (info.type === type && info.port) {
+        return info.port;
+      }
+    }
+    return null;
   }
 
   /**
@@ -997,6 +1093,39 @@ class ProcessManager {
       return [];
     }
     return processInfo.logs;
+  }
+
+  async _monitorWhisperReadiness(modelId, port, maxAttempts = 20) {
+    const processInfo = this.processes.get(modelId);
+    if (!processInfo || processInfo.ready || processInfo._whisperReadyChecking) return;
+
+    processInfo._whisperReadyChecking = true;
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
+        const latest = this.processes.get(modelId);
+        if (!latest || latest.ready) return;
+
+        try {
+          const resp = await axios.get(`http://127.0.0.1:${port}/health`, { timeout: 1000 });
+          if (resp.status >= 200 && resp.status < 500) {
+            latest.ready = true;
+            eventBus.broadcast('model-updated', { modelId });
+            return;
+          }
+        } catch (_) {
+          // ignore and retry
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } finally {
+      const latest = this.processes.get(modelId);
+      if (latest) latest._whisperReadyChecking = false;
+    }
+  }
+
+  _isWhisperReadyLog(log = '') {
+    return log.includes('Running on http://') || log.includes('服务地址:');
   }
 
   /**

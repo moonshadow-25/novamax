@@ -242,6 +242,86 @@ router.post('/models/custom', async (req, res) => {
   }
 });
 
+router.post('/models/whisper-custom', async (req, res) => {
+  try {
+    const { engine_path, models } = req.body;
+
+    if (!engine_path || !engine_path.trim()) {
+      return res.status(400).json({ error: '请选择引擎路径' });
+    }
+    if (!fs.existsSync(engine_path.trim())) {
+      return res.status(400).json({ error: '引擎路径不存在，请检查后重试' });
+    }
+    if (!Array.isArray(models) || models.length === 0) {
+      return res.status(400).json({ error: '请至少添加一个模型' });
+    }
+
+    const createdModels = [];
+
+    for (const item of models) {
+      const name = item?.name?.trim();
+      const modelPath = item?.path?.trim();
+
+      if (!name) {
+        return res.status(400).json({ error: '模型名称不能为空' });
+      }
+      if (!modelPath) {
+        return res.status(400).json({ error: '模型路径不能为空' });
+      }
+      if (!fs.existsSync(modelPath)) {
+        return res.status(400).json({ error: `模型文件不存在: ${modelPath}` });
+      }
+
+      const duplicate = modelManager.getAll().find(m => m.name === name && m.type === 'whisper');
+      if (duplicate) {
+        return res.status(409).json({ error: `已存在同名 Whisper 模型"${name}"，请使用其他名称` });
+      }
+
+      const size = fs.statSync(modelPath).size;
+      const fileName = path.basename(modelPath);
+
+      const model = await modelManager.create('whisper', {
+        id: `whisper_custom_${name.replace(/[^a-zA-Z0-9一-龥_\-]/g, '_')}`,
+        name,
+        description: name,
+        source: 'custom',
+        path: modelPath,
+        engine_path: engine_path.trim(),
+        local_path: path.dirname(modelPath),
+        downloaded_files: [
+          {
+            filename: fileName,
+            size,
+            is_active: true,
+            matched_preset: null
+          }
+        ],
+        quantizations: [
+          {
+            name: fileName,
+            file: { filename: fileName }
+          }
+        ],
+        files: {
+          model: {
+            filename: fileName,
+            size,
+            is_active: true
+          },
+          mmproj: null
+        }
+      });
+
+      createdModels.push(model);
+      eventBus.broadcast('model-updated', { modelId: model.id });
+    }
+
+    res.json({ success: true, models: createdModels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/models/cloudapi', async (req, res) => {
   try {
     const { name, api_base_url, api_key, api_model, description, cloud_platform } = req.body;
@@ -416,6 +496,26 @@ router.put('/models/:id', async (req, res) => {
           is_active: false
         }));
         console.log('🔄 清除所有已下载文件的active状态');
+      }
+    }
+
+    // Whisper 字段归一化
+    if (currentModel.type === 'whisper') {
+      if (Object.prototype.hasOwnProperty.call(updates, 'engine_version')) {
+        updates.engine_version = updates.engine_version ? String(updates.engine_version).trim() : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'engine_path')) {
+        updates.engine_path = updates.engine_path ? String(updates.engine_path).trim() : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'whisper_config')) {
+        const cfg = updates.whisper_config && typeof updates.whisper_config === 'object' ? updates.whisper_config : {};
+        const normalized = {};
+        if (cfg.threads !== undefined) normalized.threads = Number(cfg.threads) || 8;
+        if (cfg.language !== undefined) normalized.language = String(cfg.language || 'auto');
+        if (cfg.enable_vad !== undefined) normalized.enable_vad = cfg.enable_vad === true;
+        if (cfg.whisper_port !== undefined) normalized.whisper_port = Number(cfg.whisper_port) || 18181;
+        if (cfg.flask_port !== undefined) normalized.flask_port = Number(cfg.flask_port) || 8281;
+        updates.whisper_config = normalized;
       }
     }
 

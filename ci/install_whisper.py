@@ -40,30 +40,19 @@ def _find_whisper_server(install_root):
     return None
 
 
-def _python_has_module(python_exe, module_name):
-    try:
-        result = subprocess.run(
-            [python_exe, '-c', f'import {module_name}'],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace'
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def _detect_venv_backend(python_exe):
-    if _python_has_module(python_exe, 'venv'):
-        return 'venv'
-    if _python_has_module(python_exe, 'virtualenv'):
-        return 'virtualenv'
-    return None
-
-
 def _get_bundled_python(project_root):
     return os.path.join(project_root, 'external', 'python313', 'python.exe')
+
+
+def _check_venv_available(python_exe):
+    result = subprocess.run(
+        [python_exe, '-c', 'import venv'],
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='replace'
+    )
+    return result.returncode == 0
 
 
 def main():
@@ -78,11 +67,10 @@ def main():
     if not os.path.exists(python_exe):
         raise RuntimeError(f"Bundled python not found: {python_exe}")
 
-    venv_backend = _detect_venv_backend(python_exe)
-    if not venv_backend:
+    if not _check_venv_available(python_exe):
         raise RuntimeError(
-            f"Bundled python missing both venv and virtualenv: {python_exe}\n"
-            "Please install venv (stdlib) or virtualenv for external/python313 first."
+            f"Bundled python 缺少 venv 模块，无法创建隔离环境: {python_exe}\n"
+            "请为 external/python313 提供完整 venv 模块后重试。"
         )
 
     venv_path = os.path.join(install_root, 'venv')
@@ -96,40 +84,24 @@ def main():
     print(f"  Python:        {python_exe}")
     print()
 
-    # [1/3] 创建 venv
+    # [1/3] 创建 venv（标准库 venv，不使用 virtualenv）
     print("[1/3] Creating virtual environment...")
-    print(f"  Using backend: {venv_backend}")
-    if os.path.exists(venv_path):
-        print("  [INFO] Existing venv detected, recreating...")
-
-    if venv_backend == 'venv':
-        run([python_exe, '-m', 'venv', '--clear', venv_path])
-    else:
-        clean_env = os.environ.copy()
-        clean_env.pop('PYTHONHOME', None)
-        clean_env.pop('PYTHONPATH', None)
-        clean_env['VIRTUALENV_CONFIG_FILE'] = os.devnull
-        run([python_exe, '-m', 'virtualenv', '--clear', '--reset-app-data', '--activators', 'batch,powershell', venv_path], env=clean_env)
+    run([python_exe, '-m', 'venv', '--clear', venv_path])
     print("  [OK] venv created")
+
+    # 校验 venv 中 ctypes 可用，避免后续 pip 或运行时随机失败
+    run([venv_python, '-c', 'import ctypes'])
+    print("  [OK] ctypes import check passed")
 
     pip_env = os.environ.copy()
     pip_env.pop('PYTHONHOME', None)
     pip_env.pop('PYTHONPATH', None)
 
-    # [2/3] 安装依赖
+    # [2/3] 安装依赖（安装到 venv，不污染 external/python313）
     print("[2/3] Installing dependencies...")
     if os.path.exists(requirements):
-        bundled_python_dir = os.path.dirname(python_exe)
-        pip_env['PATH'] = f"{bundled_python_dir}{os.pathsep}{pip_env.get('PATH', '')}"
-
-        # 只安装到 Whisper 自己的 venv site-packages，避免污染 external/python313
-        venv_site_packages = os.path.join(venv_path, 'Lib', 'site-packages')
-        run([
-            python_exe, '-m', 'pip', 'install', '--no-cache-dir',
-            '--target', venv_site_packages,
-            '-r', requirements
-        ], env=pip_env)
-        print(f"  [OK] Dependencies installed to {venv_site_packages}")
+        run([venv_python, '-m', 'pip', 'install', '--no-cache-dir', '-r', requirements], env=pip_env)
+        print("  [OK] Dependencies installed into whisper venv")
     else:
         print("  [SKIP] requirements.txt not found")
 

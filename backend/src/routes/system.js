@@ -874,4 +874,43 @@ router.post('/system/storage/pick-folder', async (req, res) => {
   }
 });
 
+/** 调用系统原生文件选择对话框 */
+router.post('/system/storage/pick-file', async (req, res) => {
+  try {
+    const { filter } = req.body; // e.g. "*.bin;*.gguf"
+    const filterLine = filter ? `$f.Filter = '模型文件|${filter}'` : "$f.Filter = '所有文件|*.*'";
+
+    const script = [
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$screen = [System.Windows.Forms.Screen]::FromPoint([System.Windows.Forms.Cursor]::Position)',
+      '$owner = New-Object System.Windows.Forms.Form',
+      '$owner.StartPosition = "Manual"',
+      '$owner.Left = [int]($screen.WorkingArea.Left + ($screen.WorkingArea.Width / 2))',
+      '$owner.Top = [int]($screen.WorkingArea.Top + ($screen.WorkingArea.Height / 2))',
+      '$owner.TopMost = $true; $owner.Width = 0; $owner.Height = 0',
+      '$owner.ShowInTaskbar = $false; $owner.Opacity = 0',
+      '$null = $owner.Handle',
+      '$f = New-Object System.Windows.Forms.OpenFileDialog',
+      "$f.Title = '选择模型文件'",
+      filterLine,
+      'if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {',
+      '  Write-Output $f.FileName',
+      '}',
+      '$owner.Dispose()',
+    ].join('\n');
+
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -NonInteractive -STA -EncodedCommand ${encoded}`,
+      { encoding: 'utf8', timeout: 120000 }
+    );
+    const selected = stdout.trim();
+    res.json(selected ? { cancelled: false, path: selected } : { cancelled: true });
+  } catch (error) {
+    const out = error.stdout?.trim();
+    res.json(out ? { cancelled: false, path: out } : { cancelled: true });
+  }
+});
+
 export default router;

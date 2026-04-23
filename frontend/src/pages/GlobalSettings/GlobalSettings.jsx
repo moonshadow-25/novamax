@@ -562,11 +562,16 @@ const GlobalSettings = () => {
     try {
       await engineService.uninstall(engineId, version);
       message.success(`已卸载 ${version}`);
-      await loadEngines();
-      const updated = await engineService.getById(engineId);
-      setSelectedEngine({ ...engines[engineId], ...updated });
+      try {
+        await loadEngines();
+        const updated = await engineService.getById(engineId);
+        setSelectedEngine({ ...engines[engineId], ...updated });
+      } catch (refreshError) {
+        message.warning('卸载完成，但刷新状态失败，请手动刷新');
+        console.error('Failed to refresh engine list after uninstall:', refreshError);
+      }
     } catch (error) {
-      message.error('卸载失败');
+      message.error(error?.response?.data?.error || error?.message || '卸载失败');
       console.error('Failed to uninstall:', error);
     }
   };

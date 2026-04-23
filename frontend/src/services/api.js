@@ -30,6 +30,7 @@ export const modelService = {
   refreshRemote: (id) => api.post(`/models/${id}/refresh-remote`),
   deleteConfig: (id) => api.delete(`/models/${id}/config`),
   addCustomModel: (data) => api.post('/models/custom', data),
+  addWhisperModels: (data) => api.post('/models/whisper-custom', data),
   addCloudApiModel: (data) => api.post('/models/cloudapi', data),
   testCloudApiModel: (data) => api.post('/models/cloudapi/test', data)
 };
@@ -138,11 +139,10 @@ export const ttsService = {
 };
 
 export const whisperService = {
-  transcribe: (file, language, vad = true) => {
+  transcribe: (file, language) => {
     const fd = new FormData();
     fd.append('file', file);
     if (language) fd.append('language', language);
-    fd.append('vad_filter', String(vad));
     return api.post('/whisper/transcribe', fd, { timeout: 300000 });
   },
   translate: (file, language) => {
@@ -151,7 +151,13 @@ export const whisperService = {
     if (language) fd.append('language', language);
     return api.post('/whisper/translate', fd, { timeout: 300000 });
   },
-  health: () => api.get('/whisper/health')
+  health: () => api.get('/whisper/health'),
+  getFilesStatus: (modelId) => api.get(`/whisper/models/${modelId}/files-status`),
+  downloadFile: (modelId, filename) => api.post(`/whisper/models/${modelId}/download`, { filename }),
+  getDownloadStatus: (taskId) => api.get(`/whisper/download-status/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/whisper/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/whisper/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/whisper/download-cancel/${taskId}`)
 };
 
 export const configService = {
@@ -195,6 +201,7 @@ export const systemService = {
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),
   getJobStatus: (jobId) => api.get(`/system/storage/job-status/${jobId}`),
   pickFolder: () => api.post('/system/storage/pick-folder', {}, { timeout: 120000 }),
+  pickFile: (filter = '*.*') => api.post('/system/storage/pick-file', { filter }, { timeout: 120000 }),
   getCacheInfo: () => api.get('/system/cache'),
   clearCache: (keys) => api.delete('/system/cache', { data: keys ? { keys } : {} })
 };

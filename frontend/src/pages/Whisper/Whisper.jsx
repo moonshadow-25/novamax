@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Layout, Button, Select, Space, Typography, message, Spin, Tooltip, Switch } from 'antd';
+import { Layout, Button, Select, Space, Typography, message, Spin, Tooltip } from 'antd';
 import {
   ArrowLeftOutlined, UploadOutlined, CopyOutlined, DownloadOutlined,
   SoundOutlined, RedoOutlined, DeleteOutlined, InboxOutlined, QuestionCircleOutlined
@@ -37,7 +37,6 @@ export default function Whisper() {
   const fileRef = useRef(null);
   const [ready, setReady] = useState(null);
   const [language, setLanguage] = useState('auto');
-  const [vad, setVad] = useState(true);
   const [transcribing, setTranscribing] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -103,7 +102,7 @@ export default function Whisper() {
     if (fileRef.current) fileRef.current.value = '';
     setTranscribing(true);
     try {
-      const res = await whisperService.transcribe(file, language === 'auto' ? undefined : language, vad);
+      const res = await whisperService.transcribe(file, language === 'auto' ? undefined : language);
       const text = res?.text ?? '';
       const newItem = {
         id: Date.now(),
@@ -206,10 +205,6 @@ export default function Whisper() {
                   </Tooltip>
                 </span>
                 <Select size="small" value={language} onChange={setLanguage} options={LANGUAGES} style={{ flex: 1 }} />
-              </div>
-              <div className="wh-param-row">
-                <span className="wh-param-label">VAD</span>
-                <Switch size="small" checked={vad} onChange={setVad} />
               </div>
               <Button type="primary" block icon={<UploadOutlined />} loading={transcribing} onClick={handleTranscribe}
                 disabled={!pendingFile}>

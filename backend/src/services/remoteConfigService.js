@@ -18,14 +18,16 @@ import {
 const USER_FIELDS = [
   'selected_quantization', 'user_parameter_mapping',
   'downloaded_files', 'downloaded_quantizations',
-  'local_path'
+  'local_path',
+  'engine_path', 'engine_version', 'whisper_config', 'path'
 ];
 
 // 远程控制字段（版本升级时从远端覆盖）
 const REMOTE_FIELDS = [
   'name', 'description', 'modelscope_id', 'quantizations',
   'required_models', 'workflow', 'parameter_mapping', 'default_parameters',
-  'mmproj_options', 'capabilities'
+  'mmproj_options', 'capabilities',
+  'models', 'config', 'backend', 'model_type'
 ];
 
 /**
@@ -87,8 +89,19 @@ async function syncModels() {
     const res = await axios.get(url, { timeout: 10000 });
     remoteData = res.data;
   } catch (err) {
-    console.warn(`[remoteConfig] 拉取远程模型配置失败: ${err.message}`);
-    return { added: 0, updated: 0 };
+    console.warn(`[remoteConfig] 拉取远程模型配置失败: ${err.message}，尝试读取本地 models.json`);
+    const localModelsPath = path.join(DATA_DIR, 'models.json');
+    if (fs.existsSync(localModelsPath)) {
+      try {
+        remoteData = JSON.parse(fs.readFileSync(localModelsPath, 'utf-8'));
+        console.log('[remoteConfig] 已从本地 models.json 加载模型配置');
+      } catch (e) {
+        console.warn(`[remoteConfig] 读取本地 models.json 失败: ${e.message}`);
+        return { added: 0, updated: 0 };
+      }
+    } else {
+      return { added: 0, updated: 0 };
+    }
   }
 
   const remoteModels = remoteData?.models || {};
@@ -143,6 +156,12 @@ async function syncModels() {
           });
           const localRefresh = mapRemoteToLocal(refresh);
           if (skipFileFields) delete localRefresh.files;
+
+          // 保留用户本地字段（包括 whisper 的本地配置）
+          USER_FIELDS.forEach(f => {
+            if (existing[f] !== undefined) localRefresh[f] = existing[f];
+          });
+
           await modelManager.update(id, localRefresh);
         }
       }
