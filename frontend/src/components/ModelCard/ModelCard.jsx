@@ -1041,10 +1041,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               onClick={handleStart}
               loading={loading}
               block
-              color="green"
+              color="blue"
               variant="solid"
             >
-              启动
+              运行
             </Button>
           )}
           <Button
@@ -1052,7 +1052,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={() => setWhisperModelsVisible(true)}
             block
           >
-            管理模型
+            管理工作流
           </Button>
         </Space>
       )}

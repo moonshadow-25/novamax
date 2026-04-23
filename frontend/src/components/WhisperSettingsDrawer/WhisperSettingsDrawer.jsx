@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
-import { QuestionCircleOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
 import { engineService, modelService } from '../../services/api';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
@@ -18,7 +18,7 @@ const WHISPER_LANGUAGES = [
   { value: 'ru', label: 'Русский' },
 ];
 
-function WhisperSettingsDrawer({ visible, model, onClose, onSave }) {
+function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -105,7 +105,20 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave }) {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleDelete = async () => {
+    if (!model?.id) return;
+    try {
+      await modelService.delete(model.id);
+      message.success('Whisper 卡片已删除');
+      onClose();
+      onDelete?.();
+      onSave?.();
+    } catch (error) {
+      message.error(error.response?.data?.error || error.message || '删除失败');
+    }
+  };
+
+  const handleSubmit = async ({ closeAfter = true, successText = 'Whisper 配置已保存' } = {}) => {
     if (!model?.id) return;
     try {
       const values = await form.validateFields();
@@ -122,8 +135,8 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave }) {
       };
 
       await modelService.update(model.id, payload);
-      message.success('Whisper 配置已保存');
-      onClose();
+      message.success(successText);
+      if (closeAfter) onClose();
       onSave?.();
     } catch (error) {
       if (error?.errorFields) return;
@@ -136,11 +149,43 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave }) {
   return (
     <>
       <Drawer
-        title="Whisper 配置"
+        title={`${model?.name || 'Whisper'} 配置`}
         placement="right"
         width={520}
         open={visible}
         onClose={onClose}
+        extra={
+          <Space>
+            <Button
+              icon={<UndoOutlined />}
+              size="small"
+              loading={saving}
+              onClick={async () => {
+                const defaults = model?.default_parameters || {};
+                form.setFieldsValue({
+                  threads: defaults.threads ?? 8,
+                  language: defaults.language || 'auto',
+                  enable_vad: defaults.vad ?? false,
+                  whisper_port: defaults.port ?? 18181,
+                  flask_port: defaults.flask_port ?? 8281,
+                });
+                await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
+              }}
+            >
+              恢复默认
+            </Button>
+            <Popconfirm
+              title="删除卡片"
+              description="将删除此卡片配置及所有已下载的模型文件，此操作不可撤销。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={handleDelete}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
+            </Popconfirm>
+          </Space>
+        }
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
             <Button onClick={onClose}>取消</Button>

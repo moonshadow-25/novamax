@@ -91,7 +91,7 @@ function Home() {
     const updates = [];
     for (const [id, engine] of Object.entries(allEngines)) {
       if (engine.category === 'app') continue;
-      if (id === 'tts' || id === 'whisper') continue;
+      if (id === 'tts') continue;
       if (!engine.versions?.length) continue;
       if (downloadingIds.has(id)) continue;
       if (dismissedEngineUpdates.has(id)) continue;
@@ -402,7 +402,13 @@ function Home() {
         <div className="home-toolbar">
           <Tabs
             activeKey={activeTab}
-            onChange={setActiveTab}
+            onChange={(key) => {
+              if (key === 'tts') {
+                message.info('功能正在开发中，敬请期待');
+                return;
+              }
+              setActiveTab(key);
+            }}
             items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
             style={{ flex: 1 }}
           />
@@ -472,12 +478,14 @@ function Home() {
               onToggleFavorite={toggleFavorite}
             />
           ))}
-            <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
-              <div className="add-model-content">
-                <div className="add-icon">+</div>
-                <div>添加新模型</div>
+            {activeTab !== 'whisper' && (
+              <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
+                <div className="add-model-content">
+                  <div className="add-icon">+</div>
+                  <div>添加新模型</div>
+                </div>
               </div>
-            </div>
+            )}
         </div>
       </Content>
       <AddModelModal
