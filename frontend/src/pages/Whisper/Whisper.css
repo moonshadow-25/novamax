@@ -209,3 +209,14 @@
   color: var(--ant-color-text-quaternary, #999);
   font-size: 13px;
 }
+
+.wh-progress-phase {
+  margin-top: 10px;
+  color: var(--ant-color-text-secondary, #666);
+}
+
+.wh-progress-time {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #999);
+}

@@ -782,21 +782,35 @@ class ProcessManager {
     try {
       const process = await this.spawnBackend(model, port);
 
+      const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      const logFilePath = path.join(logDir, `whisper_${modelId}_runtime.log`);
+      const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+      logStream.write(`=== Whisper 启动日志 ===\n`);
+      logStream.write(`模型: ${model.name} (${modelId})\n`);
+      logStream.write(`时间: ${new Date().toISOString()}\n`);
+      logStream.write(`端口: ${port}\n`);
+      logStream.write(`${'='.repeat(50)}\n\n`);
+
       this.processes.set(modelId, {
         process,
         port,
         type: model.type,
         logs: [],
-        ready: false
+        ready: false,
+        logStream
       });
 
       this._attachLegacyProcessListeners(modelId, process, (log) => {
         const processInfo = this.processes.get(modelId);
         if (!processInfo?.ready && this._isWhisperReadyLog(log)) {
-          this._monitorWhisperReadiness(modelId, port).catch(() => {});
+          processInfo.ready = true;
+          console.log(`[${modelId}] Whisper 已就绪（日志检测）`);
+          eventBus.broadcast('model-updated', { modelId });
         }
       });
 
+      // 兜底：HTTP 轮询健康检查（应对日志未捕获的情况）
       this._monitorWhisperReadiness(modelId, port).catch(() => {});
       return { port, status: MODEL_STATUS.RUNNING };
     } catch (error) {
@@ -811,6 +825,7 @@ class ProcessManager {
       const processInfo = this.processes.get(modelId);
       if (!processInfo) return;
       processInfo.logs.push(log);
+      processInfo.logStream?.write(log);
       console.log(`[${modelId}] ${log}`);
       if (onLog) onLog(log);
     });
@@ -820,11 +835,16 @@ class ProcessManager {
       const processInfo = this.processes.get(modelId);
       if (!processInfo) return;
       processInfo.logs.push(log);
+      processInfo.logStream?.write(log);
       console.log(`[${modelId}] ${log}`);
       if (onLog) onLog(log);
     });
 
     process.on('exit', (code) => {
+      const processInfo = this.processes.get(modelId);
+      if (processInfo?.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
+        processInfo.logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
+      }
       console.log(`[${modelId}] Process exited with code ${code}`);
       this.cleanup(modelId);
     });
@@ -961,6 +981,10 @@ class ProcessManager {
         comfyuiRunner.cleanupConfig(modelId);
       }
 
+      if (processInfo.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
+        processInfo.logStream.end();
+      }
+
       this.allocatedPorts.delete(processInfo.port);
       this.processes.delete(modelId);
     }
@@ -1095,7 +1119,7 @@ class ProcessManager {
     return processInfo.logs;
   }
 
-  async _monitorWhisperReadiness(modelId, port, maxAttempts = 20) {
+  async _monitorWhisperReadiness(modelId, port, maxAttempts = 60) {
     const processInfo = this.processes.get(modelId);
     if (!processInfo || processInfo.ready || processInfo._whisperReadyChecking) return;
 
@@ -1125,7 +1149,7 @@ class ProcessManager {
   }
 
   _isWhisperReadyLog(log = '') {
-    return log.includes('Running on http://') || log.includes('服务地址:');
+    return log.includes('Running on http://') || log.includes('服务地址:') || log.includes('Serving on http://');
   }
 
   /**

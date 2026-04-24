@@ -5,7 +5,7 @@ import {
   SoundOutlined, RedoOutlined, DeleteOutlined, InboxOutlined, QuestionCircleOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { whisperService } from '../../services/api';
+import { whisperService, backendService, modelService } from '../../services/api';
 import './Whisper.css';
 
 const { Header, Content } = Layout;
@@ -32,12 +32,59 @@ const fmtTime = (ts) => {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 };
 
+const fmtDuration = (sec) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+const parseWhisperPhaseFromLogs = (logText) => {
+  if (!logText) return '';
+
+  if (logText.includes('语音转录成功完成')) {
+    return '转写完成，正在返回结果...';
+  }
+
+  const progressMatches = [...logText.matchAll(/progress\s*=\s*(\d+)%/g)];
+  if (progressMatches.length > 0) {
+    const latest = progressMatches[progressMatches.length - 1]?.[1];
+    if (latest) return `正在转写文本... ${latest}%`;
+  }
+
+  if (/\[\d{2}:\d{2}:\d{2}\.\d+\s*-->/.test(logText)) {
+    return '正在转写文本...';
+  }
+
+  if (logText.includes('whisper_vad_detect_speech') || logText.includes('VAD is enabled')) {
+    return '正在做语音活动检测（VAD）...';
+  }
+
+  if (logText.includes('直接转发请求到 whisper 服务') || logText.includes('Running Whisper.cpp inference')) {
+    return '已提交转写任务，正在等待引擎处理...';
+  }
+
+  if (logText.includes('开始音频预处理') || logText.includes('执行音频预处理命令')) {
+    return '正在上传与预处理音频...';
+  }
+
+  return '';
+};
+
 export default function Whisper() {
   const nav = useNavigate();
   const fileRef = useRef(null);
   const [ready, setReady] = useState(null);
   const [language, setLanguage] = useState('auto');
   const [transcribing, setTranscribing] = useState(false);
+  const [transcribeStartAt, setTranscribeStartAt] = useState(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [whisperModelId, setWhisperModelId] = useState(null);
+  const [logBaseline, setLogBaseline] = useState(0);
+  const [livePhaseText, setLivePhaseText] = useState('');
   const [dragging, setDragging] = useState(false);
 
   // 当前选中的文件（未转写时）
@@ -49,10 +96,55 @@ export default function Whisper() {
   const [activeId, setActiveId] = useState(null);
 
   useEffect(() => {
-    whisperService.health().then(r => setReady(r?.status === 'ok')).catch(() => setReady(false));
+    let cancelled = false;
+    let timer = null;
+
+    const check = async () => {
+      try {
+        const r = await whisperService.health();
+        if (cancelled) return;
+        setReady(r?.status === 'ok');
+      } catch {
+        if (cancelled) return;
+        setReady(false);
+      }
+
+      timer = setTimeout(check, 2000);
+    };
+
+    check();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
-  // 当前展示的音频信息（来自 pending 或 history）
+  useEffect(() => {
+    if (ready !== true) return;
+    let cancelled = false;
+
+    const loadWhisperModelId = async () => {
+      try {
+        const data = await modelService.getByType('whisper');
+        if (cancelled) return;
+        const models = data?.models || [];
+        const runningModel = models.find(m => m.status === 'running' || m.status === 'starting');
+        const target = runningModel || models[0] || null;
+        setWhisperModelId(target?.id || null);
+      } catch {
+        if (!cancelled) setWhisperModelId(null);
+      }
+    };
+
+    loadWhisperModelId();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
+
   const activeItem = useMemo(() => history.find(h => h.id === activeId), [history, activeId]);
   const displayName = activeItem?.fileName ?? pendingFile?.name ?? null;
   const displaySize = activeItem ? fmtSize(activeItem.fileSize) : pendingFile ? fmtSize(pendingFile.size) : null;
@@ -92,15 +184,66 @@ export default function Whisper() {
     else message.warning('请拖入音频文件');
   };
 
+  useEffect(() => {
+    if (!transcribing || !transcribeStartAt) return;
+    const timer = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - transcribeStartAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [transcribing, transcribeStartAt]);
+
+  useEffect(() => {
+    if (!transcribing || !whisperModelId) return;
+    let cancelled = false;
+
+    const pollLogs = async () => {
+      try {
+        const data = await backendService.getLogs(whisperModelId);
+        if (cancelled) return;
+        const logs = Array.isArray(data?.logs) ? data.logs : [];
+        const merged = logs.slice(logBaseline).join('\n');
+        const parsed = parseWhisperPhaseFromLogs(merged);
+        if (parsed) setLivePhaseText(parsed);
+      } catch {
+        // ignore log poll errors, keep fallback text
+      }
+    };
+
+    pollLogs();
+    const timer = setInterval(pollLogs, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [transcribing, whisperModelId, logBaseline]);
+
+  const transcribePhaseText = useMemo(() => {
+    if (!transcribing) return '';
+    if (livePhaseText) return livePhaseText;
+    if (elapsedSec < 8) return '正在上传与预处理音频...';
+    if (elapsedSec < 45) return '正在分析音频内容，长音频会较慢...';
+    return '正在分段转写，请耐心等待...';
+  }, [transcribing, elapsedSec, livePhaseText]);
+
   /* ── 转写 ── */
   const handleTranscribe = async () => {
     if (!pendingFile) return message.warning('请先选择音频文件');
     const file = pendingFile;
-    // 立即清空上传区
-    setPendingFile(null);
-    if (pendingUrl) { URL.revokeObjectURL(pendingUrl); setPendingUrl(null); }
-    if (fileRef.current) fileRef.current.value = '';
     setTranscribing(true);
+    setTranscribeStartAt(Date.now());
+    setElapsedSec(0);
+    setLivePhaseText('');
+    if (whisperModelId) {
+      try {
+        const data = await backendService.getLogs(whisperModelId);
+        const logs = Array.isArray(data?.logs) ? data.logs : [];
+        setLogBaseline(logs.length);
+      } catch {
+        setLogBaseline(0);
+      }
+    } else {
+      setLogBaseline(0);
+    }
     try {
       const res = await whisperService.transcribe(file, language === 'auto' ? undefined : language);
       const text = res?.text ?? '';
@@ -115,10 +258,17 @@ export default function Whisper() {
       };
       setHistory(prev => [newItem, ...prev]);
       setActiveId(newItem.id);
+      setPendingFile(null);
+      if (pendingUrl) { URL.revokeObjectURL(pendingUrl); setPendingUrl(null); }
+      if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
       message.error('转写失败: ' + (err?.message || '未知错误'));
     } finally {
       setTranscribing(false);
+      setTranscribeStartAt(null);
+      setElapsedSec(0);
+      setLivePhaseText('');
+      setLogBaseline(0);
     }
   };
 
@@ -126,14 +276,32 @@ export default function Whisper() {
   const handleRetranscribe = async () => {
     if (!activeItem?.file) return;
     setTranscribing(true);
+    setTranscribeStartAt(Date.now());
+    setElapsedSec(0);
+    setLivePhaseText('');
+    if (whisperModelId) {
+      try {
+        const data = await backendService.getLogs(whisperModelId);
+        const logs = Array.isArray(data?.logs) ? data.logs : [];
+        setLogBaseline(logs.length);
+      } catch {
+        setLogBaseline(0);
+      }
+    } else {
+      setLogBaseline(0);
+    }
     try {
-      const res = await whisperService.transcribe(activeItem.file, language === 'auto' ? undefined : language, vad);
+      const res = await whisperService.transcribe(activeItem.file, language === 'auto' ? undefined : language);
       const text = res?.text ?? '';
       setHistory(prev => prev.map(h => h.id === activeId ? { ...h, result: text, language, timestamp: Date.now() } : h));
     } catch (err) {
       message.error('转写失败: ' + (err?.message || '未知错误'));
     } finally {
       setTranscribing(false);
+      setTranscribeStartAt(null);
+      setElapsedSec(0);
+      setLivePhaseText('');
+      setLogBaseline(0);
     }
   };
 
@@ -157,13 +325,13 @@ export default function Whisper() {
     URL.revokeObjectURL(a.href);
   };
 
-  if (ready === null) return <Layout className="wh-layout"><div className="wh-empty"><Spin /></div></Layout>;
+  if (ready === null) return <Layout className="wh-layout"><div className="wh-empty"><Spin tip="正在连接 Whisper 服务..." /></div></Layout>;
   if (ready === false) return (
     <Layout className="wh-layout">
       <Header className="wh-header">
         <Space><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => nav(-1)} /><Title level={5} style={{ margin: 0 }}>Whisper 语音转写</Title></Space>
       </Header>
-      <div className="wh-empty"><p>Whisper 服务未就绪</p></div>
+      <div className="wh-empty"><p>Whisper 服务未就绪，请先在模型页面启动</p></div>
     </Layout>
   );
 
@@ -270,7 +438,11 @@ export default function Whisper() {
             {/* 结果内容 */}
             <div className="wh-result-area">
               {transcribing ? (
-                <div className="wh-empty"><Spin tip="转写中..." /></div>
+                <div className="wh-empty">
+                  <Spin />
+                  <div className="wh-progress-phase">{transcribePhaseText}</div>
+                  <div className="wh-progress-time">已耗时 {fmtDuration(elapsedSec)}</div>
+                </div>
               ) : currentResult ? (
                 <pre className="wh-result-text">{currentResult}</pre>
               ) : (

@@ -143,13 +143,13 @@ export const whisperService = {
     const fd = new FormData();
     fd.append('file', file);
     if (language) fd.append('language', language);
-    return api.post('/whisper/transcribe', fd, { timeout: 300000 });
+    return api.post('/whisper/transcribe', fd, { timeout: 7200000 });
   },
   translate: (file, language) => {
     const fd = new FormData();
     fd.append('file', file);
     if (language) fd.append('language', language);
-    return api.post('/whisper/translate', fd, { timeout: 300000 });
+    return api.post('/whisper/translate', fd, { timeout: 7200000 });
   },
   health: () => api.get('/whisper/health'),
   getFilesStatus: (modelId) => api.get(`/whisper/models/${modelId}/files-status`),

@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import comfyuiDownloader from '../services/comfyuiDownloader.js';
@@ -35,6 +36,27 @@ router.post('/whisper/transcribe', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'No audio file provided' });
   }
 
+  const controller = new AbortController();
+  let timedOut = false;
+  let clientDisconnected = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 7200000);
+
+  const onClientAbort = () => {
+    if (res.writableEnded) return;
+    clientDisconnected = true;
+    controller.abort();
+  };
+
+  req.once('aborted', onClientAbort);
+  res.once('close', () => {
+    if (!res.writableEnded) {
+      onClientAbort();
+    }
+  });
+
   try {
     const formData = new FormData();
     formData.append('file', new Blob([fs.readFileSync(req.file.path)]), req.file.originalname);
@@ -45,16 +67,21 @@ router.post('/whisper/transcribe', upload.single('file'), async (req, res) => {
     if (req.body.vad_filter) formData.append('vad_filter', req.body.vad_filter);
     if (req.body.prompt) formData.append('prompt', req.body.prompt);
 
-    const response = await fetch(`${getWhisperBase()}/audio/transcriptions`, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(300000)
+    const response = await axios.post(`${getWhisperBase()}/audio/transcriptions`, formData, {
+      signal: controller.signal,
+      timeout: 0,
+      responseType: 'text',
+      transformResponse: [data => data],
+      validateStatus: () => true
     });
 
-    const text = await response.text();
-    if (!response.ok) {
+    const text = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    if (response.status < 200 || response.status >= 300) {
+      if (res.writableEnded) return;
       return res.status(502).json({ error: `Whisper server error (${response.status}): ${text}` });
     }
+
+    if (res.writableEnded) return;
 
     try {
       res.json(JSON.parse(text));
@@ -62,9 +89,26 @@ router.post('/whisper/transcribe', upload.single('file'), async (req, res) => {
       res.type('text/plain').send(text);
     }
   } catch (error) {
-    console.error(`[whisper] Transcription failed:`, error.message);
-    res.status(502).json({ error: `Transcription failed: ${error.message}` });
+    if (clientDisconnected) {
+      console.warn('[whisper] Transcription request aborted: client disconnected');
+      return;
+    }
+
+    if (timedOut) {
+      console.error('[whisper] Transcription failed: request timeout (7200000ms)');
+      if (!res.writableEnded) {
+        return res.status(504).json({ error: 'Transcription timed out after 2 hours' });
+      }
+      return;
+    }
+
+    console.error(`[whisper] Transcription failed:`, error.message, error.code || '', error.cause?.message || '');
+    if (!res.writableEnded) {
+      res.status(502).json({ error: `Transcription failed: ${error.message}` });
+    }
   } finally {
+    clearTimeout(timeoutId);
+    req.off('aborted', onClientAbort);
     if (req.file?.path) fs.unlink(req.file.path, () => {});
   }
 });
@@ -78,6 +122,27 @@ router.post('/whisper/translate', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'No audio file provided' });
   }
 
+  const controller = new AbortController();
+  let timedOut = false;
+  let clientDisconnected = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 7200000);
+
+  const onClientAbort = () => {
+    if (res.writableEnded) return;
+    clientDisconnected = true;
+    controller.abort();
+  };
+
+  req.once('aborted', onClientAbort);
+  res.once('close', () => {
+    if (!res.writableEnded) {
+      onClientAbort();
+    }
+  });
+
   try {
     const formData = new FormData();
     formData.append('file', new Blob([fs.readFileSync(req.file.path)]), req.file.originalname);
@@ -85,16 +150,21 @@ router.post('/whisper/translate', upload.single('file'), async (req, res) => {
     if (req.body.response_format) formData.append('response_format', req.body.response_format);
     if (req.body.temperature) formData.append('temperature', req.body.temperature);
 
-    const response = await fetch(`${getWhisperBase()}/audio/transcriptions`, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(300000)
+    const response = await axios.post(`${getWhisperBase()}/audio/transcriptions`, formData, {
+      signal: controller.signal,
+      timeout: 0,
+      responseType: 'text',
+      transformResponse: [data => data],
+      validateStatus: () => true
     });
 
-    const text = await response.text();
-    if (!response.ok) {
+    const text = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    if (response.status < 200 || response.status >= 300) {
+      if (res.writableEnded) return;
       return res.status(502).json({ error: `Whisper server error (${response.status}): ${text}` });
     }
+
+    if (res.writableEnded) return;
 
     try {
       res.json(JSON.parse(text));
@@ -102,21 +172,55 @@ router.post('/whisper/translate', upload.single('file'), async (req, res) => {
       res.type('text/plain').send(text);
     }
   } catch (error) {
-    console.error(`[whisper] Translation failed:`, error.message);
-    res.status(502).json({ error: `Translation failed: ${error.message}` });
+    if (clientDisconnected) {
+      console.warn('[whisper] Translation request aborted: client disconnected');
+      return;
+    }
+
+    if (timedOut) {
+      console.error('[whisper] Translation failed: request timeout (7200000ms)');
+      if (!res.writableEnded) {
+        return res.status(504).json({ error: 'Translation timed out after 2 hours' });
+      }
+      return;
+    }
+
+    console.error(`[whisper] Translation failed:`, error.message, error.code || '', error.cause?.message || '');
+    if (!res.writableEnded) {
+      res.status(502).json({ error: `Translation failed: ${error.message}` });
+    }
   } finally {
+    clearTimeout(timeoutId);
+    req.off('aborted', onClientAbort);
     if (req.file?.path) fs.unlink(req.file.path, () => {});
   }
 });
 
 /* ── 健康检查 ── */
 router.get('/whisper/health', async (req, res) => {
-  try {
-    const r = await fetch(getWhisperBase(), { signal: AbortSignal.timeout(5000) });
-    res.json({ status: r.ok ? 'ok' : 'error' });
-  } catch (e) {
-    res.status(503).json({ status: 'error', error: e.message });
+  // 先查 processManager（进程由本后端启动的情况）
+  for (const [, info] of processManager.processes) {
+    if (info.type === 'whisper' && info.ready) {
+      return res.json({ status: 'ok' });
+    }
   }
+
+  // 兜底：直接 HTTP 探测（兼容 /health 不存在但服务可达的情况）
+  const base = getWhisperBase();
+  const candidates = [`${base}/health`, `${base}/`];
+
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (r.status >= 200 && r.status < 500) {
+        return res.json({ status: 'ok' });
+      }
+    } catch (_) {
+      // try next candidate
+    }
+  }
+
+  res.status(503).json({ status: 'error', error: 'Whisper process not ready' });
 });
 
 /* ── 模型文件状态 ── */

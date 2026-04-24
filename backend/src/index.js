@@ -203,7 +203,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 init().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n${'='.repeat(50)}`);
     console.log(`NovaMax is running!`);
     console.log(`URL: http://localhost:${PORT} (accessible from LAN on this machine's IP)`);
@@ -225,6 +225,10 @@ init().then(() => {
       }
     }, 2000);
   });
+  // Node.js 默认 requestTimeout 为 5 分钟，超长音频转录会被强制断开返回 502
+  // 设为 0 表示不限制，由各路由自己的 AbortSignal 控制超时
+  server.requestTimeout = 0;
+  server.timeout = 0;
 }).catch(error => {
   console.error('Failed to initialize:', error);
   process.exit(1);
