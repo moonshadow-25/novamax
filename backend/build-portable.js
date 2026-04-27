@@ -214,10 +214,10 @@ const frontendDest = path.join(RELEASE_DIR, 'frontend');
 copyDirectory(frontendDist, path.join(frontendDest, 'dist'));
 console.log('✅ 前端文件已复制');
 
-// 5. 复制外部工具（仅 node + python313，其余引擎按需下载）
+// 5. 复制外部工具（仅 node + python313 + uv，其余引擎按需下载）
 console.log('📋 复制外部工具...');
 const externalDest = path.join(RELEASE_DIR, 'external');
-for (const tool of ['node', 'python313']) {
+for (const tool of ['node', 'python313', 'uv']) {
   const src = path.join(PROJECT_ROOT, 'external', tool);
   if (fs.existsSync(src)) {
     console.log(`   复制 external/${tool}...`);
@@ -226,7 +226,7 @@ for (const tool of ['node', 'python313']) {
     console.warn(`⚠️  external/${tool} 不存在，跳过`);
   }
 }
-console.log('✅ 外部工具已复制 (node, python313)');
+console.log('✅ 外部工具已复制 (node, python313, uv)');
 
 // 5b. 复制 ci/ 安装脚本（引擎安装时需要）
 console.log('📋 复制 ci/ 安装脚本...');
