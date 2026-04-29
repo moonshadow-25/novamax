@@ -10,13 +10,18 @@ import eventBus from './eventBus.js';
 const TASK_CLEANUP_MS = 5 * 1000; // 5 seconds - 完成/失败后快速清理
 
 /**
- * ComfyUI模型下载服务
+ * 统一文件资源下载器（ComfyUI / Whisper / TTS）
+ *
+ * 与 LLM 下载链路的区别：
+ * - 本下载器用于“按 URL 下载单个资源文件”（含暂停/继续/取消、断点续传）
+ * - LLM 模型下载由 llmDownloader.js 负责，包含量化选择、active file、SHA256 校验等 LLM 专属逻辑
+ *
  * 下载优先级：
  *   1. HTTP 直接下载 - ModelScope URL
  *   2. HTTP 直接下载 - hf-mirror URL
  *   永远不使用 huggingface.co 直连
  */
-class ComfyUIDownloader {
+class CommonDownloader {
   constructor() {
     this.tasks = new Map();
   }
@@ -32,10 +37,13 @@ class ComfyUIDownloader {
     const abortController = new AbortController();
 
     // 注册到 downloadStateManager 以显示在下载中心
-    const stateId = `comfyui_${taskId}`;
-    const dsState = downloadStateManager.createState(stateId, modelInfo.filename, 'comfyui');
+    const stateType = modelInfo.source_model_type || 'comfyui';
+    const stateId = `${stateType}_${taskId}`;
+    const dsState = downloadStateManager.createState(stateId, modelInfo.filename, stateType);
     dsState.comfyuiTaskId = taskId;
-    dsState.displayName = `${modelInfo.filename}`;
+    dsState.displayName = `${modelInfo.source_model_name || modelInfo.filename}`;
+    dsState.sourceModelId = modelInfo.source_model_id || null;
+    dsState.sourceModelType = stateType;
     dsState._modelInfo = modelInfo; // 持久化时保留，重启后可重建任务
 
     this.tasks.set(taskId, {
@@ -467,4 +475,4 @@ class ComfyUIDownloader {
   }
 }
 
-export default new ComfyUIDownloader();
+export default new CommonDownloader();

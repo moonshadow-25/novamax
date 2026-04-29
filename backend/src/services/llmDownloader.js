@@ -12,7 +12,7 @@ import downloadStateManager from './downloadStateManager.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { isQuantizationIncomplete, checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 
-class DownloadService extends EventEmitter {
+class LlmDownloader extends EventEmitter {
   constructor() {
     super();
     // activeDownloads 已被 downloadStateManager 替代
@@ -341,13 +341,13 @@ class DownloadService extends EventEmitter {
           modelName: engine?.name || state.engineId || state.id,
           type: 'engine'
         };
-      } else if (state.type === 'comfyui') {
-        // ComfyUI 模型下载
+      } else if (state.type === 'comfyui' || state.type === 'whisper' || state.type === 'tts') {
+        // ComfyUI / Whisper / TTS 文件下载
         return {
           ...state,
           modelId: state.id,
           modelName: state.displayName || state.targetQuantization,
-          type: 'comfyui',
+          type: state.type,
           comfyuiTaskId: state.comfyuiTaskId
         };
       } else {
@@ -1182,4 +1182,4 @@ class DownloadService extends EventEmitter {
   }
 }
 
-export default new DownloadService();
+export default new LlmDownloader();

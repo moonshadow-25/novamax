@@ -1,24 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
-import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
+import { DeleteOutlined, UndoOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { engineService, modelService } from '../../services/api';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
 
-const WHISPER_LANGUAGES = [
-  { value: 'auto', label: '自动检测' },
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
-  { value: 'ko', label: '한국어' },
-  { value: 'fr', label: 'Français' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'es', label: 'Español' },
-  { value: 'ru', label: 'Русский' },
-];
-
-function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
+function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -29,7 +17,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
   const refreshEngineStatus = useCallback(async () => {
     try {
-      const res = await engineService.getById('whisper');
+      const res = await engineService.getById('tts');
       const installedVersions = res.installed_versions || [];
       setEngineInfo(res);
       setEngines(installedVersions);
@@ -44,14 +32,13 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
   useEffect(() => {
     if (!visible || !model) return;
-
-    const cfg = model.whisper_config || {};
+    const defaults = model.default_parameters || {};
+    const cfg = model.tts_config || {};
     form.setFieldsValue({
-      threads: cfg.threads ?? 8,
-      language: cfg.language || 'auto',
-      enable_vad: cfg.enable_vad ?? false,
-      whisper_port: cfg.whisper_port ?? 18181,
-      flask_port: cfg.flask_port ?? 8281,
+      api_port: cfg.api_port ?? defaults['api-port'] ?? 7863,
+      webui_port: cfg.webui_port ?? defaults['webui-port'] ?? 7864,
+      workers: cfg.workers ?? defaults.workers ?? 1,
+      fp16: cfg.fp16 ?? defaults.fp16 ?? false,
     });
   }, [visible, model, form]);
 
@@ -75,7 +62,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     if (!model?.id) return;
     try {
       await modelService.delete(model.id);
-      message.success('Whisper 卡片已删除');
+      message.success('TTS 卡片已删除');
       onClose();
       onDelete?.();
       onSave?.();
@@ -84,23 +71,21 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     }
   };
 
-  const handleSubmit = async ({ closeAfter = true, successText = 'Whisper 配置已保存' } = {}) => {
+  const handleSubmit = async ({ closeAfter = true, successText = 'TTS 配置已保存' } = {}) => {
     if (!model?.id) return;
     try {
       const values = await form.validateFields();
       setSaving(true);
 
-      const payload = {
-        whisper_config: {
-          threads: values.threads,
-          language: values.language,
-          enable_vad: values.enable_vad,
-          whisper_port: values.whisper_port,
-          flask_port: values.flask_port,
-        },
-      };
+      await modelService.update(model.id, {
+        tts_config: {
+          api_port: values.api_port,
+          webui_port: values.webui_port,
+          workers: values.workers,
+          fp16: values.fp16,
+        }
+      });
 
-      await modelService.update(model.id, payload);
       message.success(successText);
       if (closeAfter) onClose();
       onSave?.();
@@ -115,7 +100,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   return (
     <>
       <Drawer
-        title={`${model?.name || 'Whisper'} 配置`}
+        title={`${model?.name || 'TTS'} 配置`}
         placement="right"
         width={520}
         open={visible}
@@ -129,11 +114,10 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               onClick={async () => {
                 const defaults = model?.default_parameters || {};
                 form.setFieldsValue({
-                  threads: defaults.threads ?? 8,
-                  language: defaults.language || 'auto',
-                  enable_vad: defaults.vad ?? false,
-                  whisper_port: defaults.port ?? 18181,
-                  flask_port: defaults.flask_port ?? 8281,
+                  api_port: defaults['api-port'] ?? 7863,
+                  webui_port: defaults['webui-port'] ?? 7864,
+                  workers: defaults.workers ?? 1,
+                  fp16: defaults.fp16 ?? false,
                 });
                 await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
               }}
@@ -165,10 +149,10 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               <Alert
                 type="warning"
                 showIcon
-                message="未检测到已安装的 Whisper 引擎"
+                message="未检测到已安装的 TTS 引擎"
                 description={
                   <Button type="primary" size="small" onClick={() => setShowEngineModal(true)}>
-                    安装 Whisper 引擎
+                    安装 TTS 引擎
                   </Button>
                 }
               />
@@ -178,7 +162,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   label={
                     <span>
                       引擎版本
-                      <Tooltip title="选择运行此卡片使用的 Whisper 引擎版本；留空表示默认（最新版本）。">
+                      <Tooltip title="选择运行此卡片使用的 TTS 引擎版本；留空表示默认（最新版本）。">
                         <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                       </Tooltip>
                     </span>
@@ -205,31 +189,27 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
           <Divider style={{ margin: '6px 0' }} />
 
           <Form form={form} layout="vertical">
-            <Form.Item label="线程数" name="threads" rules={[{ required: true, message: '请输入线程数' }]}>
+            <Form.Item label="API 端口" name="api_port" rules={[{ required: true, message: '请输入 API 端口' }]}>
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item label="WebUI 端口" name="webui_port" rules={[{ required: true, message: '请输入 WebUI 端口' }]}>
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item label="Workers" name="workers" rules={[{ required: true, message: '请输入 workers 数' }]}>
               <InputNumber min={1} max={8} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="默认语言" name="language" rules={[{ required: true, message: '请选择默认语言' }]}>
-              <Select options={WHISPER_LANGUAGES} />
-            </Form.Item>
-
-            <Form.Item label="Whisper 端口" name="whisper_port" rules={[{ required: true, message: '请输入 Whisper 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="Flask 端口" name="flask_port" rules={[{ required: true, message: '请输入 Flask 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span>
-                  启用 VAD
-                  <Tooltip title="VAD（语音活动检测）可自动过滤音频中的静默片段，提升转写准确率并减少幻听。需要提前下载 VAD 模型文件（ggml-silero-v6.2.0.bin）才能生效。">
+                  启用 FP16
+                  <Tooltip title="启用后使用半精度推理，通常可降低显存占用并提升速度，可能对音质稳定性有轻微影响。">
                     <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                   </Tooltip>
                 </span>
-                <Form.Item name="enable_vad" valuePropName="checked" noStyle>
+                <Form.Item name="fp16" valuePropName="checked" noStyle>
                   <Switch />
                 </Form.Item>
               </div>
@@ -240,12 +220,12 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
       <EngineDownloadModal
         visible={showEngineModal}
-        engineId="whisper"
+        engineId="tts"
         engineInfo={engineInfo}
         onComplete={async () => {
           setShowEngineModal(false);
           await refreshEngineStatus();
-          message.success('Whisper 引擎安装完成');
+          message.success('TTS 引擎安装完成');
         }}
         onCancel={() => setShowEngineModal(false)}
       />
@@ -253,4 +233,4 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   );
 }
 
-export default WhisperSettingsDrawer;
+export default TtsSettingsDrawer;

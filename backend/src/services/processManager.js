@@ -749,6 +749,10 @@ class ProcessManager {
       return this._startWhisperLegacyBackend(modelId, model);
     }
 
+    if (model.type === 'tts') {
+      return this._startIndextts2LegacyBackend(modelId, model);
+    }
+
     const port = await this.allocatePort(model.type);
 
     try {
@@ -819,6 +823,56 @@ class ProcessManager {
     }
   }
 
+  async _startIndextts2LegacyBackend(modelId, model) {
+    const cfg = model.tts_config || {};
+    const fixedPort = Number(cfg.api_port) || null;
+    const port = fixedPort && fixedPort > 0 ? fixedPort : await this.allocatePort('tts');
+
+    if (fixedPort) {
+      if (!(await this.isPortAvailable(port))) {
+        throw new Error(`端口 ${port} 已被占用，请在 TTS 配置中修改 API 端口后重试`);
+      }
+      this.allocatedPorts.add(port);
+    }
+
+    try {
+      const process = await this.spawnBackend(model, port);
+
+      const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      const logFilePath = path.join(logDir, `tts_${modelId}_runtime.log`);
+      const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+      logStream.write(`=== IndexTTS2 启动日志 ===\n`);
+      logStream.write(`模型: ${model.name} (${modelId})\n`);
+      logStream.write(`时间: ${new Date().toISOString()}\n`);
+      logStream.write(`端口: ${port}\n`);
+      logStream.write(`${'='.repeat(50)}\n\n`);
+
+      this.processes.set(modelId, {
+        process,
+        port,
+        type: 'tts',
+        logs: [],
+        ready: false,
+        logStream
+      });
+
+      this._attachLegacyProcessListeners(modelId, process, (log) => {
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo?.ready && this._isIndextts2ReadyLog(log)) {
+          processInfo.ready = true;
+          console.log(`[${modelId}] IndexTTS2 已就绪（日志检测）`);
+          eventBus.broadcast('model-updated', { modelId });
+        }
+      });
+
+      return { port, status: MODEL_STATUS.RUNNING };
+    } catch (error) {
+      this.allocatedPorts.delete(port);
+      throw error;
+    }
+  }
+
   _attachLegacyProcessListeners(modelId, process, onLog = null) {
     process.stdout.on('data', (data) => {
       const log = data.toString();
@@ -866,14 +920,48 @@ class ProcessManager {
       }
 
       case 'tts': {
-        const ttsPython = path.join(externalPaths.indextts, 'engine', 'python.exe');
+        const defaultVersion = model.engine_version || engineManager.getDefaultVersion('tts');
+        if (!defaultVersion) {
+          throw new Error('请先安装 TTS 引擎');
+        }
+
+        const ttsEnginePath = engineManager.getEnginePath('tts', defaultVersion);
+        if (!ttsEnginePath) {
+          throw new Error(`TTS 引擎版本 ${defaultVersion} 未找到`);
+        }
+
+        const venvPythonWin = path.join(ttsEnginePath, '.venv', 'Scripts', 'python.exe');
+        const venvPythonUnix = path.join(ttsEnginePath, '.venv', 'bin', 'python');
+        const venvPython = fs.existsSync(venvPythonWin) ? venvPythonWin : venvPythonUnix;
+        if (!fs.existsSync(venvPython)) {
+          throw new Error(`TTS 虚拟环境 Python 不存在: ${path.join(ttsEnginePath, '.venv')}\n请重新安装 TTS 引擎`);
+        }
+
+        const startScript = path.join(ttsEnginePath, 'start.py');
+        if (!fs.existsSync(startScript)) {
+          throw new Error(`TTS 启动脚本不存在: ${startScript}`);
+        }
+
+        const cfg = model.tts_config || {};
+        const apiPort = Number(cfg.api_port) || port;
+        const webuiPort = Number(cfg.webui_port) || null;
+        const workers = Number(cfg.workers) || null;
+        const fp16 = cfg.fp16 === true;
+        const modelDir = model.local_path && fs.existsSync(model.local_path)
+          ? model.local_path
+          : path.join(MODELS_RUN_DIR, 'tts', model.id);
+
+        const args = [startScript, '--api-port', String(apiPort), '--model-dir', modelDir];
+        if (webuiPort) args.push('--webui-port', String(webuiPort));
+        if (workers) args.push('--workers', String(workers));
+        if (fp16) args.push('--fp16');
+
+        console.log(`启动TTS: ${venvPython} ${args.join(' ')}`);
+
         return spawn(
-          ttsPython,
-          [
-            path.join(externalPaths.indextts, 'api', 'main.py'),
-            '--port', port.toString()
-          ],
-          { cwd: externalPaths.indextts }
+          venvPython,
+          args,
+          { cwd: ttsEnginePath }
         );
       }
 
@@ -890,7 +978,7 @@ class ProcessManager {
         const whisperPort = Number(cfg.whisper_port) || 18181;
         const flaskPort = Number(cfg.flask_port) || port || 8281;
 
-        const defaultVersion = engineManager.getDefaultVersion('whisper');
+        const defaultVersion = model.engine_version || engineManager.getDefaultVersion('whisper');
         if (!defaultVersion) {
           throw new Error('请先安装 whisper 引擎');
         }
@@ -1150,6 +1238,10 @@ class ProcessManager {
 
   _isWhisperReadyLog(log = '') {
     return log.includes('Running on http://') || log.includes('服务地址:') || log.includes('Serving on http://');
+  }
+
+  _isIndextts2ReadyLog(log = '') {
+    return log.includes('Application startup complete') || log.includes('Uvicorn running on') || log.includes('Started server process');
   }
 
   /**

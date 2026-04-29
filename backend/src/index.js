@@ -9,7 +9,7 @@ import logCollector from './services/logCollector.js';
 
 import configManager from './services/configManager.js';
 import modelManager from './services/modelManager.js';
-import downloadService from './services/downloadService.js';
+import llmDownloader from './services/llmDownloader.js';
 import engineManager from './services/engineManager.js';
 import engineDownloader from './services/engineDownloader.js';
 import processManager from './services/processManager.js';
@@ -70,7 +70,7 @@ async function init() {
   }
 
   // 在 modelManager 初始化完成后，临时状态已经不需要清理了
-  await downloadService.cleanupStaleDownloads();
+  await llmDownloader.cleanupStaleDownloads();
 
   // 同步已下载文件记录（迁移：确保 downloaded_files 基于磁盘实际文件）
   await modelManager.syncAllDownloadedFiles();
@@ -98,7 +98,7 @@ async function init() {
   console.log('Initialization complete');
 
   // 非阻塞：对缺少 sha256 的已下载文件启动后台补算（处理崩溃/旧版本遗留数据）
-  downloadService.verifyMissingSHA256().catch(err =>
+  llmDownloader.verifyMissingSHA256().catch(err =>
     console.warn('[SHA256] 启动补算异常:', err.message)
   );
 

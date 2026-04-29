@@ -135,7 +135,13 @@ export const ttsService = {
   getHistoryAudioUrl: (itemId) => `/api/tts/history/${itemId}/audio`,
   deleteHistoryItem: (itemId) => api.delete(`/tts/history/${itemId}`),
   clearHistory: () => api.delete('/tts/history'),
-  health: () => api.get('/tts/health')
+  health: () => api.get('/tts/health'),
+  getFilesStatus: (modelId) => api.get(`/tts/models/${modelId}/files-status`),
+  downloadFile: (modelId, filename) => api.post(`/tts/models/${modelId}/download`, { filename }),
+  getDownloadStatus: (taskId) => api.get(`/tts/download-status/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/tts/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/tts/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/tts/download-cancel/${taskId}`)
 };
 
 export const whisperService = {

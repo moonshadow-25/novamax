@@ -5,7 +5,7 @@ import path from 'path';
 import axios from 'axios';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
-import comfyuiDownloader from '../services/comfyuiDownloader.js';
+import commonDownloader from '../services/commonDownloader.js';
 import eventBus from '../services/eventBus.js';
 import { DATA_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 
@@ -274,10 +274,13 @@ router.post('/whisper/models/:modelId/download', async (req, res) => {
     type: 'whisper',
     dest: modelDir,
     original_url: url,
-    download_sources: { original: url }
+    download_sources: { original: url },
+    source_model_id: model.id,
+    source_model_name: model.name,
+    source_model_type: 'whisper'
   };
 
-  const taskId = comfyuiDownloader.startDownload(modelInfo, async (result) => {
+  const taskId = commonDownloader.startDownload(modelInfo, async (result) => {
     if (result.success) {
       const asrFile = (model.models || []).find(m => m.role === 'asr');
       if (fileInfo.role === 'asr' || !asrFile) {
@@ -294,7 +297,7 @@ router.post('/whisper/models/:modelId/download', async (req, res) => {
 
 /* ── 查询下载任务状态 ── */
 router.get('/whisper/download-status/:taskId', (req, res) => {
-  const task = comfyuiDownloader.getTask(req.params.taskId);
+  const task = commonDownloader.getTask(req.params.taskId);
   if (!task) {
     return res.json({ success: true, task: { status: 'not_found' } });
   }
@@ -304,7 +307,7 @@ router.get('/whisper/download-status/:taskId', (req, res) => {
 /* ── 暂停下载 ── */
 router.post('/whisper/download-pause/:taskId', async (req, res) => {
   try {
-    await comfyuiDownloader.pauseDownload(req.params.taskId);
+    await commonDownloader.pauseDownload(req.params.taskId);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -314,7 +317,7 @@ router.post('/whisper/download-pause/:taskId', async (req, res) => {
 /* ── 继续下载 ── */
 router.post('/whisper/download-resume/:taskId', async (req, res) => {
   try {
-    await comfyuiDownloader.resumeDownload(req.params.taskId);
+    await commonDownloader.resumeDownload(req.params.taskId);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -324,7 +327,7 @@ router.post('/whisper/download-resume/:taskId', async (req, res) => {
 /* ── 取消下载 ── */
 router.post('/whisper/download-cancel/:taskId', async (req, res) => {
   try {
-    await comfyuiDownloader.cancelDownload(req.params.taskId);
+    await commonDownloader.cancelDownload(req.params.taskId);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

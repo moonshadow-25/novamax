@@ -519,6 +519,19 @@ router.put('/models/:id', async (req, res) => {
       }
     }
 
+    // TTS 字段归一化
+    if (currentModel.type === 'tts') {
+      if (Object.prototype.hasOwnProperty.call(updates, 'tts_config')) {
+        const cfg = updates.tts_config && typeof updates.tts_config === 'object' ? updates.tts_config : {};
+        const normalized = {};
+        if (cfg.api_port !== undefined) normalized.api_port = Number(cfg.api_port) || 7863;
+        if (cfg.webui_port !== undefined) normalized.webui_port = Number(cfg.webui_port) || 7864;
+        if (cfg.workers !== undefined) normalized.workers = Number(cfg.workers) || 1;
+        if (cfg.fp16 !== undefined) normalized.fp16 = cfg.fp16 === true;
+        updates.tts_config = normalized;
+      }
+    }
+
     // 如果更新了 api_key（云API模型），需要加密后再存储
     if (updates.api_key) {
       updates.api_key = encrypt(updates.api_key);

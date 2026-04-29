@@ -34,7 +34,7 @@ class EngineDownloader {
       throw new Error('Engine not found');
     }
 
-    const versionInfo = engine.versions.find(v => v.version === version);
+    const versionInfo = engineManager.getEngineVersionInfo(engineId, version);
     if (!versionInfo) {
       throw new Error('Version not found');
     }
@@ -46,7 +46,7 @@ class EngineDownloader {
     // 下载缺失的依赖
     for (const missing of depCheck.missing) {
       const depEngine = engineManager.getEngine(missing.id);
-      const depVersion = versionInfo.rocm_version || depEngine.versions[0].version;
+      const depVersion = versionInfo.rocm_version || engineManager.getEngineVersions(missing.id)[0]?.version;
       const taskId = `${missing.id}::${depVersion}`;
 
       // 若该依赖已在另一条链中下载，不重置其状态，仅加入任务等待
@@ -176,7 +176,7 @@ class EngineDownloader {
    */
   async _downloadEngine(engineId, version) {
     const engine = engineManager.getEngine(engineId);
-    const versionInfo = engine.versions.find(v => v.version === version);
+    const versionInfo = engineManager.getEngineVersionInfo(engineId, version);
 
     const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
     fs.mkdirSync(downloadDir, { recursive: true });
@@ -198,7 +198,8 @@ class EngineDownloader {
       if (versionInfo.download_url) {
         await this._execHttpDownload(engineId, version, versionInfo.download_url, filePath);
       } else {
-        await this._execDownload(engineId, version, engine.modelscope_repo, versionInfo.modelscope_file, downloadDir);
+        const repo = versionInfo.modelscope_repo || engine.modelscope_repo;
+        await this._execDownload(engineId, version, repo, versionInfo.modelscope_file, downloadDir);
       }
     } catch (err) {
       if (fs.existsSync(filePath)) {

@@ -1,5 +1,5 @@
 import express from 'express';
-import downloadService from '../services/downloadService.js';
+import llmDownloader from '../services/llmDownloader.js';
 import eventBus from '../services/eventBus.js';
 
 const router = express.Router();
@@ -12,7 +12,7 @@ router.post('/download/start', async (req, res) => {
       return res.status(400).json({ error: '缺少 modelId 参数' });
     }
 
-    const downloadState = await downloadService.startDownload(modelId, quantizationName);
+    const downloadState = await llmDownloader.startDownload(modelId, quantizationName);
     eventBus.broadcast('download-progress', { modelId, status: 'downloading' });
     res.json(downloadState);
   } catch (error) {
@@ -24,7 +24,7 @@ router.post('/download/start', async (req, res) => {
 router.post('/download/pause/:id', async (req, res) => {
   try {
     const { quantizationName } = req.body || {};
-    const downloadState = await downloadService.pauseDownload(req.params.id, quantizationName);
+    const downloadState = await llmDownloader.pauseDownload(req.params.id, quantizationName);
     eventBus.broadcast('download-progress', { modelId: req.params.id, status: 'paused' });
     res.json(downloadState);
   } catch (error) {
@@ -36,7 +36,7 @@ router.post('/download/pause/:id', async (req, res) => {
 router.post('/download/resume/:id', async (req, res) => {
   try {
     const { quantizationName } = req.body || {};
-    const downloadState = await downloadService.resumeDownload(req.params.id, quantizationName);
+    const downloadState = await llmDownloader.resumeDownload(req.params.id, quantizationName);
     eventBus.broadcast('download-progress', { modelId: req.params.id, status: 'downloading' });
     res.json(downloadState);
   } catch (error) {
@@ -48,7 +48,7 @@ router.post('/download/resume/:id', async (req, res) => {
 router.delete('/download/:id', async (req, res) => {
   try {
     const quantizationName = req.body?.quantizationName || req.query?.q;
-    const result = await downloadService.cancelDownload(req.params.id, quantizationName);
+    const result = await llmDownloader.cancelDownload(req.params.id, quantizationName);
     eventBus.broadcast('model-updated', { modelId: req.params.id });
     res.json(result);
   } catch (error) {
@@ -59,7 +59,7 @@ router.delete('/download/:id', async (req, res) => {
 // 清理所有遗留的下载状态
 router.post('/download/cleanup', async (req, res) => {
   try {
-    await downloadService.cleanupStaleDownloads();
+    await llmDownloader.cleanupStaleDownloads();
     res.json({ success: true, message: '已清理遗留的下载状态' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -69,7 +69,7 @@ router.post('/download/cleanup', async (req, res) => {
 // 获取下载状态
 router.get('/download/status/:id', async (req, res) => {
   try {
-    const status = downloadService.getDownloadStatus(req.params.id);
+    const status = llmDownloader.getDownloadStatus(req.params.id);
     if (!status) {
       return res.status(404).json({ error: '下载任务不存在' });
     }
@@ -82,7 +82,7 @@ router.get('/download/status/:id', async (req, res) => {
 // 获取所有下载任务
 router.get('/download/list', async (req, res) => {
   try {
-    const downloads = downloadService.getAllDownloads();
+    const downloads = llmDownloader.getAllDownloads();
     res.json({ downloads });
   } catch (error) {
     res.status(500).json({ error: error.message });

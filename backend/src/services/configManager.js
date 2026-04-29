@@ -91,7 +91,7 @@ class ConfigManager {
         llamacpp: './external/llamacpp',
         comfyui: './external/comfyui',
         whispercpp: './external/whispercpp',
-        indextts: './external/indextts'
+        indextts2: './external/indextts2'
       },
       ports: {
         llm_range: { start: 8080, end: 8089 },

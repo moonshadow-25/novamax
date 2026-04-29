@@ -13,6 +13,41 @@ class EngineManager {
     this.enginesFilePath = path.join(DATA_DIR, 'engines.json');
   }
 
+  _getEngineVersions(engine) {
+    if (!engine) return [];
+    if (Array.isArray(engine.versions) && engine.versions.length > 0) {
+      return engine.versions;
+    }
+    if (Array.isArray(engine.variants)) {
+      const out = [];
+      for (const variant of engine.variants) {
+        const versions = Array.isArray(variant.versions) ? variant.versions : [];
+        for (const v of versions) {
+          out.push({
+            ...v,
+            variant_id: variant.id,
+            variant_name: variant.name,
+            modelscope_repo: v.modelscope_repo || variant.modelscope_repo || engine.modelscope_repo
+          });
+        }
+      }
+      return out;
+    }
+    return [];
+  }
+
+  getEngineVersionInfo(engineId, version) {
+    const engine = this.getEngine(engineId);
+    if (!engine) return null;
+    const versions = this._getEngineVersions(engine);
+    return versions.find(v => v.version === version) || null;
+  }
+
+  getEngineVersions(engineId) {
+    const engine = this.getEngine(engineId);
+    return this._getEngineVersions(engine);
+  }
+
   /**
    * 初始化：加载本地 engines.json，尝试从服务器更新
    */
@@ -147,7 +182,7 @@ class EngineManager {
       return { satisfied: false, missing: [], error: 'Engine not found' };
     }
 
-    const versionInfo = engine.versions.find(v => v.version === version);
+    const versionInfo = this.getEngineVersionInfo(engineId, version);
     if (!versionInfo) {
       return { satisfied: false, missing: [], error: 'Version not found' };
     }

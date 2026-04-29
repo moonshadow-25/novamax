@@ -10,7 +10,7 @@ import comfyuiModelManager from '../services/comfyuiModelManager.js';
 import modelscopeParser from '../services/modelscopeParser.js';
 import openaiProxyService from '../services/openaiProxyService.js';
 import urlConverter from '../services/urlConverter.js';
-import comfyuiDownloader from '../services/comfyuiDownloader.js';
+import commonDownloader from '../services/commonDownloader.js';
 import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
 import engineManager from '../services/engineManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
@@ -434,7 +434,7 @@ router.post('/comfyui/:id/download-model', async (req, res) => {
     const modelId = req.params.id;
     console.log(`异步启动下载: ${filename} (${type})`);
 
-    const taskId = comfyuiDownloader.startDownload(requiredModel, async (result) => {
+    const taskId = commonDownloader.startDownload(requiredModel, async (result) => {
       if (result.success) {
         const latestModel = modelManager.getById(modelId);
         if (latestModel) {
@@ -484,7 +484,7 @@ router.post('/comfyui/:id/download-all-models', async (req, res) => {
 
     const tasks = missingModels.map(requiredModel => {
       const { type, filename } = requiredModel;
-      const taskId = comfyuiDownloader.startDownload(requiredModel, async (result) => {
+      const taskId = commonDownloader.startDownload(requiredModel, async (result) => {
         if (result.success) {
           const latestModel = modelManager.getById(modelId);
           if (latestModel) {
@@ -517,7 +517,7 @@ router.post('/comfyui/:id/download-all-models', async (req, res) => {
  * GET /api/comfyui/download-status/:taskId
  */
 router.get('/comfyui/download-status/:taskId', (req, res) => {
-  const task = comfyuiDownloader.getTask(req.params.taskId);
+  const task = commonDownloader.getTask(req.params.taskId);
   if (!task) {
     return res.json({ success: true, task: { status: 'not_found' } });
   }
@@ -529,7 +529,7 @@ router.get('/comfyui/download-status/:taskId', (req, res) => {
  * POST /api/comfyui/download-pause/:taskId
  */
 router.post('/comfyui/download-pause/:taskId', (req, res) => {
-  const ok = comfyuiDownloader.pauseDownload(req.params.taskId);
+  const ok = commonDownloader.pauseDownload(req.params.taskId);
   if (!ok) {
     return res.status(400).json({ error: '无法暂停该任务' });
   }
@@ -541,7 +541,7 @@ router.post('/comfyui/download-pause/:taskId', (req, res) => {
  * POST /api/comfyui/download-resume/:taskId
  */
 router.post('/comfyui/download-resume/:taskId', (req, res) => {
-  const ok = comfyuiDownloader.resumeDownload(req.params.taskId);
+  const ok = commonDownloader.resumeDownload(req.params.taskId);
   if (!ok) {
     return res.status(400).json({ error: '无法恢复该任务' });
   }
@@ -553,7 +553,7 @@ router.post('/comfyui/download-resume/:taskId', (req, res) => {
  * POST /api/comfyui/download-cancel/:taskId
  */
 router.post('/comfyui/download-cancel/:taskId', (req, res) => {
-  const ok = comfyuiDownloader.cancelDownload(req.params.taskId);
+  const ok = commonDownloader.cancelDownload(req.params.taskId);
   if (!ok) {
     return res.status(400).json({ error: '无法取消该任务' });
   }

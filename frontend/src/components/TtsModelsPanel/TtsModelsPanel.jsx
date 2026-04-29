@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Table, Tag, Button, Space, Typography, message, Progress } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined,
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined
 } from '@ant-design/icons';
-import { whisperService, downloadService } from '../../services/api';
-import './WhisperModelsPanel.css';
+import { ttsService, downloadService } from '../../services/api';
 
 const { Title, Text } = Typography;
 
@@ -21,10 +20,24 @@ function formatSpeed(bps) {
   return `${formatBytes(bps)}/s`;
 }
 
-function WhisperModelsPanel({ modelId, onPathReady }) {
+function getTypeLabel(record) {
+  if (record.isFolder) return 'Folder';
+  const name = String(record.filename || '').split('/').pop() || '';
+  const idx = name.lastIndexOf('.');
+  if (idx > 0 && idx < name.length - 1) {
+    return name.slice(idx + 1);
+  }
+  return name || 'file';
+}
+
+function getFolderName(filename = '') {
+  const i = filename.lastIndexOf('/');
+  return i > 0 ? filename.slice(0, i) : null;
+}
+
+function TtsModelsPanel({ modelId }) {
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState({ total: 0, downloaded: 0, missing: 0 });
-  // { [filename]: { taskId, progress, totalBytes, downloadedBytes, speed, paused } }
   const [tasks, setTasks] = useState({});
   const tasksRef = useRef({});
   const pollingRef = useRef(false);
@@ -52,7 +65,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       const list = data.downloads || [];
       const restored = {};
       for (const dl of list) {
-        if (dl.type !== 'whisper') continue;
+        if (dl.type !== 'tts') continue;
         if (dl.sourceModelId !== modelId) continue;
         restored[dl.targetQuantization] = {
           taskId: dl.comfyuiTaskId,
@@ -72,11 +85,10 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
   const loadStatus = async () => {
     if (!modelId) return;
     try {
-      const res = await whisperService.getFilesStatus(modelId);
+      const res = await ttsService.getFilesStatus(modelId);
       if (res.success) {
         setFiles(res.files || []);
         setSummary(res.summary || {});
-        if (onPathReady) onPathReady(res.asr_path);
       }
     } catch {}
   };
@@ -91,7 +103,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       const done = [];
       await Promise.all(entries.map(async ([filename, info]) => {
         try {
-          const res = await whisperService.getDownloadStatus(info.taskId);
+          const res = await ttsService.getDownloadStatus(info.taskId);
           const t = res.task;
           if (!t || t.status === 'completed' || t.status === 'not_found') {
             done.push(filename);
@@ -123,7 +135,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
   const handleDownload = async (filename) => {
     setTasks(prev => ({ ...prev, [filename]: { taskId: null, progress: 0 } }));
     try {
-      const res = await whisperService.downloadFile(modelId, filename);
+      const res = await ttsService.downloadFile(modelId, filename);
       if (res.success) {
         setTasks(prev => ({ ...prev, [filename]: { taskId: res.taskId, progress: 0 } }));
       } else {
@@ -140,45 +152,142 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.pauseDownload(taskId);
+      await ttsService.pauseDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: true, speed: 0 } }));
-    } catch (e) { message.error('暂停失败'); }
+    } catch { message.error('暂停失败'); }
   };
 
   const handleResume = async (filename) => {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.resumeDownload(taskId);
+      await ttsService.resumeDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: false } }));
-    } catch (e) { message.error('恢复失败'); }
+    } catch { message.error('恢复失败'); }
   };
 
   const handleCancel = async (filename) => {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.cancelDownload(taskId);
+      await ttsService.cancelDownload(taskId);
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-    } catch (e) { message.error('取消失败'); }
+    } catch { message.error('取消失败'); }
   };
+
+  const handleDownloadFolder = async (folder, fileList) => {
+    const missing = fileList.filter(f => !f.downloaded);
+    if (missing.length === 0) return;
+    for (const f of missing) {
+      await handleDownload(f.filename);
+    }
+    message.success(`已开始下载文件夹 ${folder} 下 ${missing.length} 个文件`);
+  };
+
+  const rows = useMemo(() => {
+    const folderMap = new Map();
+    const singles = [];
+
+    for (const f of files) {
+      const folder = getFolderName(f.filename);
+      if (!folder) {
+        singles.push({ ...f, isFolder: false, key: `file:${f.filename}` });
+        continue;
+      }
+      const list = folderMap.get(folder) || [];
+      list.push(f);
+      folderMap.set(folder, list);
+    }
+
+    const folders = Array.from(folderMap.entries()).map(([folder, list]) => {
+      const total = list.length;
+      const downloaded = list.filter(x => x.downloaded).length;
+      const running = list.filter(x => tasks[x.filename]).length;
+      const paused = list.filter(x => tasks[x.filename]?.paused).length;
+      const aggregate = list.reduce((acc, x) => {
+        const t = tasks[x.filename];
+        if (x.size) acc.totalSize += Number(x.size) || 0;
+        if (!t) return acc;
+        acc.downloadedBytes += t.downloadedBytes || 0;
+        acc.totalBytes += t.totalBytes || 0;
+        return acc;
+      }, { downloadedBytes: 0, totalBytes: 0, totalSize: 0 });
+
+      return {
+        key: `folder:${folder}`,
+        isFolder: true,
+        folder,
+        filename: folder,
+        role: 'folder',
+        downloaded,
+        total,
+        files: list,
+        running,
+        paused,
+        downloadedBytes: aggregate.downloadedBytes,
+        totalBytes: aggregate.totalBytes,
+        totalSize: aggregate.totalSize
+      };
+    });
+
+    folders.sort((a, b) => a.folder.localeCompare(b.folder));
+    singles.sort((a, b) => a.filename.localeCompare(b.filename));
+    return [...singles, ...folders];
+  }, [files, tasks]);
 
   const columns = [
     {
-      title: '类型', dataIndex: 'role', key: 'role', width: 100,
-      render: role => <Tag color={role === 'vad' ? 'orange' : 'blue'}>{role === 'vad' ? 'VAD' : 'ASR'}</Tag>
+      title: '类型', dataIndex: 'role', key: 'role', width: 120,
+      render: (_, record) => {
+        if (record.isFolder) return <Tag color="gold">folder</Tag>;
+        return <Tag color="blue">{getTypeLabel(record)}</Tag>;
+      }
     },
     {
       title: '文件名', dataIndex: 'filename', key: 'filename',
-      render: v => <Text code>{v}</Text>
-    },
-    {
-      title: '大小', dataIndex: 'size', key: 'size', width: 100,
-      render: v => <Text type="secondary">{v ? formatBytes(v) : '-'}</Text>
-    },
-    {
-      title: '状态', key: 'status', width: 180,
       render: (_, record) => {
+        if (record.isFolder) {
+          return (
+            <div>
+              <Text code>{record.folder}</Text>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                自动对应 {record.total} 个文件（弹窗内不展开）
+              </div>
+            </div>
+          );
+        }
+        return <Text code>{record.filename}</Text>;
+      }
+    },
+    {
+      title: '大小', dataIndex: 'size', key: 'size', width: 140,
+      render: (_, record) => {
+        if (record.isFolder) {
+          const label = record.totalSize > 0 ? formatBytes(record.totalSize) : '-';
+          return <Text type="secondary">{label}</Text>;
+        }
+        return <Text type="secondary">{record.size ? formatBytes(record.size) : '-'}</Text>;
+      }
+    },
+    {
+      title: '状态', key: 'status', width: 220,
+      render: (_, record) => {
+        if (record.isFolder) {
+          if (record.running > 0) {
+            const percent = record.totalBytes > 0 ? Math.floor((record.downloadedBytes / record.totalBytes) * 100) : 0;
+            return (
+              <div style={{ minWidth: 160 }}>
+                <Progress percent={percent} size="small" status={record.paused === record.running ? 'exception' : 'active'} style={{ margin: 0 }} />
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                  {record.downloaded}/{record.total} 已下载
+                </div>
+              </div>
+            );
+          }
+          if (record.downloaded === record.total) return <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>;
+          return <Tag icon={<CloseCircleOutlined />} color="error">缺失 {record.total - record.downloaded}</Tag>;
+        }
+
         const task = tasks[record.filename];
         if (task) {
           return (
@@ -203,8 +312,18 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       }
     },
     {
-      title: '操作', key: 'actions', width: 180,
+      title: '操作', key: 'actions', width: 200,
       render: (_, record) => {
+        if (record.isFolder) {
+          const missing = record.files.filter(f => !f.downloaded);
+          if (missing.length === 0) return <Button size="small" disabled>已下载</Button>;
+          return (
+            <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadFolder(record.folder, record.files)}>
+              下载文件夹
+            </Button>
+          );
+        }
+
         const task = tasks[record.filename];
         if (task) {
           return (
@@ -226,7 +345,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     }
   ];
 
-  const missingCount = summary.missing || 0;
+  const tableScroll = rows.length > 8 ? { y: 520 } : undefined;
 
   return (
     <div style={{ marginTop: 8 }}>
@@ -245,7 +364,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
             type="primary"
             icon={<DownloadOutlined />}
             onClick={() => {
-              const targets = files.filter(f => !f.downloaded);
+              const targets = rows.flatMap(r => r.isFolder ? r.files : [r]).filter(f => !f.isFolder && !f.downloaded);
               targets.forEach(f => handleDownload(f.filename));
             }}
           >
@@ -254,25 +373,17 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
         )}
       </div>
 
-      {missingCount > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <Text type="warning">
-            还有 {missingCount} 个文件未下载，请先下载后才能启动 Whisper。
-          </Text>
-        </div>
-      )}
-
       <Table
         columns={columns}
-        dataSource={files}
-        rowKey="filename"
+        dataSource={rows}
+        rowKey="key"
         pagination={false}
         size="small"
         bordered
-        className="whisper-models-table"
+        scroll={tableScroll}
       />
     </div>
   );
 }
 
-export default WhisperModelsPanel;
+export default TtsModelsPanel;

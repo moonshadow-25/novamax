@@ -41,6 +41,8 @@ class DownloadStateManager {
           // ComfyUI 专用字段
           displayName: state.displayName || null,
           comfyuiTaskId: state.comfyuiTaskId || null,
+          sourceModelId: state.sourceModelId || null,
+          sourceModelType: state.sourceModelType || null,
           // ComfyUI 下载需要 modelInfo 才能重建任务
           modelInfo: state.type === 'comfyui' ? (state._modelInfo || null) : undefined
         };
@@ -81,6 +83,8 @@ class DownloadStateManager {
           files: [],
           displayName: record.displayName || null,
           comfyuiTaskId: record.comfyuiTaskId || null,
+          sourceModelId: record.sourceModelId || null,
+          sourceModelType: record.sourceModelType || null,
           _modelInfo: record.modelInfo || null,  // ComfyUI 重建任务所需
           _restoredFromDisk: true    // 标记为磁盘恢复，路由层据此补算进度
         };
@@ -247,7 +251,9 @@ class DownloadStateManager {
         totalBytes: state.totalBytes,
         // ComfyUI 扩展字段
         comfyuiTaskId: state.comfyuiTaskId || null,
-        displayName: state.displayName || null
+        displayName: state.displayName || null,
+        sourceModelId: state.sourceModelId || null,
+        sourceModelType: state.sourceModelType || null
       };
     }
     return result;

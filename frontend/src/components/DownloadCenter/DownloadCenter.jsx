@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Drawer, Progress, Button, Space, Tag, Empty, Typography, message } from 'antd';
 import { PauseCircleOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { downloadService, comfyuiService } from '../../services/api';
+import { downloadService, comfyuiService, whisperService, ttsService } from '../../services/api';
 
 const { Text } = Typography;
 
@@ -76,6 +76,10 @@ function DownloadCenter({ visible, onClose }) {
     try {
       if (dl.type === 'comfyui') {
         await comfyuiService.pauseDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'whisper') {
+        await whisperService.pauseDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'tts') {
+        await ttsService.pauseDownload(dl.comfyuiTaskId);
       } else {
         await downloadService.pause(dl.modelId, dl.targetQuantization);
       }
@@ -89,6 +93,10 @@ function DownloadCenter({ visible, onClose }) {
     try {
       if (dl.type === 'comfyui') {
         await comfyuiService.resumeDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'whisper') {
+        await whisperService.resumeDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'tts') {
+        await ttsService.resumeDownload(dl.comfyuiTaskId);
       } else {
         await downloadService.resume(dl.modelId, dl.targetQuantization);
       }
@@ -102,6 +110,10 @@ function DownloadCenter({ visible, onClose }) {
     try {
       if (dl.type === 'comfyui') {
         await comfyuiService.cancelDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'whisper') {
+        await whisperService.cancelDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'tts') {
+        await ttsService.cancelDownload(dl.comfyuiTaskId);
       } else {
         await downloadService.cancel(dl.modelId, dl.targetQuantization);
       }
@@ -149,6 +161,8 @@ function DownloadCenter({ visible, onClose }) {
                     {dl.type === 'model' && <Tag color="blue" style={{ marginLeft: 8 }}>LLM</Tag>}
                     {dl.type === 'engine' && <Tag color="purple" style={{ marginLeft: 8 }}>引擎</Tag>}
                     {dl.type === 'comfyui' && <Tag color="green" style={{ marginLeft: 8 }}>ComfyUI</Tag>}
+                    {dl.type === 'whisper' && <Tag color="cyan" style={{ marginLeft: 8 }}>Whisper</Tag>}
+                    {dl.type === 'tts' && <Tag color="geekblue" style={{ marginLeft: 8 }}>TTS</Tag>}
                   </Text>
                   <Space size={4}>
                     {dl.type !== 'comfyui' && dl.targetQuantization && (

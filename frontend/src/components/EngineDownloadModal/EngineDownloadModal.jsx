@@ -16,18 +16,38 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   const [selectedVersion, setSelectedVersion] = useState(null);
   const [dependencies, setDependencies] = useState([]);
 
+  const versionGroups = React.useMemo(() => {
+    if (!engineInfo) return [];
+    if (Array.isArray(engineInfo.variants) && engineInfo.variants.length > 0) {
+      return engineInfo.variants.map(v => ({
+        id: v.id,
+        name: v.name,
+        versions: Array.isArray(v.versions) ? v.versions.map(ver => ({
+          ...ver,
+          modelscope_repo: ver.modelscope_repo || v.modelscope_repo || engineInfo.modelscope_repo,
+          variant_id: v.id,
+          variant_name: v.name
+        })) : []
+      }));
+    }
+    return [{ id: 'default', name: '', versions: engineInfo.versions || [] }];
+  }, [engineInfo]);
+
+  const flatVersions = React.useMemo(
+    () => versionGroups.flatMap(g => g.versions),
+    [versionGroups]
+  );
+
   useEffect(() => {
     if (visible && engineInfo) {
-      // 设置默认版本（最新版本）
-      const latestVersion = engineInfo.versions[0]?.version;
+      const latestVersion = flatVersions[0]?.version;
       setSelectedVersion(latestVersion);
 
-      // 检查依赖
       if (latestVersion) {
         checkDependencies(latestVersion);
       }
     }
-  }, [visible, engineInfo]);
+  }, [visible, engineInfo, flatVersions]);
 
   const checkDependencies = async (version) => {
     try {
@@ -150,8 +170,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
       maskClosable={true}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="large">
-        {/* 版本选择器 */}
-        {!downloading && engineInfo.versions?.length > 1 && (
+        {!downloading && flatVersions.length > 1 && (
           <div>
             <Text strong>选择版本：</Text>
             <Select
@@ -162,10 +181,12 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
               }}
               style={{ width: '100%', marginTop: 8 }}
             >
-              {engineInfo.versions.map(v => (
-                <Option key={v.version} value={v.version}>
-                  {v.version} ({formatBytes(v.size)})
-                </Option>
+              {versionGroups.map(group => (
+                group.versions.map(v => (
+                  <Option key={`${group.id}:${v.version}`} value={v.version}>
+                    {group.name ? `${group.name} / ` : ''}{v.version} ({formatBytes(v.size)})
+                  </Option>
+                ))
               ))}
             </Select>
           </div>
@@ -181,7 +202,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
           <div style={{ marginTop: 4 }}>
             <Text strong>大小：</Text>
             <Text>
-              {formatBytes(engineInfo?.versions?.find(v => v.version === selectedVersion)?.size)}
+              {formatBytes(flatVersions.find(v => v.version === selectedVersion)?.size)}
             </Text>
           </div>
         </div>

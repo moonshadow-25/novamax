@@ -32,7 +32,9 @@ import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
 import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 import WhisperModelsPanel from '../WhisperModelsPanel/WhisperModelsPanel';
+import TtsModelsPanel from '../TtsModelsPanel/TtsModelsPanel';
 import WhisperSettingsDrawer from '../WhisperSettingsDrawer/WhisperSettingsDrawer';
+import TtsSettingsDrawer from '../TtsSettingsDrawer/TtsSettingsDrawer';
 import './ModelCard.css';
 
 const { Text } = Typography;
@@ -78,6 +80,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [loading, setLoading] = useState(false);
   const [parametersVisible, setParametersVisible] = useState(false);
   const [whisperSettingsVisible, setWhisperSettingsVisible] = useState(false);
+  const [ttsSettingsVisible, setTtsSettingsVisible] = useState(false);
   const [quantizationSelectorVisible, setQuantizationSelectorVisible] = useState(false);
   const [realDownloadedQuantizations, setRealDownloadedQuantizations] = useState([]);
   const [realDownloadedFiles, setRealDownloadedFiles] = useState([]);
@@ -89,8 +92,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(model.name);
 
-  // whisper 管理弹窗
+  // whisper / tts 管理弹窗
   const [whisperModelsVisible, setWhisperModelsVisible] = useState(false);
+  const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
 
   // ComfyUI 启动相关
   const [comfyuiLaunchVisible, setComfyuiLaunchVisible] = useState(false);
@@ -243,6 +247,30 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         if (!engineResult.installed) {
           setEngineInfo(engineResult.engineInfo);
           setEngineTarget('llamacpp');
+          setShowEngineModal(true);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // TTS 模型启动前检查 tts 引擎
+      if (model.type === 'tts') {
+        const engineResult = await engineService.checkInstalled('tts');
+        if (!engineResult.installed) {
+          setEngineInfo(engineResult.engineInfo);
+          setEngineTarget('tts');
+          setShowEngineModal(true);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Whisper 模型启动前检查 whisper 引擎
+      if (model.type === 'whisper') {
+        const engineResult = await engineService.checkInstalled('whisper');
+        if (!engineResult.installed) {
+          setEngineInfo(engineResult.engineInfo);
+          setEngineTarget('whisper');
           setShowEngineModal(true);
           setLoading(false);
           return;
@@ -607,6 +635,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       setComfyuiSettingsVisible(true);
     } else if (model.type === 'whisper') {
       setWhisperSettingsVisible(true);
+    } else if (model.type === 'tts') {
+      setTtsSettingsVisible(true);
     } else {
       setParametersVisible(true);
     }
@@ -1018,8 +1048,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* Whisper 专属按钮 */}
-      {model.type === 'whisper' && model.source !== 'custom' && (
+      {/* Whisper / TTS 专属按钮 */}
+      {(model.type === 'whisper' && model.source !== 'custom') && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
@@ -1052,6 +1082,40 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={() => setWhisperModelsVisible(true)}
             block
           >
+            管理工作流
+          </Button>
+        </Space>
+      )}
+
+      {model.type === 'tts' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          {isStarting ? (
+            <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
+              中断启动
+            </Button>
+          ) : isRunning ? (
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
+                停止
+              </Button>
+              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
+                使用
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleStart}
+              loading={loading}
+              block
+              color="blue"
+              variant="solid"
+            >
+              运行
+            </Button>
+          )}
+          <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
             管理工作流
           </Button>
         </Space>
@@ -1221,8 +1285,32 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       </Modal>
 
 
-      {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote） */}
-      {canStart && model.type !== 'comfyui' && !(model.type === 'whisper' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {/* TTS 模型管理 Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>{model.name}</span>
+          </Space>
+        }
+        open={ttsModelsVisible}
+        onCancel={() => setTtsModelsVisible(false)}
+        footer={null}
+        width={980}
+        destroyOnClose
+      >
+        <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="模型描述">
+            <Text>{model.description || '暂无描述'}</Text>
+          </Descriptions.Item>
+        </Descriptions>
+        <Divider style={{ margin: '12px 0' }} />
+        <TtsModelsPanel modelId={model.id} />
+      </Modal>
+
+
+      {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote、非TTS） */}
+      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'whisper' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger
@@ -1380,6 +1468,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         onSave={onUpdate}
       />
 
+      <TtsSettingsDrawer
+        visible={ttsSettingsVisible}
+        model={model}
+        onClose={() => setTtsSettingsVisible(false)}
+        onSave={onUpdate}
+        onDelete={onUpdate}
+      />
+
       {/* 量化版本选择器 */}
       {model.quantizations && model.quantizations.length > 0 && (
         <QuantizationSelector
@@ -1415,11 +1511,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         engineInfo={engineInfo}
         onComplete={() => {
           setShowEngineModal(false);
-          if (engineTarget === 'llamacpp') {
-            doStartModel();
-          } else {
-            // 引擎就绪后重新走完整流程（会继续检测模型是否下载全）
+          if (engineTarget === 'comfyui') {
             handleComfyUILaunch();
+          } else {
+            doStartModel();
           }
         }}
         onCancel={() => setShowEngineModal(false)}

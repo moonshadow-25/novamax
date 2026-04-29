@@ -460,6 +460,17 @@ const GlobalSettings = () => {
     return `${h}时${m}分`;
   };
 
+  const resolveEngineVersions = (engine) => {
+    if (!engine) return [];
+    if (Array.isArray(engine.versions) && engine.versions.length > 0) return engine.versions;
+    if (Array.isArray(engine.variants)) {
+      return engine.variants.flatMap(variant =>
+        (variant.versions || []).map(v => ({ ...v, variant_name: variant.name }))
+      );
+    }
+    return [];
+  };
+
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
     'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'files', 'capabilities'];
 
@@ -546,7 +557,8 @@ const GlobalSettings = () => {
   const handleDownloadEngine = async (engineId, version = null) => {
     try {
       const engine = engines[engineId];
-      const targetVersion = version || engine.versions[0].version;
+      const resolvedVersions = resolveEngineVersions(engine);
+      const targetVersion = version || resolvedVersions[0]?.version;
       await engineService.download(engineId, targetVersion);
       // 立即开启强制轮询，防止 download_state 尚未就绪时漏掉状态
       setForcePolling(true);
@@ -622,13 +634,13 @@ const GlobalSettings = () => {
     <Card title="引擎管理" extra={<Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>}>
       <List
         // 过滤掉 category 为 app 由运行状态页面统一管理
-        // tts 功能暂未完成，先隐藏，后续完善后再放出来
-        dataSource={Object.values(engines).filter(e => e.category !== 'app' && e.id !== 'tts')}
+        dataSource={Object.values(engines).filter(e => e.category !== 'app')}
         renderItem={engine => {
           const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
           const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));
           const isDownloading = activeStates.length > 0;
-          const latestVersion = engine.versions?.[0];
+          const resolvedVersions = resolveEngineVersions(engine);
+          const latestVersion = resolvedVersions[0];
           const hasNewerVersion = engine.installed && latestVersion &&
             !engine.installed_versions?.some(v => v.version === latestVersion.version);
 
@@ -1324,7 +1336,7 @@ const GlobalSettings = () => {
           {/* 下载新版本 */}
           <Card size="small" title="可用版本">
             <List
-              dataSource={selectedEngine.versions || []}
+              dataSource={resolveEngineVersions(selectedEngine)}
               renderItem={version => {
                 const isInstalled = selectedEngine.installed_versions?.some(
                   v => v.version === version.version
