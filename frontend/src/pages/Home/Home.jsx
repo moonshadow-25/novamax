@@ -483,7 +483,7 @@ function Home() {
               onToggleFavorite={toggleFavorite}
             />
           ))}
-            {activeTab !== 'whisper' && (
+            {(activeTab === 'llm' || activeTab === 'comfyui') && (
               <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
                 <div className="add-model-content">
                   <div className="add-icon">+</div>

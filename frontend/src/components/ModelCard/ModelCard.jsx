@@ -238,6 +238,29 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     await runRpcValidation(rpcValidationDevices);
   };
 
+  const buildTtsVariantEngineInfo = (rawEngineInfo) => {
+    if (!rawEngineInfo || !Array.isArray(rawEngineInfo.variants)) return rawEngineInfo;
+
+    const candidate = String(
+      model?.engine_version ||
+      model?.remote_snapshot?.engine_version ||
+      model?.id || ''
+    ).toLowerCase();
+
+    let marker = null;
+    if (candidate.includes('1.5') || candidate.includes('tts1.5')) marker = 'indextts1.5';
+    if (candidate.includes('tts2') || candidate.includes('index_tts2') || candidate.includes('index-tts2')) marker = 'indextts2';
+    if (!marker) return rawEngineInfo;
+
+    const matched = rawEngineInfo.variants.filter(v => String(v.id || '').toLowerCase() === marker);
+    if (matched.length === 0) return rawEngineInfo;
+
+    return {
+      ...rawEngineInfo,
+      variants: matched
+    };
+  };
+
   const handleStart = async () => {
     setLoading(true);
     try {
@@ -257,7 +280,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       if (model.type === 'tts') {
         const engineResult = await engineService.checkInstalled('tts');
         if (!engineResult.installed) {
-          setEngineInfo(engineResult.engineInfo);
+          setEngineInfo(buildTtsVariantEngineInfo(engineResult.engineInfo));
           setEngineTarget('tts');
           setShowEngineModal(true);
           setLoading(false);
@@ -624,8 +647,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     // TTS: 直接打开 WebUI 页面（本机/局域网均使用当前访问的 hostname）
     if (model.type === 'tts') {
       const host = window.location.hostname || '127.0.0.1';
-      const webuiPort = model.tts_config?.webui_port || 7864;
-      window.open(`http://${host}:${webuiPort}`, '_blank');
+      const webuiPort = model.tts_config?.webui_port || model.parameters?.['webui-port'] || 7864;
+      const apiPort = model.tts_config?.api_port || model.parameters?.['api-port'] || 7863;
+      window.open(`http://${host}:${webuiPort}?api_port=${apiPort}`, '_blank');
       return;
     }
     const routes = {
@@ -838,7 +862,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               title={isFavorited ? '取消收藏' : '收藏'}
             />
           )}
-          {!!model.modelscope_id && (
+          {!!model.modelscope_id && model.type !== 'tts' && (
             <Button
               size="small"
               icon={<CloudSyncOutlined />}
@@ -878,7 +902,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       </div>
       <div className="model-meta">
-        {model.source === 'custom' ? (
+        {model.type === 'tts' ? (
+          <span />
+        ) : model.source === 'custom' ? (
           <span className="model-source">custom</span>
         ) : model.source === 'cloudapi' ? (
           <span className="model-source">{model.cloud_platform || '云API'}</span>

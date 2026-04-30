@@ -15,24 +15,74 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [showEngineModal, setShowEngineModal] = useState(false);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
 
+  const inferVariantMarker = useCallback(() => {
+    const candidate = String(
+      model?.engine_version ||
+      model?.remote_snapshot?.engine_version ||
+      model?.id || ''
+    ).toLowerCase();
+
+    if (candidate.includes('1.5') || candidate.includes('tts1.5')) return 'index-tts1.5';
+    if (candidate.includes('tts2') || candidate.includes('index_tts2') || candidate.includes('index-tts2')) return 'index-tts2';
+    return null;
+  }, [model]);
+
+  const filterVersionsByVariant = useCallback((versions) => {
+    const marker = inferVariantMarker();
+    if (!marker) return versions || [];
+    return (versions || []).filter(v => String(v.version || '').toLowerCase().includes(marker));
+  }, [inferVariantMarker]);
+
+  const buildVariantEngineInfo = useCallback((raw) => {
+    if (!raw) return null;
+    const marker = inferVariantMarker();
+    if (!marker) return raw;
+
+    const matchedVariants = Array.isArray(raw.variants)
+      ? raw.variants.filter(v => String(v.id || '').toLowerCase() === marker.replace('index-', 'index'))
+      : [];
+
+    if (matchedVariants.length > 0) {
+      return {
+        ...raw,
+        variants: matchedVariants
+      };
+    }
+
+    return {
+      ...raw,
+      variants: [{
+        id: marker.replace('index-', 'index'),
+        name: marker.includes('1.5') ? 'IndexTTS 1.5' : 'IndexTTS 2.0',
+        versions: (raw.versions || []).filter(v => String(v.version || '').toLowerCase().includes(marker))
+      }]
+    };
+  }, [inferVariantMarker]);
+
   const refreshEngineStatus = useCallback(async () => {
     try {
       const res = await engineService.getById('tts');
-      const installedVersions = res.installed_versions || [];
-      setEngineInfo(res);
+      const installedVersions = filterVersionsByVariant(res.installed_versions || []);
+      setEngineInfo(buildVariantEngineInfo(res));
       setEngines(installedVersions);
       setEngineInstalled(installedVersions.length > 0);
-      setSelectedEngineVersion(model?.engine_version || null);
+
+      const pinnedVersion = model?.engine_version || null;
+      if (pinnedVersion && installedVersions.some(v => v.version === pinnedVersion)) {
+        setSelectedEngineVersion(pinnedVersion);
+      } else {
+        setSelectedEngineVersion(installedVersions[0]?.version || null);
+      }
     } catch {
       setEngineInfo(null);
       setEngines([]);
       setEngineInstalled(false);
     }
-  }, []);
+  }, [buildVariantEngineInfo, filterVersionsByVariant, model]);
 
   useEffect(() => {
     if (!visible || !model) return;
-    const defaults = model.default_parameters || {};
+    const defaults = model.parameters || model.default_parameters || {};
     const cfg = model.tts_config || {};
     form.setFieldsValue({
       api_port: cfg.api_port ?? defaults['api-port'] ?? 7863,
@@ -112,7 +162,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               size="small"
               loading={saving}
               onClick={async () => {
-                const defaults = model?.default_parameters || {};
+                const defaults = model?.parameters || model?.default_parameters || {};
                 form.setFieldsValue({
                   api_port: defaults['api-port'] ?? 7863,
                   webui_port: defaults['webui-port'] ?? 7864,

@@ -25,10 +25,29 @@ class LogCollector {
     return `${y}-${m}-${d}`;
   }
 
+  _cleanupOldLogs(logsDir) {
+    const files = fs.readdirSync(logsDir);
+    const now = new Date();
+
+    for (const file of files) {
+      const match = /^novamax-(\d{4}-\d{2}-\d{2})\.log$/.exec(file);
+      if (!match) continue;
+
+      const logDate = new Date(`${match[1]}T00:00:00`);
+      if (Number.isNaN(logDate.getTime())) continue;
+
+      const ageDays = Math.floor((now - logDate) / (24 * 60 * 60 * 1000));
+      if (ageDays > 7) {
+        fs.unlinkSync(path.join(logsDir, file));
+      }
+    }
+  }
+
   _initFileStream() {
     const logsDir = path.join(DATA_DIR, 'logs');
     try {
       fs.mkdirSync(logsDir, { recursive: true });
+      this._cleanupOldLogs(logsDir);
       const dateStr = this._getDateString();
       const logFile = path.join(logsDir, `novamax-${dateStr}.log`);
       if (this._logStream) {

@@ -471,6 +471,39 @@ const GlobalSettings = () => {
     return [];
   };
 
+  const resolveEngineRows = () => {
+    const rows = [];
+    for (const engine of Object.values(engines).filter(e => e.category !== 'app')) {
+      if (engine.id !== 'tts' || !Array.isArray(engine.variants) || engine.variants.length === 0) {
+        rows.push(engine);
+        continue;
+      }
+
+      for (const variant of engine.variants) {
+        const variantVersions = Array.isArray(variant.versions) ? variant.versions : [];
+        const variantInstalled = (engine.installed_versions || []).filter(v => String(v.version || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
+        const variantBroken = (engine.broken_versions || []).filter(v => String(v.version || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
+        const variantDownloadStates = (engine.download_states || []).filter(s => String(s.targetQuantization || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
+
+        rows.push({
+          ...engine,
+          id: `tts:${variant.id}`,
+          engine_api_id: 'tts',
+          name: `TTS / ${variant.name}`,
+          description: `${engine.description}（${variant.name}）`,
+          variants: [variant],
+          installed: variantInstalled.length > 0,
+          installed_versions: variantInstalled,
+          broken_versions: variantBroken,
+          default_version: variantInstalled[0]?.version || null,
+          download_states: variantDownloadStates,
+          download_state: variantDownloadStates[0] || null
+        });
+      }
+    }
+    return rows;
+  };
+
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
     'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'files', 'capabilities'];
 
@@ -634,7 +667,7 @@ const GlobalSettings = () => {
     <Card title="引擎管理" extra={<Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>}>
       <List
         // 过滤掉 category 为 app 由运行状态页面统一管理
-        dataSource={Object.values(engines).filter(e => e.category !== 'app')}
+        dataSource={resolveEngineRows()}
         renderItem={engine => {
           const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
           const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));
@@ -681,7 +714,7 @@ const GlobalSettings = () => {
                   <Button
                     type="primary"
                     icon={<DownloadOutlined />}
-                    onClick={() => handleDownloadEngine(engine.id)}
+                    onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id)}
                   >
                     下载
                   </Button>
@@ -1298,14 +1331,14 @@ const GlobalSettings = () => {
                     <Button
                       size="small"
                       icon={<SyncOutlined />}
-                      onClick={() => handleReinstall(selectedEngine.id, version.version)}
+                      onClick={() => handleReinstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
                     >
                       重装
                     </Button>,
                     <Popconfirm
                       title="确认卸载"
                       description={`确定要卸载版本 ${version.version} 吗？`}
-                      onConfirm={() => handleUninstall(selectedEngine.id, version.version)}
+                      onConfirm={() => handleUninstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
                       okText="确定"
                       cancelText="取消"
                     >
@@ -1362,7 +1395,7 @@ const GlobalSettings = () => {
                           size="small"
                           icon={<DownloadOutlined />}
                           onClick={() => {
-                            handleDownloadEngine(selectedEngine.id, version.version);
+                            handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
                           }}
                         >
                           下载

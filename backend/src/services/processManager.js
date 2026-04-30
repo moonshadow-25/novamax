@@ -4,7 +4,7 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT } from '../config/constants.js';
+import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import { getAuxiliaryScriptPath } from '../utils/pathHelper.js';
 import { decrypt } from '../utils/crypto.js';
 import modelManager from './modelManager.js';
@@ -920,21 +920,30 @@ class ProcessManager {
       }
 
       case 'tts': {
-        const defaultVersion = model.engine_version || engineManager.getDefaultVersion('tts');
-        if (!defaultVersion) {
+        const requestedVersion = model.engine_version || model.remote_snapshot?.engine_version || engineManager.getDefaultVersion('tts');
+        if (!requestedVersion) {
           throw new Error('请先安装 TTS 引擎');
         }
 
-        const ttsEnginePath = engineManager.getEnginePath('tts', defaultVersion);
+        let resolvedVersion = requestedVersion;
+        let ttsEnginePath = engineManager.getEnginePath('tts', resolvedVersion);
         if (!ttsEnginePath) {
-          throw new Error(`TTS 引擎版本 ${defaultVersion} 未找到`);
+          const installed = engineManager.getInstalledVersions('tts');
+          const matched = installed.find(v => String(v.version || '').toLowerCase().includes(String(requestedVersion).toLowerCase()));
+          if (matched) {
+            resolvedVersion = matched.version;
+            ttsEnginePath = matched.path;
+          }
+        }
+        if (!ttsEnginePath) {
+          throw new Error(`TTS 引擎版本 ${requestedVersion} 未找到`);
         }
 
-        const venvPythonWin = path.join(ttsEnginePath, '.venv', 'Scripts', 'python.exe');
-        const venvPythonUnix = path.join(ttsEnginePath, '.venv', 'bin', 'python');
+        const venvPythonWin = path.join(ttsEnginePath, 'venv', 'Scripts', 'python.exe');
+        const venvPythonUnix = path.join(ttsEnginePath, 'venv', 'bin', 'python');
         const venvPython = fs.existsSync(venvPythonWin) ? venvPythonWin : venvPythonUnix;
         if (!fs.existsSync(venvPython)) {
-          throw new Error(`TTS 虚拟环境 Python 不存在: ${path.join(ttsEnginePath, '.venv')}\n请重新安装 TTS 引擎`);
+          throw new Error(`TTS 虚拟环境 Python 不存在: ${path.join(ttsEnginePath, 'venv')}\n请重新安装 TTS 引擎`);
         }
 
         const startScript = path.join(ttsEnginePath, 'start.py');
@@ -943,13 +952,15 @@ class ProcessManager {
         }
 
         const cfg = model.tts_config || {};
-        const apiPort = Number(cfg.api_port) || port;
-        const webuiPort = Number(cfg.webui_port) || null;
-        const workers = Number(cfg.workers) || null;
-        const fp16 = cfg.fp16 === true;
-        const modelDir = model.local_path && fs.existsSync(model.local_path)
-          ? model.local_path
-          : path.join(MODELS_RUN_DIR, 'tts', model.id);
+        const defaults = model.parameters || {};
+        const apiPort = Number(cfg.api_port ?? defaults['api-port']) || port;
+        const webuiPort = Number(cfg.webui_port ?? defaults['webui-port']) || null;
+        const workers = Number(cfg.workers ?? defaults.workers) || null;
+        const fp16 = (cfg.fp16 ?? defaults.fp16) === true;
+        const expectedModelDir = path.join(MODELS_RUN_DIR, 'tts', model.id);
+        const modelDir = fs.existsSync(expectedModelDir)
+          ? expectedModelDir
+          : (model.local_path && fs.existsSync(model.local_path) ? model.local_path : expectedModelDir);
 
         const args = [startScript, '--api-port', String(apiPort), '--model-dir', modelDir];
         if (webuiPort) args.push('--webui-port', String(webuiPort));
