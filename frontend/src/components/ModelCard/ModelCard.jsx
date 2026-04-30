@@ -621,10 +621,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       window.open(`http://${host}:${model.port}`, '_blank');
       return;
     }
+    // TTS: 直接打开 WebUI 页面（本机/局域网均使用当前访问的 hostname）
+    if (model.type === 'tts') {
+      const host = window.location.hostname || '127.0.0.1';
+      const webuiPort = model.tts_config?.webui_port || 7864;
+      window.open(`http://${host}:${webuiPort}`, '_blank');
+      return;
+    }
     const routes = {
       llm: `/llm/${model.id}`,
       comfyui: `/comfyui/${model.id}`,
-      tts: `/tts/${model.id}`,
+      // tts: `/tts/${model.id}`,  // 已改为直接打开 WebUI，如需恢复 React 页面取消此注释并删除上方 tts 块
       whisper: `/whisper/${model.id}`
     };
     navigate(routes[model.type]);

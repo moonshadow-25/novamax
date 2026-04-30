@@ -21,18 +21,13 @@ function formatSpeed(bps) {
 }
 
 function getTypeLabel(record) {
-  if (record.isFolder) return 'Folder';
+  if (record.isGroup) return 'folder';
   const name = String(record.filename || '').split('/').pop() || '';
   const idx = name.lastIndexOf('.');
   if (idx > 0 && idx < name.length - 1) {
     return name.slice(idx + 1);
   }
   return name || 'file';
-}
-
-function getFolderName(filename = '') {
-  const i = filename.lastIndexOf('/');
-  return i > 0 ? filename.slice(0, i) : null;
 }
 
 function TtsModelsPanel({ modelId }) {
@@ -175,31 +170,26 @@ function TtsModelsPanel({ modelId }) {
     } catch { message.error('取消失败'); }
   };
 
-  const handleDownloadFolder = async (folder, fileList) => {
+  const handleDownloadGroup = async (groupName, fileList) => {
     const missing = fileList.filter(f => !f.downloaded);
     if (missing.length === 0) return;
     for (const f of missing) {
       await handleDownload(f.filename);
     }
-    message.success(`已开始下载文件夹 ${folder} 下 ${missing.length} 个文件`);
+    message.success(`已开始下载分组 ${groupName} 下 ${missing.length} 个文件`);
   };
 
   const rows = useMemo(() => {
-    const folderMap = new Map();
-    const singles = [];
+    const roleMap = new Map();
 
     for (const f of files) {
-      const folder = getFolderName(f.filename);
-      if (!folder) {
-        singles.push({ ...f, isFolder: false, key: `file:${f.filename}` });
-        continue;
-      }
-      const list = folderMap.get(folder) || [];
+      const role = f.role || 'default';
+      const list = roleMap.get(role) || [];
       list.push(f);
-      folderMap.set(folder, list);
+      roleMap.set(role, list);
     }
 
-    const folders = Array.from(folderMap.entries()).map(([folder, list]) => {
+    const groups = Array.from(roleMap.entries()).map(([role, list]) => {
       const total = list.length;
       const downloaded = list.filter(x => x.downloaded).length;
       const running = list.filter(x => tasks[x.filename]).length;
@@ -214,11 +204,11 @@ function TtsModelsPanel({ modelId }) {
       }, { downloadedBytes: 0, totalBytes: 0, totalSize: 0 });
 
       return {
-        key: `folder:${folder}`,
-        isFolder: true,
-        folder,
-        filename: folder,
-        role: 'folder',
+        key: `role:${role}`,
+        isGroup: true,
+        groupName: role,
+        filename: role,
+        role,
         downloaded,
         total,
         files: list,
@@ -230,26 +220,25 @@ function TtsModelsPanel({ modelId }) {
       };
     });
 
-    folders.sort((a, b) => a.folder.localeCompare(b.folder));
-    singles.sort((a, b) => a.filename.localeCompare(b.filename));
-    return [...singles, ...folders];
+    groups.sort((a, b) => a.groupName.localeCompare(b.groupName));
+    return groups;
   }, [files, tasks]);
 
   const columns = [
     {
       title: '类型', dataIndex: 'role', key: 'role', width: 120,
       render: (_, record) => {
-        if (record.isFolder) return <Tag color="gold">folder</Tag>;
+        if (record.isGroup) return <Tag color="blue">{record.groupName}</Tag>;
         return <Tag color="blue">{getTypeLabel(record)}</Tag>;
       }
     },
     {
       title: '文件名', dataIndex: 'filename', key: 'filename',
       render: (_, record) => {
-        if (record.isFolder) {
+        if (record.isGroup) {
           return (
             <div>
-              <Text code>{record.folder}</Text>
+              <Text code>{record.groupName}</Text>
               <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
                 自动对应 {record.total} 个文件（弹窗内不展开）
               </div>
@@ -262,7 +251,7 @@ function TtsModelsPanel({ modelId }) {
     {
       title: '大小', dataIndex: 'size', key: 'size', width: 140,
       render: (_, record) => {
-        if (record.isFolder) {
+        if (record.isGroup) {
           const label = record.totalSize > 0 ? formatBytes(record.totalSize) : '-';
           return <Text type="secondary">{label}</Text>;
         }
@@ -272,7 +261,7 @@ function TtsModelsPanel({ modelId }) {
     {
       title: '状态', key: 'status', width: 220,
       render: (_, record) => {
-        if (record.isFolder) {
+        if (record.isGroup) {
           if (record.running > 0) {
             const percent = record.totalBytes > 0 ? Math.floor((record.downloadedBytes / record.totalBytes) * 100) : 0;
             return (
@@ -285,7 +274,7 @@ function TtsModelsPanel({ modelId }) {
             );
           }
           if (record.downloaded === record.total) return <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>;
-          return <Tag icon={<CloseCircleOutlined />} color="error">缺失 {record.total - record.downloaded}</Tag>;
+          return <Tag icon={<CloseCircleOutlined />} color="error">缺失{record.total - record.downloaded}个文件</Tag>;
         }
 
         const task = tasks[record.filename];
@@ -314,12 +303,12 @@ function TtsModelsPanel({ modelId }) {
     {
       title: '操作', key: 'actions', width: 200,
       render: (_, record) => {
-        if (record.isFolder) {
+        if (record.isGroup) {
           const missing = record.files.filter(f => !f.downloaded);
           if (missing.length === 0) return <Button size="small" disabled>已下载</Button>;
           return (
-            <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadFolder(record.folder, record.files)}>
-              下载文件夹
+            <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadGroup(record.groupName, record.files)}>
+              下载
             </Button>
           );
         }
@@ -364,7 +353,7 @@ function TtsModelsPanel({ modelId }) {
             type="primary"
             icon={<DownloadOutlined />}
             onClick={() => {
-              const targets = rows.flatMap(r => r.isFolder ? r.files : [r]).filter(f => !f.isFolder && !f.downloaded);
+              const targets = rows.flatMap(r => r.files).filter(f => !f.downloaded);
               targets.forEach(f => handleDownload(f.filename));
             }}
           >

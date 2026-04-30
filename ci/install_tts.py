@@ -3,7 +3,7 @@ TTS 引擎安装脚本（自动分发器）
 由 NovaMax 后端调用，引擎 ID 为 "tts"。
 
 根据解压目录中的文件特征，自动选择对应的安装脚本：
-  - pyproject.toml 存在  →  install_indextts2.py   (IndexTTS2，uv sync)
+  - pyproject.toml 存在  →  install_indextts2.py   (IndexTTS2，pip 安装并补齐关键运行时依赖)
   - requirements.txt 存在 →  install_indextts15.py  (IndexTTS1.5，pip)
   - ...后续新增版本只需新建 install_indextts*.py 并在此添加判断
 

@@ -42,6 +42,11 @@ Thumbs.db
 external/*
 !external/.gitkeep
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
 # Temporary files
 *.tmp
 *.temp

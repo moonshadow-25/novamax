@@ -177,14 +177,7 @@ function TTS() {
         params.emo_text = emotionPreset;
         params.emo_alpha = emoAlpha;
       }
-      const resp = await ttsService.speech(params);
-      const blob = resp instanceof Blob ? resp : resp.data;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tts_${Date.now()}.${responseFormat}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await ttsService.speech(params);
       message.success('生成完成');
       loadHistory();
     } catch (e) { message.error('生成失败: ' + (e.message || '未知错误')); }

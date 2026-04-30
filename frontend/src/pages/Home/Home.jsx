@@ -91,10 +91,20 @@ function Home() {
     const updates = [];
     for (const [id, engine] of Object.entries(allEngines)) {
       if (engine.category === 'app') continue;
-      if (!engine.versions?.length) continue;
       if (downloadingIds.has(id)) continue;
       if (dismissedEngineUpdates.has(id)) continue;
-      const latestVersion = engine.versions[0].version;
+
+      let latestVersion = null;
+      if (engine.versions?.length) {
+        latestVersion = engine.versions[0].version;
+      } else if (Array.isArray(engine.variants)) {
+        const variantVersions = engine.variants.flatMap(v => Array.isArray(v.versions) ? v.versions : []);
+        if (variantVersions.length > 0) {
+          latestVersion = variantVersions[0].version;
+        }
+      }
+      if (!latestVersion) continue;
+
       if (!engine.installed) {
         updates.push({ id, name: engine.name, latestVersion, installed: false, dependencies: engine.dependencies || [] });
       } else if (!engine.installed_versions?.some(v => v.version === latestVersion)) {

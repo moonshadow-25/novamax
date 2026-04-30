@@ -1241,7 +1241,7 @@ class ProcessManager {
   }
 
   _isIndextts2ReadyLog(log = '') {
-    return log.includes('Application startup complete') || log.includes('Uvicorn running on') || log.includes('Started server process');
+    return log.includes('Application startup complete') || log.includes('Uvicorn running on');
   }
 
   /**
