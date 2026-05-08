@@ -210,12 +210,45 @@ const GlobalSettings = () => {
     }
   };
 
+  const resolveTtsVariantRow = (engine, variantId) => {
+    if (!engine || engine.id !== 'tts' || !variantId || !Array.isArray(engine.variants)) return null;
+    const variant = engine.variants.find(v => String(v.id || '').toLowerCase() === String(variantId).toLowerCase());
+    if (!variant) return null;
+
+    const matchKey = String(variant.id || '').toLowerCase().replace('indextts', 'index-tts');
+    const variantInstalled = (engine.installed_versions || []).filter(v => String(v.version || '').toLowerCase().includes(matchKey));
+    const variantBroken = (engine.broken_versions || []).filter(v => String(v.version || '').toLowerCase().includes(matchKey));
+    const variantDownloadStates = (engine.download_states || []).filter(s => String(s.targetQuantization || '').toLowerCase().includes(matchKey));
+
+    return {
+      ...engine,
+      id: `tts:${variant.id}`,
+      engine_api_id: 'tts',
+      name: `TTS / ${variant.name}`,
+      description: `${engine.description}（${variant.name}）`,
+      variants: [variant],
+      installed: variantInstalled.length > 0,
+      installed_versions: variantInstalled,
+      broken_versions: variantBroken,
+      default_version: variantInstalled[0]?.version || null,
+      download_states: variantDownloadStates,
+      download_state: variantDownloadStates[0] || null
+    };
+  };
+
   const loadEngines = async () => {
     try {
       const result = await engineService.getAll();
       setEngines(result);
-      // 抽屉在开时同步刷新，让抽屉进度实时更新
-      setSelectedEngine(prev => prev ? { ...prev, ...result[prev.id] } : null);
+      setSelectedEngine(prev => {
+        if (!prev) return null;
+        if (String(prev.id || '').startsWith('tts:')) {
+          const variantId = String(prev.id).split(':')[1];
+          return resolveTtsVariantRow(result.tts, variantId) || prev;
+        }
+        const latest = result[prev.engine_api_id || prev.id];
+        return latest ? { ...prev, ...latest } : prev;
+      });
     } catch (error) {
       message.error('加载引擎列表失败');
       console.error('Failed to load engines:', error);
@@ -609,8 +642,6 @@ const GlobalSettings = () => {
       message.success(`已卸载 ${version}`);
       try {
         await loadEngines();
-        const updated = await engineService.getById(engineId);
-        setSelectedEngine({ ...engines[engineId], ...updated });
       } catch (refreshError) {
         message.warning('卸载完成，但刷新状态失败，请手动刷新');
         console.error('Failed to refresh engine list after uninstall:', refreshError);
@@ -626,14 +657,14 @@ const GlobalSettings = () => {
       const result = await engineService.reinstall(engineId, version);
       message.info(`正在重新安装 ${version}...`);
       // 复用下载进度轮询逻辑
-      pollReinstallProgress(result.tasks, engineId);
+      pollReinstallProgress(result.tasks);
     } catch (error) {
       message.error('重新安装失败');
       console.error('Failed to reinstall:', error);
     }
   };
 
-  const pollReinstallProgress = (tasks, engineId) => {
+  const pollReinstallProgress = (tasks) => {
     const interval = setInterval(async () => {
       try {
         const statuses = await Promise.all(
@@ -649,8 +680,6 @@ const GlobalSettings = () => {
             message.success('重新安装完成');
           }
           await loadEngines();
-          const updated = await engineService.getById(engineId);
-          setSelectedEngine({ ...engines[engineId], ...updated });
         }
       } catch (e) {
         clearInterval(interval);
@@ -714,7 +743,7 @@ const GlobalSettings = () => {
                   <Button
                     type="primary"
                     icon={<DownloadOutlined />}
-                    onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id)}
+                    onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version)}
                   >
                     下载
                   </Button>

@@ -88,29 +88,71 @@ function Home() {
         (engine.dependencies || []).forEach(depId => downloadingIds.add(depId));
       }
     }
+
     const updates = [];
+
     for (const [id, engine] of Object.entries(allEngines)) {
       if (engine.category === 'app') continue;
+
+      if (id === 'tts' && Array.isArray(engine.variants) && engine.variants.length > 0) {
+        for (const variant of engine.variants) {
+          const variantId = String(variant.id || '').toLowerCase();
+          const variantVersions = Array.isArray(variant.versions) ? variant.versions : [];
+          const latestVersion = variantVersions[0]?.version;
+          if (!latestVersion) continue;
+
+          const matchKey = variantId.replace('indextts', 'index-tts');
+          const variantInstalled = (engine.installed_versions || []).filter(v =>
+            String(v.version || '').toLowerCase().includes(matchKey)
+          );
+          const variantDownloading = (engine.download_states || []).some(s => {
+            const stateKey = String(s.targetQuantization || '').toLowerCase();
+            return stateKey.includes(matchKey) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
+          });
+          if (variantDownloading) continue;
+
+          const dismissKey = `tts:${variantId}`;
+          if (dismissedEngineUpdates.has(dismissKey)) continue;
+
+          if (variantInstalled.length === 0) {
+            updates.push({
+              id: dismissKey,
+              dismissKey,
+              engineApiId: 'tts',
+              name: `TTS / ${variant.name}`,
+              latestVersion,
+              installed: false,
+              dependencies: engine.dependencies || []
+            });
+          } else if (!variantInstalled.some(v => v.version === latestVersion)) {
+            updates.push({
+              id: dismissKey,
+              dismissKey,
+              engineApiId: 'tts',
+              name: `TTS / ${variant.name}`,
+              latestVersion,
+              installed: true,
+              dependencies: engine.dependencies || []
+            });
+          }
+        }
+        continue;
+      }
+
       if (downloadingIds.has(id)) continue;
+
       if (dismissedEngineUpdates.has(id)) continue;
 
-      let latestVersion = null;
-      if (engine.versions?.length) {
-        latestVersion = engine.versions[0].version;
-      } else if (Array.isArray(engine.variants)) {
-        const variantVersions = engine.variants.flatMap(v => Array.isArray(v.versions) ? v.versions : []);
-        if (variantVersions.length > 0) {
-          latestVersion = variantVersions[0].version;
-        }
-      }
+      const latestVersion = engine.versions?.[0]?.version;
       if (!latestVersion) continue;
 
       if (!engine.installed) {
-        updates.push({ id, name: engine.name, latestVersion, installed: false, dependencies: engine.dependencies || [] });
+        updates.push({ id, dismissKey: id, engineApiId: id, name: engine.name, latestVersion, installed: false, dependencies: engine.dependencies || [] });
       } else if (!engine.installed_versions?.some(v => v.version === latestVersion)) {
-        updates.push({ id, name: engine.name, latestVersion, installed: true, dependencies: engine.dependencies || [] });
+        updates.push({ id, dismissKey: id, engineApiId: id, name: engine.name, latestVersion, installed: true, dependencies: engine.dependencies || [] });
       }
     }
+
     return updates;
   }, [allEngines, dismissedEngineUpdates]);
 
@@ -387,10 +429,11 @@ function Home() {
               type="primary"
               size="small"
               onClick={async () => {
-                const deps = allEngines[engine.id]?.dependencies || [];
-                setDismissedEngineUpdates(prev => new Set([...prev, engine.id, ...deps]));
+                const rootEngine = allEngines[engine.engineApiId] || allEngines[engine.id] || {};
+                const deps = rootEngine.dependencies || [];
+                setDismissedEngineUpdates(prev => new Set([...prev, engine.dismissKey, ...deps]));
                 try {
-                  await engineService.download(engine.id, engine.latestVersion);
+                  await engineService.download(engine.engineApiId || engine.id, engine.latestVersion);
                   message.success(`${engine.name} 开始下载`);
                 } catch (e) {
                   message.error(`下载失败: ${e.response?.data?.error || e.message}`);
@@ -403,7 +446,7 @@ function Home() {
           </div>
           <CloseOutlined
             className="update-banner-close"
-            onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, engine.id]))}
+            onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, engine.dismissKey]))}
           />
         </div>
       ))}

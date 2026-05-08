@@ -939,11 +939,16 @@ class ProcessManager {
           throw new Error(`TTS 引擎版本 ${requestedVersion} 未找到`);
         }
 
-        const venvPythonWin = path.join(ttsEnginePath, 'venv', 'Scripts', 'python.exe');
-        const venvPythonUnix = path.join(ttsEnginePath, 'venv', 'bin', 'python');
-        const venvPython = fs.existsSync(venvPythonWin) ? venvPythonWin : venvPythonUnix;
+        // conda 环境: engine/python.exe；venv 环境: engine/Scripts/python.exe；Unix venv: engine/bin/python
+        const engineDir = path.join(ttsEnginePath, 'engine');
+        const condaPython = path.join(engineDir, 'python.exe');
+        const venvPythonWin = path.join(engineDir, 'Scripts', 'python.exe');
+        const venvPythonUnix = path.join(engineDir, 'bin', 'python');
+        const venvPython = fs.existsSync(condaPython) ? condaPython
+          : fs.existsSync(venvPythonWin) ? venvPythonWin
+          : venvPythonUnix;
         if (!fs.existsSync(venvPython)) {
-          throw new Error(`TTS 虚拟环境 Python 不存在: ${path.join(ttsEnginePath, 'venv')}\n请重新安装 TTS 引擎`);
+          throw new Error(`TTS 运行环境 Python 不存在: ${engineDir}\n请重新安装 TTS 引擎`);
         }
 
         const startScript = path.join(ttsEnginePath, 'start.py');

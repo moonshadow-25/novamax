@@ -4,9 +4,14 @@ IndexTTS 安装脚本（通用）
 支持热更新：可从服务器独立下发，无需重新发布 Node 服务。
 
 参数：
-  --install-root   IndexTTS 解压目录
-  --rocm-path      ROCm 环境目录（含 python.exe），由 JS 查找后传入
-  --project-root   项目根目录
+  --install-root     IndexTTS 解压目录
+  --project-root     项目根目录（python313 路径由此推导：external/python313）
+
+流程：
+  1. 从 install-root 路径判断变体（tts2 / tts1.5）
+  2. 从 ModelScope (shoujiekeji/Novastudio3.0) 下载对应运行环境 zip
+  3. 解压到 install-root，删除压缩包
+  4. 写入 .installed 标记
 """
 
 import argparse
@@ -14,141 +19,134 @@ import subprocess
 import sys
 import os
 import json
-import tempfile
+import zipfile
 from datetime import datetime, timezone
 
 
-TORCH_STACK_PACKAGES = ['torch', 'torchvision', 'torchaudio']
-
-
-def run(cmd, cwd=None, check=True, env=None):
+def run(cmd, cwd=None, check=True, env=None, stream=False):
     print(f"  > {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace')
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    if result.stderr.strip():
-        print(result.stderr.strip())
-    if check and result.returncode != 0:
-        raise RuntimeError(f"命令失败，退出码: {result.returncode}")
-    return result
+    if stream:
+        import threading
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace'
+        )
+        def _pipe(src, dest):
+            for line in src:
+                line = line.rstrip('\n')
+                if line:
+                    print(line, file=dest, flush=True)
+        t1 = threading.Thread(target=_pipe, args=(proc.stdout, sys.stdout))
+        t2 = threading.Thread(target=_pipe, args=(proc.stderr, sys.stderr))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+        proc.wait()
+        if check and proc.returncode != 0:
+            raise RuntimeError(f"命令失败，退出码: {proc.returncode}")
+        return proc
+    else:
+        result = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if result.stdout.strip():
+            print(result.stdout.strip())
+        if result.stderr.strip():
+            print(result.stderr.strip())
+        if check and result.returncode != 0:
+            raise RuntimeError(f"命令失败，退出码: {result.returncode}")
+        return result
 
 
-def build_filtered_requirements(src_path):
-    filtered_lines = []
-    skip_prefixes = ('torch==', 'torchvision==', 'torchaudio==', 'deepspeed==')
-    with open(src_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                filtered_lines.append(line)
-                continue
-            if stripped.startswith(skip_prefixes):
-                continue
-            filtered_lines.append(line)
-
-    tmp = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False)
-    tmp.writelines(filtered_lines)
-    tmp.flush()
-    tmp.close()
-    return tmp.name
+def detect_variant(install_root):
+    """从 install_root 路径判断 TTS 变体（tts2 或 tts15）"""
+    normalized = install_root.replace('\\', '/').lower()
+    # 先匹配 tts2，避免 tts1.5 中的子串误匹配
+    if 'index-tts2' in normalized or 'index_tts2' in normalized or 'indextts2' in normalized:
+        return 'tts2'
+    if 'index-tts1' in normalized or 'index_tts1' in normalized or 'indextts1' in normalized or 'tts1.5' in normalized:
+        return 'tts15'
+    raise RuntimeError(f"无法从路径判断 TTS 变体（tts2/tts1.5）：{install_root}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--install-root', required=True)
-    parser.add_argument('--rocm-path', required=True)
+    parser.add_argument('--rocm-path', default='')
     parser.add_argument('--project-root', required=True)
     args = parser.parse_args()
 
     install_root = args.install_root
     project_root = args.project_root
-    rocm_python = os.path.join(args.rocm_path, 'python.exe')
-
-    venv_path = os.path.join(install_root, 'venv')
-    venv_python = os.path.join(venv_path, 'Scripts', 'python.exe')
+    python313 = os.path.join(project_root, 'external', 'python313', 'python.exe')
 
     print("========================================")
     print("IndexTTS Installation")
     print("========================================")
-    print(f"  Install Root:  {install_root}")
-    print(f"  ROCm Python:   {rocm_python}")
+    print(f"  Install Root:    {install_root}")
+    print(f"  Python 3.13:     {python313}")
     print()
 
-    # [1/4] 检查 ROCm
-    print("[1/4] Checking ROCm environment...")
-    if not os.path.exists(rocm_python):
-        raise RuntimeError(f"ROCm Python not found: {rocm_python}")
-    print(f"  [OK] {rocm_python}")
+    # [1/4] 检查 Python 3.13
+    print("[1/4] Checking Python 3.13 environment...")
+    if not os.path.exists(python313):
+        raise RuntimeError(f"Python 3.13 not found: {python313}")
+    print(f"  [OK] {python313}")
 
-    # [2/4] 创建 venv（复用 ROCm 环境包）
-    print("[2/4] Creating virtual environment...")
-    if os.path.exists(venv_python):
-        print("  [SKIP] venv already exists")
+    # [2/4] 检测变体，确定运行环境包
+    print("[2/4] Detecting engine variant...")
+    variant = detect_variant(install_root)
+    MODELSCOPE_REPO = 'shoujiekeji/Novastudio3.0'
+    if variant == 'tts2':
+        engine_file = 'tts/engines/index_tts2_engine.zip'
+        variant_name = 'IndexTTS 2.0'
     else:
-        run([rocm_python, '-m', 'venv', venv_path, '--system-site-packages'])
-        print("  [OK] venv created")
+        engine_file = 'tts/engines/index_tts1.5_engine.zip'
+        variant_name = 'IndexTTS 1.5'
+    zip_filename = os.path.basename(engine_file)
+    zip_path = os.path.join(install_root, zip_filename)
+    print(f"  [OK] Variant: {variant_name}")
+    print(f"  [OK] Engine package: {engine_file}")
 
-    # [3/4] 安装依赖
-    print("[3/4] Installing dependencies...")
-    requirements = os.path.join(install_root, 'requirements.txt')
+    # [3/4] 从 ModelScope 下载运行环境
+    print("[3/4] Downloading runtime environment from ModelScope...")
+    # 兼容开发环境（src/services/）和打包后生产环境（dist/scripts/）
+    downloader_candidates = [
+        os.path.join(project_root, 'backend', 'dist', 'scripts', 'modelscope_downloader.py'),
+        os.path.join(project_root, 'backend', 'src', 'services', 'modelscope_downloader.py'),
+    ]
+    downloader_script = next((p for p in downloader_candidates if os.path.exists(p)), None)
+    if not downloader_script:
+        raise RuntimeError(f"ModelScope 下载脚本未找到，已查找路径：{downloader_candidates}")
 
-    if not os.path.exists(requirements):
-        raise RuntimeError(f"requirements.txt 未找到: {requirements}")
-
-    filtered_requirements = build_filtered_requirements(requirements)
-    result = run([venv_python, '-m', 'pip', 'install', '--no-cache-dir', '-r', filtered_requirements], cwd=install_root, check=False)
+    result = run(
+        [python313, downloader_script, MODELSCOPE_REPO, '--output', install_root, '--files', engine_file],
+        cwd=project_root,
+        check=False,
+        stream=True,
+        env={**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+    )
     if result.returncode != 0:
-        raise RuntimeError('pip install 失败（已过滤 torch 系依赖），请检查上方日志')
+        raise RuntimeError('ModelScope 下载失败，请检查上方日志')
+    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+        raise RuntimeError(f"下载后未找到文件或文件为空: {zip_path}")
+    print(f"  [OK] Downloaded: {zip_path}")
 
-    run([venv_python, '-m', 'pip', 'uninstall', '-y', *TORCH_STACK_PACKAGES], check=False)
+    # [4/4] 解压并清理
+    print("[4/4] Extracting runtime environment...")
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        zf.extractall(install_root)
+    print(f"  [OK] Extracted to: {install_root}")
 
-    try:
-        os.remove(filtered_requirements)
-    except OSError:
-        pass
-
-    print("  [OK] Dependencies installed, ROCm torch preserved")
-
-    # [4/4] 验证安装
-    print("[4/4] Verifying installation...")
-
-    if not os.path.exists(venv_python):
-        raise RuntimeError(f"虚拟环境 Python 未找到于: {venv_python}")
-    print(f"  [OK] Python: {venv_python}")
-
-    start_py = os.path.join(install_root, 'start.py')
-    if not os.path.exists(start_py):
-        raise RuntimeError(f"start.py 未找到: {start_py}")
-    print(f"  [OK] start.py: {start_py}")
-
-    # 验证核心模块可导入与设备可见性
-    verify_code = """
-import torch
-import fastapi
-import uvicorn
-print('torch_version', torch.__version__)
-print('fastapi_version', fastapi.__version__)
-print('uvicorn_version', uvicorn.__version__)
-print('cuda_available', torch.cuda.is_available())
-print('cuda_version', torch.version.cuda)
-print('device_count', torch.cuda.device_count())
-if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-    print('device0', torch.cuda.get_device_name(0))
-"""
-    result = run([venv_python, '-c', verify_code], check=False)
-    if result.returncode != 0:
-        print("  [WARN] 验证未通过（安装已完成，可能需要手动检查依赖）")
-    else:
-        print("  [OK] 核心模块与设备检测校验通过")
+    os.remove(zip_path)
+    print(f"  [OK] Removed archive: {zip_filename}")
 
     marker_path = os.path.join(install_root, '.installed')
     with open(marker_path, 'w', encoding='utf-8') as f:
-        json.dump({'installed_at': datetime.now(timezone.utc).isoformat(), 'engine': 'indextts'}, f)
+        json.dump({'installed_at': datetime.now(timezone.utc).isoformat(), 'engine': f'indextts_{variant}'}, f)
     print("  [OK] .installed marker written")
 
     print()
     print("========================================")
-    print("IndexTTS installation completed!")
+    print(f"{variant_name} installation completed!")
     print("========================================")
 
 

@@ -25,7 +25,7 @@ import {
   RedoOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService } from '../../services/api';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
@@ -286,6 +286,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           setLoading(false);
           return;
         }
+        // TTS 模型启动前检查模型文件是否已下载
+        const filesStatus = await ttsService.getFilesStatus(model.id);
+        if (filesStatus.summary && filesStatus.summary.missing > 0) {
+          message.warning('请先下载 TTS 模型文件');
+          setTtsModelsVisible(true);
+          setLoading(false);
+          return;
+        }
       }
 
       // Whisper 模型启动前检查 whisper 引擎
@@ -295,6 +303,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           setEngineInfo(engineResult.engineInfo);
           setEngineTarget('whisper');
           setShowEngineModal(true);
+          setLoading(false);
+          return;
+        }
+        // Whisper 模型启动前检查模型文件是否已下载
+        const filesStatus = await whisperService.getFilesStatus(model.id);
+        if (filesStatus.summary && filesStatus.summary.missing > 0) {
+          message.warning('请先下载 Whisper 模型文件');
+          setWhisperModelsVisible(true);
           setLoading(false);
           return;
         }

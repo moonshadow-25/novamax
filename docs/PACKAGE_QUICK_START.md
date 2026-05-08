@@ -54,7 +54,7 @@ npm run build
 2. ✅ 重新构建前端（确保最新）
 3. ✅ 复制后端源码和 node_modules
 4. ✅ 复制前端构建产物
-5. ✅ 复制 external 目录（Node.js, Python, uv, llamacpp）
+5. ✅ 复制 external 目录（Node.js, Python）
 6. ✅ 复制配置文件
 7. ✅ 创建 data 目录和默认配置
 8. ✅ 生成启动脚本和用户文档
@@ -79,7 +79,6 @@ release/
 ├── external/            # 外部工具
 │   ├── node/            # Node.js
 │   ├── python313/       # Python
-│   ├── uv/              # uv 包管理器
 │   └── llamacpp/        # llama.cpp
 └── data/                # 用户数据
 ```
@@ -225,7 +224,6 @@ npm run build
 Node.js (external/node/node.exe) + 后端代码 (端口 3001)
     ↓ 调用
 external/python313/python.exe  （ModelScope/HuggingFace 下载）
-external/uv/                   （Python 虚拟环境管理）
 external/llamacpp/             （LLM 模型运行）
 ```
 
