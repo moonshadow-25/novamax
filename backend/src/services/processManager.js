@@ -16,7 +16,7 @@ import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
-import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices } from '../utils/serviceRegistrar.js';
+import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices, ensureServiceRegistration } from '../utils/serviceRegistrar.js';
 import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
 import multiConnectService from './multiConnectService.js';
 
@@ -352,7 +352,8 @@ class ProcessManager {
         logs: [],
         startupFailed: false,
         ready: false,
-        logStream
+        logStream,
+        watchdogTimer: null
       });
 
       process.stdout.on('data', (data) => {
@@ -385,6 +386,29 @@ class ProcessManager {
           console.log(`[${modelId}] 模型已就绪`);
           eventBus.broadcast('model-updated', { modelId });
         }
+      });
+
+      process.on('error', (error) => {
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo) return;
+        if (processInfo.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
+          processInfo.logStream.write(`\n=== 进程错误: ${error.message}，时间: ${new Date().toISOString()} ===\n`);
+        }
+        console.error(`[${modelId}] 进程错误: ${error.message}`);
+        this.cleanup(modelId);
+        eventBus.broadcast('model-updated', { modelId });
+      });
+
+      process.on('exit', (code) => {
+        const processInfo = this.processes.get(modelId);
+        if (!processInfo) return;
+        if (processInfo.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
+          processInfo.logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
+        }
+        console.log(`[${modelId}] Process exited with code ${code}`);
+        stopServiceRegistration(processInfo.port, isEmbedding).catch(() => {});
+        this.cleanup(modelId);
+        eventBus.broadcast('model-updated', { modelId });
       });
 
       const startupResult = new Promise((resolve, reject) => {
@@ -435,6 +459,28 @@ class ProcessManager {
       register(port).catch((err) =>
         console.warn(`[service-registrar] Single model registration failed: ${err.message}`)
       );
+
+      const processInfo = this.processes.get(modelId);
+      if (processInfo) {
+        processInfo.watchdogTimer = setInterval(async () => {
+          const latest = this.processes.get(modelId);
+          if (!latest || latest.mode !== 'single') {
+            if (latest?.watchdogTimer) clearInterval(latest.watchdogTimer);
+            return;
+          }
+          if (latest.process?.exitCode !== null || latest.process?.killed) return;
+          if (!latest.ready) return;
+
+          try {
+            const alive = await this._isLocalPortListening(latest.port);
+            if (!alive) return;
+            await ensureServiceRegistration(latest.port, embedding);
+          } catch (err) {
+            console.warn(`[service-registrar] Single model watchdog failed: ${err.message}`);
+          }
+        }, 30000);
+      }
+
       return { port, status: MODEL_STATUS.STARTING, mode: 'single' };
     } catch (error) {
       this.allocatedPorts.delete(port);
@@ -1085,6 +1131,10 @@ class ProcessManager {
         comfyuiRunner.cleanupConfig(modelId);
       }
 
+      if (processInfo.watchdogTimer) {
+        clearInterval(processInfo.watchdogTimer);
+      }
+
       if (processInfo.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
         processInfo.logStream.end();
       }
@@ -1258,6 +1308,15 @@ class ProcessManager {
 
   _isIndextts2ReadyLog(log = '') {
     return log.includes('Application startup complete') || log.includes('Uvicorn running on');
+  }
+
+  async _isLocalPortListening(port) {
+    try {
+      const resp = await axios.get(`http://127.0.0.1:${port}/health`, { timeout: 1500 });
+      return resp.status >= 200 && resp.status < 500;
+    } catch (_) {
+      return false;
+    }
   }
 
   /**

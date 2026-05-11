@@ -55,6 +55,17 @@ class LogCollector {
       }
       // 当天追加（flags: 'a'），跨天新建同名新文件
       this._logStream = fs.createWriteStream(logFile, { flags: 'a' });
+      this._logStream.on('error', (err) => {
+        this._logStream = null;
+        try {
+          console.warn('[logCollector] 日志写入流异常:', err.message);
+        } catch (_) {}
+      });
+      this._logStream.on('close', () => {
+        if (this._logStream && this._logStream.closed) {
+          this._logStream = null;
+        }
+      });
       this._currentDate = dateStr;
     } catch (e) {
       // 目录创建失败时不影响主流程

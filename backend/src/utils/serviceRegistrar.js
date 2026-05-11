@@ -176,6 +176,18 @@ export function getRegisteredServices() {
 }
 
 /**
+ * 确保指定端口+类型已注册；若本地缓存缺失则自动补注册。
+ */
+export async function ensureServiceRegistration(port, isEmbedding = false) {
+  const nodePath = isEmbedding ? '/v1/embeddings' : '/v1/chat/completions';
+  const key = getServiceKey(port, nodePath);
+  if (registeredServices.has(key)) {
+    return registeredServices.get(key);
+  }
+  return registerLLMService(port, isEmbedding);
+}
+
+/**
  * 向网关发送 DELETE 请求，主动注销指定 service_id 下的所有端点。
  * 该方法仅负责发送注销请求，不负责清理本地缓存与心跳定时器。
  * @param {string} serviceId

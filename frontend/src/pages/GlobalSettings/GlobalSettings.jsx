@@ -303,12 +303,78 @@ const GlobalSettings = () => {
     }
   };
 
+  const clearBrowserSiteData = async () => {
+    const tasks = [];
+
+    tasks.push(Promise.resolve().then(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    }));
+
+    tasks.push(Promise.resolve().then(() => {
+      const hostname = window.location.hostname;
+      const domainParts = hostname.split('.').filter(Boolean);
+      const domainCandidates = [''];
+      for (let i = 0; i < domainParts.length - 1; i++) {
+        domainCandidates.push(`.${domainParts.slice(i).join('.')}`);
+      }
+
+      const pathCandidates = ['/'];
+      const pathnameParts = window.location.pathname.split('/').filter(Boolean);
+      let currentPath = '';
+      for (const part of pathnameParts) {
+        currentPath += `/${part}`;
+        pathCandidates.push(currentPath);
+      }
+
+      document.cookie.split(';').forEach((entry) => {
+        const key = entry.split('=')[0]?.trim();
+        if (!key) return;
+        for (const path of pathCandidates) {
+          document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${path}`;
+          for (const domain of domainCandidates) {
+            document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${path}; domain=${domain}`;
+          }
+        }
+      });
+    }));
+
+    tasks.push((async () => {
+      if ('caches' in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map(name => caches.delete(name)));
+      }
+    })());
+
+    tasks.push((async () => {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(reg => reg.unregister()));
+      }
+    })());
+
+    tasks.push((async () => {
+      if (indexedDB?.databases) {
+        const dbs = await indexedDB.databases();
+        await Promise.all((dbs || []).map(db => db?.name ? new Promise((resolve) => {
+          const req = indexedDB.deleteDatabase(db.name);
+          req.onsuccess = () => resolve();
+          req.onerror = () => resolve();
+          req.onblocked = () => resolve();
+        }) : Promise.resolve()));
+      }
+    })());
+
+    await Promise.allSettled(tasks);
+  };
+
   const handleClearCache = async (keys) => {
     const clearKey = keys ? keys[0] : 'all';
     try {
       setCacheClearing(clearKey);
       await systemService.clearCache(keys || null);
-      message.success('缓存已清除');
+      await clearBrowserSiteData();
+      message.success('本地缓存和浏览器站点数据已清除');
       await loadCacheInfo();
     } catch (e) {
       message.error('清除缓存失败');

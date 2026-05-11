@@ -44,17 +44,22 @@ function getCpuUsagePercent() {
  * 获取 GPU / VRAM 信息
  * 优先 nvidia-smi，Windows 下用 PowerShell（过滤虚拟适配器 + 注册表读 64 位 VRAM）
  */
-async function getGpuInfo() {
+async function getGpuInfo(options = {}) {
+  const { namesOnly = false } = options;
+
   // 1. NVIDIA nvidia-smi（仅在可用时调用，避免 AMD 机器重复失败回退）
   if (_nvidiaSmiAvailable !== false) {
     try {
-      const { stdout } = await execAsync(
-        'nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits',
-        { encoding: 'utf-8', timeout: 3000 }
-      );
+      const nvidiaQuery = namesOnly
+        ? 'nvidia-smi --query-gpu=name --format=csv,noheader'
+        : 'nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits';
+      const { stdout } = await execAsync(nvidiaQuery, { encoding: 'utf-8', timeout: 3000 });
       const lines = stdout.trim().split('\n').filter(l => l.trim());
       if (lines.length > 0) {
         _nvidiaSmiAvailable = true;
+        if (namesOnly) {
+          return lines.map(line => ({ name: line.trim() }));
+        }
         return lines.map(line => {
           const [name, totalMB, usedMB, freeMB] = line.split(',').map(s => s.trim());
           const total = parseInt(totalMB) * 1024 * 1024;
@@ -75,7 +80,15 @@ async function getGpuInfo() {
   //   - 性能计数器只保留 _phys_0 后缀（物理 GPU，过滤虚拟适配器 LUID）
   if (os.platform() === 'win32') {
     try {
-      const psLines = [
+      const psLines = namesOnly ? [
+        '$ErrorActionPreference="SilentlyContinue"',
+        '$vc=@(Get-CimInstance Win32_VideoController|Where-Object{$_.PNPDeviceID -like "PCI\\*"})',
+        '$out=@($vc|Where-Object{',
+        '  $_.Name -and',
+        '  $_.Name -notmatch "Virtual|Remote|RDP|Miracast|DisplayLink|GameViewer|ToDesk|Oray|Idd"',
+        '}|ForEach-Object{ @{ n = $_.Name } })',
+        '@{g=$out}|ConvertTo-Json -Depth 3 -Compress'
+      ] : [
         '$ErrorActionPreference="SilentlyContinue"',
         '$base="HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}"',
         // PCI 真实 GPU 列表
@@ -102,6 +115,7 @@ async function getGpuInfo() {
         '})',
         '@{g=$out;p=$perf;tu=$totalUsed}|ConvertTo-Json -Depth 4 -Compress'
       ];
+
       const encoded = Buffer.from(psLines.join('\n'), 'utf16le').toString('base64');
       const { stdout } = await execAsync(
         `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
@@ -109,9 +123,14 @@ async function getGpuInfo() {
       );
       const data = JSON.parse(stdout.trim());
       const gpus = Array.isArray(data.g) ? data.g : (data.g ? [data.g] : []);
+      const visibleGpus = gpus.filter(g => g && g.n);
+
+      if (namesOnly) {
+        return visibleGpus.map(g => ({ name: g.n }));
+      }
+
       const perfs = Array.isArray(data.p) ? data.p : (data.p ? [data.p] : []);
       const totalUsed = Number(data.tu || 0);
-      const visibleGpus = gpus.filter(g => g && g.n);
 
       // 单 GPU 场景（如 AMD 780M）优先使用 totalUsed，避免计数器实例与显卡列表错位
       if (visibleGpus.length === 1) {
@@ -173,6 +192,22 @@ async function getProcessMemoryMap() {
   }
   return memMap;
 }
+
+router.get('/system/gpu', async (req, res) => {
+  try {
+    const namesOnly = req.query.namesOnly === '1' || req.query.namesOnly === 'true';
+    const gpus = await getGpuInfo({ namesOnly });
+    res.json({
+      gpus,
+      platform: os.platform(),
+      arch: os.arch(),
+      hostname: os.hostname(),
+      uptime: os.uptime()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.get('/system/info', async (req, res) => {
   try {
