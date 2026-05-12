@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const SIZE_TOLERANCE = 0; // 0 容差：文件大小必须精确匹配
+const warnedMissingFolderFiles = new Set();
 
 /**
  * 检查一组文件是否都存在且大小匹配（底层原语）
@@ -13,9 +14,15 @@ export function checkFilesComplete(dir, files) {
   for (const file of files) {
     const filePath = path.join(dir, file.filename);
     if (!fs.existsSync(filePath)) {
-      console.warn(`[integrity] 文件不存在: ${file.filename}`);
+      const missingKey = `${dir}::${file.filename}`;
+      if (!warnedMissingFolderFiles.has(missingKey)) {
+        console.warn(`[integrity] 文件不存在: ${file.filename}`);
+        warnedMissingFolderFiles.add(missingKey);
+      }
       return false;
     }
+    const missingKey = `${dir}::${file.filename}`;
+    warnedMissingFolderFiles.delete(missingKey);
     if (file.size) {
       const actualSize = fs.statSync(filePath).size;
       if (Math.abs(actualSize - file.size) / file.size > SIZE_TOLERANCE) {
@@ -59,9 +66,15 @@ export function checkActiveFileIntegrity(model) {
     for (const ff of quantInfo.folder_files) {
       const ffPath = path.join(model.local_path, ff.name);
       if (!fs.existsSync(ffPath)) {
-        console.warn(`[integrity] 文件夹量化缺少文件: ${ff.name}`);
+        const missingKey = `${model.local_path}::${ff.name}`;
+        if (!warnedMissingFolderFiles.has(missingKey)) {
+          console.warn(`[integrity] 文件夹量化缺少文件: ${ff.name}`);
+          warnedMissingFolderFiles.add(missingKey);
+        }
         return false;
       }
+      const missingKey = `${model.local_path}::${ff.name}`;
+      warnedMissingFolderFiles.delete(missingKey);
       if (ff.size) {
         const actualSize = fs.statSync(ffPath).size;
         if (actualSize !== ff.size) {
@@ -78,9 +91,16 @@ export function checkActiveFileIntegrity(model) {
 
     // 1. 文件存在性
     if (!fs.existsSync(filePath)) {
-      console.warn(`[integrity] 文件不存在: ${fileRec.filename}`);
+      const missingKey = `${model.local_path}::${fileRec.filename}`;
+      if (!warnedMissingFolderFiles.has(missingKey)) {
+        console.warn(`[integrity] 文件不存在: ${fileRec.filename}`);
+        warnedMissingFolderFiles.add(missingKey);
+      }
       return false;
     }
+
+    const missingKey = `${model.local_path}::${fileRec.filename}`;
+    warnedMissingFolderFiles.delete(missingKey);
 
     // 2. SHA256 校验：downloaded_files 记录了 sha256 且配置中有期望值
     if (fileRec.sha256 && quantInfo?.file?.sha256) {

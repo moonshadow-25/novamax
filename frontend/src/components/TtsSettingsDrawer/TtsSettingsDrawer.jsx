@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
 import { DeleteOutlined, UndoOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { engineService, modelService } from '../../services/api';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
@@ -14,6 +15,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [engineInstalled, setEngineInstalled] = useState(false);
   const [showEngineModal, setShowEngineModal] = useState(false);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
+  const [latestEngineVersion, setLatestEngineVersion] = useState(null);
 
   const inferVariantMarker = useCallback(() => {
     const candidate = String(
@@ -63,15 +65,25 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     try {
       const res = await engineService.getById('tts');
       const installedVersions = filterVersionsByVariant(res.installed_versions || []);
+      const availableVersions = filterVersionsByVariant(
+        Array.isArray(res.versions) && res.versions.length > 0
+          ? res.versions
+          : (res.variants || []).flatMap(variant => variant.versions || [])
+      );
+      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
+        availableVersions,
+        installedVersions
+      );
       setEngineInfo(buildVariantEngineInfo(res));
-      setEngines(installedVersions);
+      setEngines(orderedInstalledVersions);
+      setLatestEngineVersion(latestInstalledVersion);
       setEngineInstalled(installedVersions.length > 0);
 
       const pinnedVersion = model?.engine_version || null;
-      if (pinnedVersion && installedVersions.some(v => v.version === pinnedVersion)) {
+      if (pinnedVersion && orderedInstalledVersions.some(v => v.version === pinnedVersion)) {
         setSelectedEngineVersion(pinnedVersion);
       } else {
-        setSelectedEngineVersion(installedVersions[0]?.version || null);
+        setSelectedEngineVersion(null);
       }
     } catch {
       setEngineInfo(null);
@@ -225,9 +237,9 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                     placeholder="默认（最新版本）"
                     allowClear
                   >
-                    {engines.map((v, index) => (
+                    {engines.map((v) => (
                       <Select.Option key={v.version} value={v.version}>
-                        {v.version}{index === 0 ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
                       </Select.Option>
                     ))}
                   </Select>

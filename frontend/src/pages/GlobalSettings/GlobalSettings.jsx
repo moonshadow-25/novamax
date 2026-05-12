@@ -3,6 +3,7 @@ import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message
 import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
+import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
 const { Text } = Typography;
@@ -570,6 +571,23 @@ const GlobalSettings = () => {
     return [];
   };
 
+  const getLatestInstalledVersion = (engine) => {
+    if (!engine) return null;
+    const availableVersions = resolveEngineVersions(engine);
+    return getLatestInstalledVersionByAvailable(availableVersions, engine.installed_versions || []);
+  };
+
+  const getOrderedInstalledVersions = (engine) => {
+    if (!engine) return [];
+    const availableVersions = resolveEngineVersions(engine);
+    const installedAndBroken = [
+      ...(engine.installed_versions || []).map(v => ({ ...v, broken: false })),
+      ...(engine.broken_versions || []).map(v => ({ ...v, broken: true }))
+    ];
+
+    return resolveVersionOrder(availableVersions, installedAndBroken).orderedInstalledVersions;
+  };
+
   const resolveEngineRows = () => {
     const rows = [];
     for (const engine of Object.values(engines).filter(e => e.category !== 'app')) {
@@ -621,6 +639,7 @@ const GlobalSettings = () => {
       if (params !== undefined) out.default_parameters = params;
       // 用户自定义参数映射
       if (m.user_parameter_mapping !== undefined) out.user_parameters = m.user_parameter_mapping;
+      if (m.selected_quantization !== undefined) out.selected_quantization = m.selected_quantization;
       return out;
     };
 
@@ -1410,17 +1429,16 @@ const GlobalSettings = () => {
               style={{ marginBottom: 16 }}
             />
             <List
-              dataSource={[
-                ...(selectedEngine.installed_versions || []).map(v => ({ ...v, broken: false })),
-                ...(selectedEngine.broken_versions || []).map(v => ({ ...v, broken: true }))
-              ]}
+              dataSource={getOrderedInstalledVersions(selectedEngine)}
               locale={{ emptyText: '暂无已安装版本' }}
-              renderItem={(version, index) => (
+              renderItem={(version) => {
+                const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
+                return (
                 <List.Item
                   actions={[
                     version.broken ? (
                       <Tag color="error">安装不完整</Tag>
-                    ) : index === 0 ? (
+                    ) : version.version === latestInstalledVersion ? (
                       <Tag color="green">最新版本</Tag>
                     ) : null,
                     <Button
@@ -1457,7 +1475,8 @@ const GlobalSettings = () => {
                     }
                   />
                 </List.Item>
-              )}
+                );
+              }}
             />
           </Card>
 

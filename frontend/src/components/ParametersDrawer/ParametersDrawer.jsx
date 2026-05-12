@@ -29,6 +29,7 @@ import {
 } from '@ant-design/icons';
 import axios from 'axios';
 import { engineService, modelService, backendService } from '../../services/api';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import './ParametersDrawer.css';
 
 const { Panel } = Collapse;
@@ -48,6 +49,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   // 引擎版本相关
   const [engineVersions, setEngineVersions] = useState([]);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
+  const [latestEngineVersion, setLatestEngineVersion] = useState(null);
 
   // 自动启动 & 多机互联
   const [autoStart, setAutoStart] = useState(false);
@@ -130,7 +132,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     if (model?.type !== 'llm' || isCloudApi) return;
     try {
       const data = await engineService.getById('llamacpp');
-      setEngineVersions(data.installed_versions || []);
+      const installedVersions = data.installed_versions || [];
+      const availableVersions = data.versions || [];
+      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
+        availableVersions,
+        installedVersions
+      );
+      setEngineVersions(orderedInstalledVersions);
+      setLatestEngineVersion(latestInstalledVersion);
       // 读取模型当前配置的版本，没有则显示"默认（最新）"
       setSelectedEngineVersion(model?.engine_version || null);
     } catch (e) {
@@ -510,9 +519,9 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     placeholder="默认（最新版本）"
                     allowClear
                   >
-                    {engineVersions.map((v, index) => (
+                    {engineVersions.map((v) => (
                       <Option key={v.version} value={v.version}>
-                        {v.version}{index === 0 ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
                       </Option>
                     ))}
                   </Select>

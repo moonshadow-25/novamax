@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
 import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
 import { engineService, modelService } from '../../services/api';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
@@ -26,13 +27,20 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [engineInstalled, setEngineInstalled] = useState(false);
   const [showEngineModal, setShowEngineModal] = useState(false);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
+  const [latestEngineVersion, setLatestEngineVersion] = useState(null);
 
   const refreshEngineStatus = useCallback(async () => {
     try {
       const res = await engineService.getById('whisper');
       const installedVersions = res.installed_versions || [];
+      const availableVersions = res.versions || [];
+      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
+        availableVersions,
+        installedVersions
+      );
       setEngineInfo(res);
-      setEngines(installedVersions);
+      setEngines(orderedInstalledVersions);
+      setLatestEngineVersion(latestInstalledVersion);
       setEngineInstalled(installedVersions.length > 0);
       setSelectedEngineVersion(model?.engine_version || null);
     } catch {
@@ -191,9 +199,9 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                     placeholder="默认（最新版本）"
                     allowClear
                   >
-                    {engines.map((v, index) => (
+                    {engines.map((v) => (
                       <Select.Option key={v.version} value={v.version}>
-                        {v.version}{index === 0 ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
                       </Select.Option>
                     ))}
                   </Select>
