@@ -161,6 +161,8 @@ function Home() {
       setFavorites(res.favorites || []);
     }).catch(() => {});
 
+    // 立即加载本地模型，不等待远程同步
+    loadModels();
     // 启动时触发远程模型同步，完成后刷新列表
     remoteConfigService.sync().then(() => loadModels()).catch(() => {});
 

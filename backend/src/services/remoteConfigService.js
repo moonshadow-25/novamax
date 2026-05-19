@@ -86,7 +86,7 @@ async function syncModels() {
 
   let remoteData;
   try {
-    const res = await axios.get(url, { timeout: 10000 });
+    const res = await axios.get(url, { timeout: 5000 });
     remoteData = res.data;
   } catch (err) {
     console.warn(`[remoteConfig] 拉取远程模型配置失败: ${err.message}，尝试读取本地 models.json`);
@@ -186,23 +186,40 @@ async function syncEngines() {
   const url = `${serverUrl}${enginesPath}`;
 
   let remoteData;
+  let fromLocal = false;
   try {
-    const res = await axios.get(url, { timeout: 10000 });
+    const res = await axios.get(url, { timeout: 5000 });
     remoteData = res.data;
   } catch (err) {
-    console.warn(`[remoteConfig] 拉取远程引擎配置失败: ${err.message}`);
-    return false;
+    console.warn(`[remoteConfig] 拉取远程引擎配置失败: ${err.message}，使用本地 engines.json`);
+    const localPath = path.join(DATA_DIR, 'engines.json');
+    if (fs.existsSync(localPath)) {
+      try {
+        remoteData = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
+        fromLocal = true;
+      } catch (e) {
+        console.warn(`[remoteConfig] 读取本地 engines.json 失败: ${e.message}`);
+        return false;
+      }
+    } else {
+      return false;
+    }
   }
 
   if (!remoteData?.engines) {
-    console.warn('[remoteConfig] 远程引擎配置格式无效');
+    console.warn('[remoteConfig] 引擎配置格式无效');
     return false;
   }
 
-  const enginesFilePath = path.join(DATA_DIR, 'engines.json');
-  await writeJSON(enginesFilePath, remoteData);
-  engineManager.reload(remoteData);
-  console.log('[remoteConfig] 引擎配置已更新');
+  if (fromLocal) {
+    engineManager.reload(remoteData);
+    console.log('[remoteConfig] 引擎配置已加载（本地缓存）');
+  } else {
+    const enginesFilePath = path.join(DATA_DIR, 'engines.json');
+    await writeJSON(enginesFilePath, remoteData);
+    engineManager.reload(remoteData);
+    console.log('[remoteConfig] 引擎配置已更新（远程）');
+  }
   return true;
 }
 
