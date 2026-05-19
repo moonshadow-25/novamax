@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlin
 import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
+import './GlobalSettings.css';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
 const { Text } = Typography;
@@ -276,7 +277,7 @@ const GlobalSettings = () => {
       const result = await modelService.getAll();
       const models = (result.models || []).filter(m => ['llm', 'comfyui', 'whisper', 'tts'].includes(m.type));
       setExportModels(models);
-      const now = new Date().toISOString().slice(0, 19) + 'Z';
+      const now = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 19) + '+08:00';
       setExportUpdatedAt(now);
       const vmap = {};
       models.forEach(m => { vmap[m.id] = '1.0'; });
@@ -799,7 +800,13 @@ const GlobalSettings = () => {
   };
 
   const renderEnginesContent = () => (
-    <Card title="引擎管理" extra={<Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>}>
+    <>
+    <div className="gs-section-head">
+      <span className="gs-section-title">引擎管理</span>
+      <Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>
+    </div>
+    <div className="gs-section-body">
+    <Card className="gs-section-card">
       <List
         // 过滤掉 category 为 app 由运行状态页面统一管理
         dataSource={resolveEngineRows()}
@@ -912,6 +919,8 @@ const GlobalSettings = () => {
         }}
       />
     </Card>
+    </div>
+    </>
   );
 
   const renderExportContent = () => {
@@ -952,7 +961,12 @@ const GlobalSettings = () => {
     ];
 
     return (
-      <Card title="导出配置" style={{ maxWidth: 900 }}>
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">导出配置</span>
+      </div>
+      <div className="gs-section-body">
+      <Card className="gs-section-card" style={{ maxWidth: 900 }}>
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
 
           {/* 基本信息 */}
@@ -1037,11 +1051,18 @@ const GlobalSettings = () => {
           )}
         </Space>
       </Card>
+      </div>
+      </>
     );
   };
 
   const renderUpdateContent = () => (
-    <Card title="更新设置">
+    <>
+    <div className="gs-section-head">
+      <span className="gs-section-title">更新设置</span>
+    </div>
+    <div className="gs-section-body">
+    <Card className="gs-section-card">
       <Form form={form} layout="vertical">
         <Form.Item>
           <Space>
@@ -1113,10 +1134,17 @@ const GlobalSettings = () => {
         </div>
       )}
     </Card>
+    </div>
+    </>
   );
 
   const renderCacheContent = () => (
-    <Card title="缓存管理">
+    <>
+    <div className="gs-section-head">
+      <span className="gs-section-title">缓存管理</span>
+    </div>
+    <div className="gs-section-body">
+    <Card className="gs-section-card">
       {cacheLoading && !cacheInfo ? (
         <Skeleton active />
       ) : cacheInfo ? (
@@ -1151,6 +1179,8 @@ const GlobalSettings = () => {
         <Empty description="加载失败" />
       )}
     </Card>
+    </div>
+    </>
   );
 
   const renderRuntimeContent = () => {
@@ -1218,7 +1248,12 @@ const GlobalSettings = () => {
     ];
 
     return (
-      <Card title="运行状态">
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">运行状态</span>
+      </div>
+      <div className="gs-section-body">
+      <Card className="gs-section-card">
         {systemLoading && !systemInfo ? (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
@@ -1303,6 +1338,8 @@ const GlobalSettings = () => {
           </>
         )}
       </Card>
+      </div>
+      </>
     );
   };
 
@@ -1311,7 +1348,12 @@ const GlobalSettings = () => {
     const totalSize = storageItems.reduce((sum, s) => sum + (s.size || 0), 0);
 
     return (
-      <Card title="模型存储">
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">模型存储</span>
+      </div>
+      <div className="gs-section-body">
+      <Card className="gs-section-card">
         <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text type="secondary">管理各类模型的存储目录，支持迁移到其他磁盘</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>总占用: {formatBytes(totalSize)}</Text>
@@ -1360,13 +1402,17 @@ const GlobalSettings = () => {
           </div>
         )}
       </Card>
+      </div>
+      </>
     );
   };
 
   const renderLogsContent = () => {
     const levelColors = { info: '#1890ff', warn: '#faad14', error: '#ff4d4f' };
     return (
-      <Card title="系统日志" extra={
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">系统日志</span>
         <Space>
           <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
             <Option value="all">全部</Option>
@@ -1386,7 +1432,9 @@ const GlobalSettings = () => {
             <Button size="small" danger icon={<DeleteOutlined />}>清空</Button>
           </Popconfirm>
         </Space>
-      }>
+      </div>
+      <div className="gs-section-body">
+      <Card className="gs-section-card">
         <div
           ref={logContainerRef}
           style={{
@@ -1416,6 +1464,8 @@ const GlobalSettings = () => {
           )}
         </div>
       </Card>
+      </div>
+      </>
     );
   };
 
@@ -1563,7 +1613,7 @@ const GlobalSettings = () => {
   );
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="gs-layout">
       {(restarting || unpacking) && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
@@ -1586,13 +1636,7 @@ const GlobalSettings = () => {
           )}
         </div>
       )}
-      <Header style={{
-        background: '#fff',
-        padding: '0 24px',
-        display: 'flex',
-        alignItems: 'center',
-        borderBottom: '1px solid #f0f0f0'
-      }}>
+      <Header className="gs-header">
         <Button
           type="text"
           icon={<ArrowLeftOutlined />}
@@ -1604,8 +1648,8 @@ const GlobalSettings = () => {
         <h2 style={{ margin: 0 }}>全局设置</h2>
       </Header>
 
-      <Layout>
-        <Sider width={200} style={{ background: '#fff', borderRight: '1px solid #f0f0f0' }}>
+      <Layout className="gs-body">
+        <Sider width={200} className="gs-sider">
           <Menu
             mode="inline"
             selectedKeys={[selectedMenu]}
@@ -1623,7 +1667,7 @@ const GlobalSettings = () => {
           />
         </Sider>
 
-        <Content style={{ padding: 24, minHeight: 280 }}>
+        <Content className="gs-content">
           {renderContent()}
         </Content>
       </Layout>

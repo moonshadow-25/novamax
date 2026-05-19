@@ -1,0 +1,92 @@
+/* ===== 全局设置页面布局 ===== */
+
+.gs-layout {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gs-header {
+  background: #fff;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.gs-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+.gs-sider {
+  background: #fff !important;
+  border-right: 1px solid #f0f0f0;
+  overflow-y: auto !important;
+}
+
+.gs-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+/* 区域副标题 — flex-shrink:0，完全不随内容滚动 */
+.gs-section-head {
+  flex-shrink: 0;
+  background: #fff;
+  padding: 12px 24px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px 8px 0 0;
+  margin: 24px 24px 0;
+}
+
+.gs-section-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* 卡片内容的滚动容器 — 占据剩余高度，内容在此滚动 */
+.gs-section-body {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s;
+}
+
+.gs-section-body:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+/* 区域 Card — 顶部与 section-head 无缝衔接，去掉顶部边框和圆角 */
+.gs-section-card {
+  margin: 0 24px 24px !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+  border-top: none !important;
+}
+
+/* 深色主题适配 */
+[data-theme='dark'] .gs-header {
+  background: #141414;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .gs-sider {
+  background: #141414 !important;
+  border-right-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme='dark'] .gs-section-head {
+  background: #141414;
+  border-color: rgba(255, 255, 255, 0.12);
+}

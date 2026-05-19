@@ -1,25 +1,98 @@
 .home-layout {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .home-header {
   background: inherit;
   padding: 0 24px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.home-header-inner {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.home-header-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.home-header-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.home-header-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .home-content {
-  padding: 24px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+}
+
+.home-toolbar-bar {
+  flex-shrink: 0;
+}
+
+.home-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s;
+}
+
+.home-scroll-area:hover,
+.home-scroll-area:focus-within {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+.home-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.home-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.home-scroll-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.3s;
+}
+
+.home-scroll-area:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.home-content-inner {
+  padding: 16px 24px;
   max-width: 1400px;
   margin: 0 auto;
-  width: 100%;
 }
 
 .home-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -71,6 +144,7 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: #fff;
   animation: bannerSlideDown 0.4s ease-out;
+  flex-shrink: 0;
 }
 
 @keyframes bannerSlideDown {

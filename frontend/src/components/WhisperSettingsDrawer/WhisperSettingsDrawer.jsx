@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
-import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
-import { engineService, modelService } from '../../services/api';
+import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { engineService, modelService, backendService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
@@ -243,6 +243,22 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               </div>
             </Form.Item>
           </Form>
+
+          <Divider />
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={async () => {
+              try {
+                await backendService.openLogsFolder();
+                message.success('已打开日志文件夹');
+              } catch {
+                message.error('打开失败');
+              }
+            }}
+            block
+          >
+            打开日志文件夹
+          </Button>
         </Space>
       </Drawer>
 

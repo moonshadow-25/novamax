@@ -362,43 +362,49 @@ function Home() {
   return (
     <Layout className="home-layout">
       <Header className="home-header">
-        <Space size="large" style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Title level={3} style={{ margin: 0, color: 'inherit' }}>NovaMax</Title>
-          <Input
-            placeholder="搜索模型..."
-            prefix={<SearchOutlined />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: 400 }}
-          />
-          <Space size={4}>
-            {activeTab === 'llm' && (
-              <Button
-                type="text"
-                icon={<WifiOutlined />}
-                onClick={handleOpenMultiConnectModal}
-                title="多机互联"
-              >
-                多机互联
-              </Button>
-            )}
-            <Badge count={downloadingCount} size="small">
-              <Button
-                type="text"
-                icon={<DownloadOutlined />}
-                onClick={() => setDownloadCenterVisible(true)}
-                title="下载中心"
-              />
-            </Badge>
-            {/* 主题切换暂时隐藏 */}
-            <Button
-              type="text"
-              icon={<SettingOutlined />}
-              onClick={() => navigate('/global-settings')}
-              title="全局设置"
+        <div className="home-header-inner">
+          <div className="home-header-left">
+            <Title level={3} style={{ margin: 0, color: 'inherit' }}>NovaMax</Title>
+          </div>
+          <div className="home-header-center">
+            <Input
+              placeholder="搜索模型..."
+              prefix={<SearchOutlined />}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: 400 }}
             />
-          </Space>
-        </Space>
+          </div>
+          <div className="home-header-right">
+            <Space size={4}>
+              {activeTab === 'llm' && (
+                <Button
+                  type="text"
+                  icon={<WifiOutlined />}
+                  onClick={handleOpenMultiConnectModal}
+                  title="多机互联"
+                >
+                  多机互联
+                </Button>
+              )}
+              <Badge count={downloadingCount} size="small">
+                <Button
+                  type="text"
+                  icon={<DownloadOutlined />}
+                  onClick={() => setDownloadCenterVisible(true)}
+                  title="下载中心"
+                />
+              </Badge>
+              {/* 主题切换暂时隐藏 */}
+              <Button
+                type="text"
+                icon={<SettingOutlined />}
+                onClick={() => navigate('/global-settings')}
+                title="全局设置"
+              />
+            </Space>
+          </div>
+        </div>
       </Header>
       {updateInfo && (
         <div className="update-banner">
@@ -454,27 +460,32 @@ function Home() {
         </div>
       ))}
       <Content className="home-content">
-        <div className="home-toolbar">
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => {
-              setActiveTab(key);
-            }}
-            items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
-            style={{ flex: 1 }}
-          />
-          <Segmented
-            value={filterTab}
-            onChange={setFilterTab}
-            options={
-              activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS
-                : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-            }
-          />
+        <div className="home-toolbar-bar">
+          <div className="home-content-inner">
+            <div className="home-toolbar">
+              <Tabs
+                activeKey={activeTab}
+                onChange={(key) => {
+                  setActiveTab(key);
+                }}
+                items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
+                style={{ flex: 1 }}
+              />
+              <Segmented
+                value={filterTab}
+                onChange={setFilterTab}
+                options={
+                  activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS
+                    : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                    : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                    : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                }
+              />
+            </div>
+          </div>
         </div>
-
+        <div className="home-scroll-area">
+          <div className="home-content-inner">
         {/* LLM Tab 启动全部按钮 - 暂时隐藏 */}
 
         {/* ComfyUI Tab 实例管理（折叠面板）*/}
@@ -537,6 +548,8 @@ function Home() {
                 </div>
               </div>
             )}
+        </div>
+          </div>
         </div>
       </Content>
       <AddModelModal
