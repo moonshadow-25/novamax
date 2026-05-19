@@ -101,7 +101,7 @@ class ConfigManager {
         whisper: 18181
       },
       update_settings: {
-        auto_check: true,
+        auto_check: false,
         last_check: null,
         channel: 'stable',
         server_url: 'https://api.novamax.com'

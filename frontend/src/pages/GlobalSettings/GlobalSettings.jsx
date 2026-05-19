@@ -45,7 +45,7 @@ const GlobalSettings = () => {
   const [exportModels, setExportModels] = useState([]);
   const [exportFileVersion, setExportFileVersion] = useState('1.0');
   const [exportUpdatedAt, setExportUpdatedAt] = useState('');
-  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui']);
+  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'whisper', 'tts']);
   const [exportVersionMap, setExportVersionMap] = useState({});
   const [exportJson, setExportJson] = useState('');
 
@@ -174,17 +174,32 @@ const GlobalSettings = () => {
     }
   }, [appDownloadState?.status]);
 
+  const [restartTimedOut, setRestartTimedOut] = useState(false);
+
   // restarting 变为 true 时启动倒计时 + 轮询
   useEffect(() => {
-    if (!restarting) return;
+    if (!restarting) {
+      setRestartTimedOut(false);
+      return;
+    }
+    const MAX_WAIT = 60; // 最大等待 60 秒
     let countdown = 5;
+    let elapsed = 0;
     setRestartCountdown(countdown);
+    setRestartTimedOut(false);
     const countTimer = setInterval(() => {
       countdown--;
       setRestartCountdown(Math.max(0, countdown));
       if (countdown <= 0) clearInterval(countTimer);
     }, 1000);
     const poll = setInterval(async () => {
+      elapsed += 2;
+      if (elapsed >= MAX_WAIT) {
+        clearInterval(poll);
+        clearInterval(countTimer);
+        setRestartTimedOut(true);
+        return;
+      }
       try {
         await fetch('/api/health');
         clearInterval(poll);
@@ -259,7 +274,7 @@ const GlobalSettings = () => {
   const loadExportModels = async () => {
     try {
       const result = await modelService.getAll();
-      const models = (result.models || []).filter(m => m.type === 'llm' || m.type === 'comfyui');
+      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'whisper', 'tts'].includes(m.type));
       setExportModels(models);
       const now = new Date().toISOString().slice(0, 19) + 'Z';
       setExportUpdatedAt(now);
@@ -628,6 +643,8 @@ const GlobalSettings = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));
     const llm = filtered.filter(m => m.type === 'llm');
     const comfyui = filtered.filter(m => m.type === 'comfyui');
+    const whisper = filtered.filter(m => m.type === 'whisper');
+    const tts = filtered.filter(m => m.type === 'tts');
 
     const toExportModel = (m) => {
       const out = { id: m.id, version: exportVersionMap[m.id] || '1.0' };
@@ -639,7 +656,9 @@ const GlobalSettings = () => {
       if (params !== undefined) out.default_parameters = params;
       // 用户自定义参数映射
       if (m.user_parameter_mapping !== undefined) out.user_parameters = m.user_parameter_mapping;
-      if (m.selected_quantization !== undefined) out.selected_quantization = m.selected_quantization;
+      const activeDownloadedPreset = (m.downloaded_files || []).find(f => f.is_active)?.matched_preset || null;
+      const effectiveSelectedQuantization = m.selected_quantization || activeDownloadedPreset;
+      if (effectiveSelectedQuantization) out.selected_quantization = effectiveSelectedQuantization;
       return out;
     };
 
@@ -650,6 +669,8 @@ const GlobalSettings = () => {
     };
     if (exportTypes.includes('llm')) result.models.llm = llm.map(toExportModel);
     if (exportTypes.includes('comfyui')) result.models.comfyui = comfyui.map(toExportModel);
+    if (exportTypes.includes('whisper')) result.models.whisper = whisper.map(toExportModel);
+    if (exportTypes.includes('tts')) result.models.tts = tts.map(toExportModel);
 
     const json = JSON.stringify(result, null, 2);
     setExportJson(json);
@@ -959,7 +980,9 @@ const GlobalSettings = () => {
                     onChange={v => { setExportTypes(v); setExportJson(''); }}
                     options={[
                       { label: 'LLM', value: 'llm' },
-                      { label: 'ComfyUI', value: 'comfyui' }
+                      { label: 'ComfyUI', value: 'comfyui' },
+                      { label: 'Whisper', value: 'whisper' },
+                      { label: 'TTS', value: 'tts' }
                     ]}
                   />
                 </Form.Item>
@@ -1550,10 +1573,17 @@ const GlobalSettings = () => {
         }}>
           <Spin size="large" />
           <span style={{ color: '#fff', fontSize: 16 }}>
-            {restarting
-              ? `更新完成，应用将在 ${restartCountdown} 秒后重启...`
-              : '正在解压安装，即将重启...'}
+            {restartTimedOut
+              ? '重启超时，请手动重新启动应用'
+              : restarting
+                ? `更新完成，应用将在 ${restartCountdown} 秒后重启...`
+                : '正在解压安装，即将重启...'}
           </span>
+          {restartTimedOut && (
+            <span style={{ color: '#aaa', fontSize: 13 }}>
+              请运行 start_novamax.py 或 NovaMax.bat 重新启动
+            </span>
+          )}
         </div>
       )}
       <Header style={{

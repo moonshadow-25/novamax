@@ -232,10 +232,14 @@ class EngineDownloader {
 
     // 安装步骤
     if (engine.category === 'app') {
+      const updateSource = this._resolveAppUpdateSource(installPath);
+      if (!this._isValidAppUpdateSource(updateSource)) {
+        throw new Error(`更新包结构无效: ${updateSource}`);
+      }
       // App 更新：写 pending 文件，然后自动重启
       const PENDING_FILE = path.join(DATA_DIR, 'updates', 'pending');
       fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
-      fs.writeFileSync(PENDING_FILE, installPath, 'utf8');
+      fs.writeFileSync(PENDING_FILE, updateSource, 'utf8');
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       // 通知前端进入重启状态
       downloadStateManager.setState(engineId, 'restarting', null, version);
@@ -252,6 +256,41 @@ class EngineDownloader {
 
     // 清理下载文件
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  }
+
+  _resolveUpdateBundleRoot(installPath) {
+    // 与 Python 启动器 _resolve_update_source 保持一致的标记文件
+    const markers = [
+      ['backend', 'dist', 'index.js'],
+      ['external', 'node', 'node.exe']
+    ];
+
+    const isValidRoot = (root) => markers.every(parts => fs.existsSync(path.join(root, ...parts)));
+
+    if (isValidRoot(installPath)) return installPath;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(installPath, { withFileTypes: true });
+    } catch {
+      return installPath;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(installPath, entry.name);
+      if (isValidRoot(candidate)) return candidate;
+    }
+
+    return installPath;
+  }
+
+  _isValidAppUpdateSource(sourcePath) {
+    return fs.existsSync(path.join(sourcePath, 'backend', 'dist', 'index.js'));
+  }
+
+  _resolveAppUpdateSource(installPath) {
+    return this._resolveUpdateBundleRoot(installPath);
   }
 
   /**

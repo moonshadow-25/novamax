@@ -253,8 +253,9 @@ function Home() {
   }, [activeTab]);
 
   const refreshDownloadCount = useCallback(() => {
+    const activeStatuses = ['downloading', 'unpacking', 'installing', 'restarting'];
     downloadService.getAll().then(data => {
-      const count = (data.downloads || []).filter(d => d.status === 'downloading').length;
+      const count = (data.downloads || []).filter(d => activeStatuses.includes(d.status)).length;
       setDownloadingCount(count);
     }).catch(() => {});
   }, []);

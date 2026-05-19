@@ -271,301 +271,45 @@ if (fs.existsSync(dataSrc)) {
 }
 console.log('✅ 数据目录已创建');
 
-// 8. 创建启动脚本
-console.log('📄 创建启动脚本...');
-
-// Windows 批处理启动脚本（使用英文避免编码问题）
-const startBat = `@echo off
-setlocal EnableDelayedExpansion
-title NovaMax
-cls
-
-echo ========================================
-echo    NovaMax - AI Model Platform
-echo ========================================
-echo.
-
-set "APP_DIR=%~dp0"
-set "APP_DIR=!APP_DIR:~0,-1!"
-set NODE_ENV=production
-
-:start
-echo Starting service...
-echo.
-cd /d "!APP_DIR!"
-"!APP_DIR!\\external\\node\\node.exe" "!APP_DIR!\\backend\\dist\\index.js"
-
-if exist "!APP_DIR!\\data\\updates\\pending" (
-    echo.
-    echo [NovaMax Updater] Applying update...
-    set /p STAGING=<"!APP_DIR!\\data\\updates\\pending"
-    robocopy "!STAGING!" "!APP_DIR!" /E /XD "data" /NFL /NDL /NJH /NJS /R:2 /W:1
-    del "!APP_DIR!\\data\\updates\\pending" 2>nul
-    rmdir /S /Q "!STAGING!" 2>nul
-    echo [NovaMax Updater] Done. Restarting...
-    goto start
-)
-
-echo.
-echo Service stopped
-pause
-`;
-fs.writeFileSync(path.join(RELEASE_DIR, 'NovaMax.bat'), startBat, 'utf8');
-
-// 创建隐藏窗口启动脚本（通过 VBS）
-const startVbs = `Set WshShell = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
-WshShell.CurrentDirectory = scriptDir
-WshShell.Run "NovaMax.bat", 0, False
-Set WshShell = Nothing
-Set fso = Nothing
-`;
-fs.writeFileSync(path.join(RELEASE_DIR, 'NovaMax-Silent.vbs'), startVbs);
-
-// 创建停止服务脚本
-const stopBat = `@echo off
-title Stop NovaMax
-cls
-
-echo ========================================
-echo    Stop NovaMax Service
-echo ========================================
-echo.
-
-taskkill /FI "WINDOWTITLE eq NovaMax*" /F >nul 2>&1
-taskkill /FI "IMAGENAME eq node.exe" /FI "MEMUSAGE gt 50000" /F >nul 2>&1
-
-echo Service stopped
-echo.
-pause
-`;
-fs.writeFileSync(path.join(RELEASE_DIR, 'Stop-NovaMax.bat'), stopBat, 'utf8');
-
-// 创建 Python 启动脚本（Windows Job Object + ctypes，无 pywin32 依赖）
-const startPy = `import os
-import sys
-import ctypes
-import subprocess
-from ctypes import wintypes
-
-CREATE_NO_WINDOW = 0x08000000
-PROCESS_SET_QUOTA = 0x0100
-PROCESS_TERMINATE = 0x0001
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-PROCESS_ALL_NEEDED = PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION
-
-JobObjectExtendedLimitInformation = 9
-JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-
-kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-
-class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ('PerProcessUserTimeLimit', ctypes.c_longlong),
-        ('PerJobUserTimeLimit', ctypes.c_longlong),
-        ('LimitFlags', wintypes.DWORD),
-        ('MinimumWorkingSetSize', ctypes.c_size_t),
-        ('MaximumWorkingSetSize', ctypes.c_size_t),
-        ('ActiveProcessLimit', wintypes.DWORD),
-        ('Affinity', ctypes.c_size_t),
-        ('PriorityClass', wintypes.DWORD),
-        ('SchedulingClass', wintypes.DWORD),
-    ]
-
-class IO_COUNTERS(ctypes.Structure):
-    _fields_ = [
-        ('ReadOperationCount', ctypes.c_ulonglong),
-        ('WriteOperationCount', ctypes.c_ulonglong),
-        ('OtherOperationCount', ctypes.c_ulonglong),
-        ('ReadTransferCount', ctypes.c_ulonglong),
-        ('WriteTransferCount', ctypes.c_ulonglong),
-        ('OtherTransferCount', ctypes.c_ulonglong),
-    ]
-
-class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ('BasicLimitInformation', JOBOBJECT_BASIC_LIMIT_INFORMATION),
-        ('IoInfo', IO_COUNTERS),
-        ('ProcessMemoryLimit', ctypes.c_size_t),
-        ('JobMemoryLimit', ctypes.c_size_t),
-        ('PeakProcessMemoryUsed', ctypes.c_size_t),
-        ('PeakJobMemoryUsed', ctypes.c_size_t),
-    ]
-
-kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
-kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-
-kernel32.SetInformationJobObject.argtypes = [
-    wintypes.HANDLE,
-    ctypes.c_int,
-    wintypes.LPVOID,
-    wintypes.DWORD,
-]
-kernel32.SetInformationJobObject.restype = wintypes.BOOL
-
-kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-
-kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-kernel32.OpenProcess.restype = wintypes.HANDLE
-
-kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-kernel32.CloseHandle.restype = wintypes.BOOL
-
-
-def _raise_last_error(prefix):
-    err = ctypes.get_last_error()
-    raise OSError(f"{prefix} failed, winerr={err}")
-
-
-def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    node_exe = os.path.join(script_dir, "external", "node", "node.exe")
-    entry_js = os.path.join(script_dir, "backend", "dist", "index.js")
-
-    if not os.path.exists(node_exe):
-        print(f"Error: node.exe not found at {node_exe}")
-        sys.exit(1)
-
-    if not os.path.exists(entry_js):
-        print(f"Error: backend entry not found at {entry_js}")
-        sys.exit(1)
-
-    proc = subprocess.Popen(
-        [node_exe, entry_js],
-        cwd=script_dir,
-        env={**os.environ, "NODE_ENV": "production"},
-        creationflags=CREATE_NO_WINDOW
-    )
-
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        _raise_last_error('CreateJobObjectW')
-
-    process_handle = kernel32.OpenProcess(PROCESS_ALL_NEEDED, False, proc.pid)
-    if not process_handle:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        kernel32.CloseHandle(job)
-        _raise_last_error('OpenProcess')
-
-    try:
-        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-
-        ok = kernel32.SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            ctypes.byref(info),
-            ctypes.sizeof(info),
-        )
-        if not ok:
-            _raise_last_error('SetInformationJobObject')
-
-        ok = kernel32.AssignProcessToJobObject(job, process_handle)
-        if not ok:
-            _raise_last_error('AssignProcessToJobObject')
-
-        proc.wait()
-    finally:
-        kernel32.CloseHandle(process_handle)
-        kernel32.CloseHandle(job)
-
-
-if __name__ == "__main__":
-    main()
-`;
-fs.writeFileSync(path.join(RELEASE_DIR, 'start_novamax.py'), startPy, 'utf8');
-
-console.log('✅ 启动脚本已创建');
-
-// 9. 创建用户文档
-console.log('📄 创建用户文档...');
-
-const readme = `# NovaMax - AI 模型运行平台
-
-## 🚀 快速开始
-
-### 方法 1：显示窗口启动（推荐）
-双击 **NovaMax.bat** 启动程序，会显示控制台窗口。
-
-### 方法 2：后台静默启动
-双击 **NovaMax-Silent.vbs** 后台启动，不显示窗口。
-
-### 访问界面
-启动后，浏览器会自动打开。如果没有，请手动访问：
-**http://localhost:3001**
-
-### 停止服务
-- 方法1启动：在控制台窗口按 Ctrl+C 或关闭窗口
-- 方法2启动：打开任务管理器，结束 node.exe 进程
-
-## 📁 目录结构
-
-- \`NovaMax.bat\` - 显示窗口启动脚本
-- \`NovaMax-Silent.vbs\` - 后台静默启动脚本
-- \`backend/\` - 后端服务代码
-- \`frontend/\` - 前端界面文件
-- \`external/\` - 外部工具 (Node.js, Python, llamacpp)
-- \`data/\` - 用户数据和配置
-
-## ⚙️ 配置说明
-
-所有配置文件存储在 \`data/\` 目录：
-- \`models.json\` - 模型列表
-- \`config.json\` - 系统配置
-- \`presets.json\` - 预设参数
-- \`parameters.json\` - 运行参数
-
-## 🔧 常见问题
-
-### 端口被占用
-如果提示端口 3001 被占用，编辑 \`data/config.json\` 修改端口配置。
-
-### 找不到 Python
-确保 \`external/python313/python.exe\` 文件存在。
-
-### 无法访问界面
-检查防火墙是否拦截，或尝试访问 http://127.0.0.1:3001
-
-## 📦 更新说明
-
-更新时，只需备份 \`data/\` 目录，然后用新版本替换其他文件即可。
-
-## 🗑️ 卸载
-
-直接删除整个文件夹，无需卸载程序。
-用户数据全部在本地，不会残留系统文件。
-
-## 📊 系统要求
-
-- Windows 10/11 (64位)
-- 至少 4GB 内存
-- 建议 SSD 硬盘
-
-## 📚 技术信息
-
-- 构建日期: ${new Date().toISOString().split('T')[0]}
-- 架构: 便携版 (无需安装)
-
-## 🆘 获取帮助
-
-如遇问题，请查看控制台输出的错误信息。
-也可以访问项目主页获取帮助。
-
----
-
-感谢使用 NovaMax！
-`;
-fs.writeFileSync(path.join(RELEASE_DIR, 'README.txt'), readme);
-console.log('✅ 用户文档已创建');
+// 8. 复制启动脚本（源文件在 scripts/ 目录下独立维护）
+console.log('📄 复制启动脚本...');
+const scriptsDir = path.join(PROJECT_ROOT, 'scripts');
+
+// NovaMax.bat / Stop-NovaMax.bat
+for (const script of ['NovaMax.bat', 'Stop-NovaMax.bat']) {
+  const src = path.join(scriptsDir, script);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(RELEASE_DIR, script));
+    console.log(`   ✓ ${script}`);
+  } else {
+    console.warn(`⚠️  scripts/${script} 不存在，跳过`);
+  }
+}
+
+
+// start_novamax.py — 从 scripts/ 复制
+const startPySrc = path.join(scriptsDir, 'start_novamax.py');
+if (fs.existsSync(startPySrc)) {
+  fs.copyFileSync(startPySrc, path.join(RELEASE_DIR, 'start_novamax.py'));
+  console.log(`   ✓ start_novamax.py`);
+} else {
+  console.warn('⚠️  scripts/start_novamax.py 不存在，跳过');
+}
+console.log('✅ 启动脚本已复制');
+
+
+// 9. 复制用户文档（替换构建日期占位符）
+console.log('📄 复制用户文档...');
+const readmeSrc = path.join(scriptsDir, 'README.md');
+if (fs.existsSync(readmeSrc)) {
+  let readme = fs.readFileSync(readmeSrc, 'utf-8');
+  readme = readme.replace('{{BUILD_DATE}}', new Date().toISOString().split('T')[0]);
+  fs.writeFileSync(path.join(RELEASE_DIR, 'README.md'), readme);
+  console.log('   ✓ README.md');
+} else {
+  console.warn('⚠️  scripts/README.md 不存在，跳过');
+}
+console.log('✅ 用户文档已复制');
 
 // 10. 显示打包结果
 console.log('\n' + '='.repeat(60));
