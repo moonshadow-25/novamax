@@ -168,7 +168,7 @@ router.post('/modelscope/parse-url', async (req, res) => {
       throw error;
     }
 
-    const { modelData, files, description } = modelInfo;
+    const { modelData, files, description, readmeContent } = modelInfo;
 
     // 生成配置
     let config;
@@ -179,7 +179,8 @@ router.post('/modelscope/parse-url', async (req, res) => {
         modelData,
         files,
         description,
-        folder
+        folder,
+        readmeContent
       );
     } catch (error) {
       if (error.message.includes('没有 GGUF')) {

@@ -32,7 +32,8 @@ export const modelService = {
   addCustomModel: (data) => api.post('/models/custom', data),
   addWhisperModels: (data) => api.post('/models/whisper-custom', data),
   addCloudApiModel: (data) => api.post('/models/cloudapi', data),
-  testCloudApiModel: (data) => api.post('/models/cloudapi/test', data)
+  testCloudApiModel: (data) => api.post('/models/cloudapi/test', data),
+  generateDescription: (id) => api.post(`/models/${id}/generate-description`)
 };
 
 export const modelscopeService = {

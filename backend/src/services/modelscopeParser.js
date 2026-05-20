@@ -107,7 +107,7 @@ class ModelscopeParser {
 
       const files = filesResponse.data.Data.Files || [];
 
-      // 3. 提取描述
+      // 3. 快速提取描述（异步 AI 总结由 generate-description 接口完成）
       let description = modelData.Description || '';
       if (!description && modelData.ReadMeContent) {
         const lines = modelData.ReadMeContent.split('\n').filter(line => line.trim());
@@ -132,7 +132,8 @@ class ModelscopeParser {
       return {
         modelData,
         files,
-        description
+        description,
+        readmeContent: modelData.ReadMeContent || ''
       };
     } catch (error) {
       if (error.response?.status === 404) {
@@ -143,6 +144,62 @@ class ModelscopeParser {
         throw new Error('无法连接到 ModelScope');
       }
     }
+  }
+
+  /**
+   * 通过在线 chat 接口总结 README 为中文简介
+   * @param {string} readmeContent - 完整的 README 内容
+   * @returns {string} 中文简介（约 50 字）
+   */
+  async summarizeReadme(readmeContent) {
+    const maxLen = 3000;
+    const content = readmeContent.length > maxLen
+      ? readmeContent.substring(0, maxLen) + '\n...(内容已截断)'
+      : readmeContent;
+
+    const response = await axios.post(
+      'http://localhost:3001/api/chat',
+      {
+        question: `请基于以下模型README文档，用中文总结该模型的功能和特点，字数控制在50字左右，直接给出总结不要任何前缀：\n\n${content}`,
+        history: []
+      },
+      { timeout: 60000 }
+    );
+
+    // chat API 返回 SSE 流格式，需要解析
+    const rawData = response.data;
+    let summary = '';
+
+    if (typeof rawData === 'string') {
+      // 解析 SSE: data: {"type":"content","text":"..."}
+      const lines = rawData.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+
+        try {
+          const jsonStr = trimmed.substring(5).trim();
+          if (jsonStr === '[DONE]') continue;
+
+          const chunk = JSON.parse(jsonStr);
+          if (chunk.type === 'content' && chunk.text) {
+            summary += chunk.text;
+          }
+        } catch (e) {
+          // 跳过解析失败的行
+        }
+      }
+    }
+
+    if (!summary) {
+      throw new Error('chat API 未返回有效内容');
+    }
+
+    if (summary.length > 100) {
+      summary = summary.substring(0, 100);
+    }
+
+    return summary.trim();
   }
 
   /**
@@ -380,9 +437,10 @@ class ModelscopeParser {
    * @param {Array} files - 文件列表
    * @param {string} description - 描述
    * @param {string|null} filterFolder - 可选的文件夹筛选
+   * @param {string} readmeContent - README 全文（用于异步 AI 总结）
    * @returns {Object} 完整的模型配置
    */
-  generateModelConfig(modelId, type, modelData, files, description, filterFolder = null) {
+  generateModelConfig(modelId, type, modelData, files, description, filterFolder = null, readmeContent = '') {
     const baseConfig = {
       id: modelId.replace('/', '_'),
       name: modelData.Name || modelId.split('/').pop(),
@@ -390,6 +448,7 @@ class ModelscopeParser {
       type: type,
       source: 'modelscope',
       modelscope_id: modelId,
+      readme_content: readmeContent,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

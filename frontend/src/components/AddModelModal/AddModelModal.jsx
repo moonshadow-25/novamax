@@ -201,6 +201,10 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         message.success('模型添加成功');
         setPreviewVisible(false);
         handleClose();
+        // 异步生成 AI 描述
+        if (response.model?.id && config.readme_content) {
+          modelService.generateDescription(response.model.id).catch(() => {});
+        }
         if (onSuccess) {
           onSuccess(response.model);
         }
