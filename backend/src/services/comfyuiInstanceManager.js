@@ -44,17 +44,24 @@ class ComfyUIInstanceManager {
   createInstance(config) {
     const instances = configManager.get('comfyui_instances') || [];
 
-    // 如果未指定引擎版本，使用最新版本
-    let engineVersion = config.engine_version;
-    if (!engineVersion) {
-      engineVersion = engineManager.getDefaultVersion('comfyui');
+    // 引擎版本：留空表示使用最新版本（启动时动态解析）
+    const engineVersion = config.engine_version || null;
+
+    // 端口自动分配：8188 起步，依次递增
+    let port = config.port;
+    if (!port) {
+      const usedPorts = instances.map(i => i.port);
+      port = 8188;
+      while (usedPorts.includes(port)) {
+        port++;
+      }
     }
 
     const newInstance = {
       id: `instance_${Date.now()}`,
       name: config.name || '新实例',
       host: config.host || '0.0.0.0',
-      port: config.port || 8188,
+      port,
       engine_version: engineVersion,
       custom_args: config.custom_args || ''
     };
@@ -317,7 +324,7 @@ class ComfyUIInstanceManager {
         name: '默认实例',
         host: '0.0.0.0',
         port: 8188,
-        engine_version: defaultVersion,
+        engine_version: null,
         custom_args: ''
       });
     }

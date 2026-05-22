@@ -205,7 +205,6 @@ function Home() {
       await comfyuiService.createInstance({
         name: '新实例',
         host: '0.0.0.0',
-        port: 8189,
         engine_version: null,
         custom_args: ''
       });
@@ -500,29 +499,27 @@ function Home() {
                   <div>
                     {comfyuiInstances.length === 0 ? (
                       <div style={{ padding: '16px 0', textAlign: 'center', color: '#999' }}>
-                        暂无实例，点击模型卡片的"运行"按钮将自动创建
+                        暂无可用实例
                       </div>
                     ) : (
-                      <>
-                        {comfyuiInstances.map(instance => (
-                          <ComfyUIInstanceCard
-                            key={instance.id}
-                            instance={instance}
-                            onUpdate={loadComfyUIInstances}
-                            onSettings={handleInstanceSettings}
-                          />
-                        ))}
-                        <Button
-                          type="dashed"
-                          icon={<PlusOutlined />}
-                          onClick={handleCreateInstance}
-                          block
-                          style={{ marginTop: 8 }}
-                        >
-                          新增实例
-                        </Button>
-                      </>
+                      comfyuiInstances.map(instance => (
+                        <ComfyUIInstanceCard
+                          key={instance.id}
+                          instance={instance}
+                          onUpdate={loadComfyUIInstances}
+                          onSettings={handleInstanceSettings}
+                        />
+                      ))
                     )}
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={handleCreateInstance}
+                      block
+                      style={{ marginTop: 8 }}
+                    >
+                      新增实例
+                    </Button>
                   </div>
                 )
               }
