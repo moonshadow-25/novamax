@@ -210,7 +210,7 @@ function MultiConnectModal({ visible, onClose }) {
       okText: '确认退出',
       cancelText: '取消',
       okButtonProps: { danger: true, loading: disabling },
-      onOk: handleDisable,
+      onOk: () => { handleDisable(); },
       centered: true,
       maskClosable: false
     });

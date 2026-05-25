@@ -9,6 +9,7 @@ import {
   configureSingleUSBAdapter,
   configureMultiUSBAdapters,
   destroyNetworkBridge,
+  destroyNetworkBridgeByGuid,
   DEFAULT_MASK
 } from '../utils/windowsNetworkUtils.js';
 
@@ -21,7 +22,8 @@ class MultiConnectService {
   constructor() {
     this._rpcProcess = null;       // 从机 rpc-server 进程
     this._slaveConfig = {};        // { port, ip, mask, network_mode }
-    this._bridgeInfo = null;       // { bridge } when bridge mode enabled
+    this._bridgeInfo = null;       // { bridge, bridge_guid } when bridge mode enabled
+    this._bridgeGuid = null;       // 桥接 GUID，用于退出时删除
     this._slaveLogStream = null;   // 从机日志流
     this._rpcServers = new Map();  // modelId -> { process, port, address, logStream }
   }
@@ -105,6 +107,7 @@ class MultiConnectService {
 
     const result = await configureMultiUSBAdapters(adapters, ip, mask);
     this._bridgeInfo = result.bridge ? { bridge: result.bridge } : null;
+    this._bridgeGuid = result.bridge_guid || null;
     return result;
   }
 
@@ -235,13 +238,7 @@ class MultiConnectService {
 
   async enableSlaveMode(portOrConfig = DEFAULT_RPC_PORT, ip = `${SLAVE_IP_PREFIX}101`, mask = DEFAULT_MASK) {
     if (this._rpcProcess) {
-      return {
-        status: 'enabled',
-        port: this._slaveConfig.port,
-        ip: this._slaveConfig.ip,
-        mask: this._slaveConfig.mask,
-        network_mode: this._slaveConfig.network_mode
-      };
+      throw new Error('从机模式已启用，请先禁用后再重新启用');
     }
 
     const cfg = this._normalizeEnableArgs(portOrConfig, ip, mask);
@@ -266,6 +263,28 @@ class MultiConnectService {
 
     const { stream: slaveLogStream, filePath: slaveLogPath } = this._createRpcLogStream('slave');
     slaveLogStream.write(`command: ${rpcServerPath} -H 0.0.0.0 -p ${actualPort} -c\n`);
+
+    // 先配置网络（建桥），再启动 rpc-server
+    // 原因：rpc-server 以 -H 0.0.0.0 启动后会绑定所有网卡（含 USB4 适配器），
+    // 此时 Windows 会保护有活跃 socket 的网卡，导致第二块网卡无法加入网桥（静默失败）
+    let networkResult;
+    try {
+      console.log('[enableSlaveMode] 先配置网络，再启动 rpc-server...');
+      networkResult = await this._applySlaveNetwork(adapters, cfg.ip, cfg.mask);
+    } catch (e) {
+      // 网络配置失败时回滚桥接
+      if (this._bridgeGuid) {
+        await destroyNetworkBridgeByGuid(this._bridgeGuid).catch(() => {});
+        this._bridgeGuid = null;
+      }
+      if (this._bridgeInfo) {
+        await destroyNetworkBridge().catch(() => {});
+        this._bridgeInfo = null;
+      }
+      slaveLogStream.write(`[network-failed] ${e.message}\n`);
+      slaveLogStream.end();
+      throw e;
+    }
 
     const proc = spawn(rpcServerPath, ['-H', '0.0.0.0', '-p', String(actualPort), '-c'], {
       stdio: ['ignore', 'pipe', 'pipe']
@@ -302,7 +321,6 @@ class MultiConnectService {
     try {
       await this._waitForPort(actualPort, 10, proc, 'slave rpc-server');
 
-      const networkResult = await this._applySlaveNetwork(adapters, cfg.ip, cfg.mask);
       const appliedIp = networkResult.applied_ip || cfg.ip;
 
       this._slaveConfig = {
@@ -327,7 +345,11 @@ class MultiConnectService {
       };
     } catch (e) {
       try { proc.kill(); } catch (_) {}
-      // 网络异常时尽量回滚桥接
+      // rpc-server 启动异常时回滚桥接
+      if (this._bridgeGuid) {
+        await destroyNetworkBridgeByGuid(this._bridgeGuid).catch(() => {});
+        this._bridgeGuid = null;
+      }
       if (this._bridgeInfo) {
         await destroyNetworkBridge().catch(() => {});
         this._bridgeInfo = null;
@@ -356,6 +378,11 @@ class MultiConnectService {
     }
     this._slaveLogStream = null;
 
+    // 优先使用 GUID 删除网桥
+    if (this._bridgeGuid) {
+      await destroyNetworkBridgeByGuid(this._bridgeGuid).catch(() => {});
+      this._bridgeGuid = null;
+    }
     if (this._bridgeInfo) {
       await destroyNetworkBridge().catch(() => {});
       this._bridgeInfo = null;
