@@ -44,6 +44,57 @@ function getCpuUsagePercent() {
  * 获取 GPU / VRAM 信息
  * 优先 nvidia-smi，Windows 下用 PowerShell（过滤虚拟适配器 + 注册表读 64 位 VRAM）
  */
+async function getAmdSoftwareVersion() {
+  if (os.platform() !== 'win32') return null;
+  try {
+    const psLines = [
+      '$ErrorActionPreference="SilentlyContinue"',
+      '$roots=@("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall","HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall")',
+      '$cands=@()',
+      'foreach($r in $roots){',
+      '  $items=@(Get-ChildItem $r -EA SilentlyContinue|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+      '  foreach($it in $items){',
+      '    if(-not $it.DisplayName -or -not $it.DisplayVersion){continue}',
+      '    $n=[string]$it.DisplayName; $v=[string]$it.DisplayVersion',
+      '    if($n -like "AMD Software*"){$cands += [pscustomobject]@{p=1;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "Adrenalin"){$cands += [pscustomobject]@{p=2;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "Radeon Software"){$cands += [pscustomobject]@{p=3;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "AMD Settings"){$cands += [pscustomobject]@{p=4;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '  }',
+      '}',
+      '$cnPaths=@("HKLM:\\SOFTWARE\\AMD\\CN","HKLM:\\SOFTWARE\\WOW6432Node\\AMD\\CN")',
+      'foreach($cp in $cnPaths){',
+      '  $p=Get-ItemProperty $cp -EA SilentlyContinue',
+      '  if(-not $p){continue}',
+      '  foreach($k in @("ReleaseVersion","RadeonSoftwareVersion","Version","DriverVersion")){',
+      '    $val=$p.$k',
+      '    if($val){$cands += [pscustomobject]@{p=9;v=[string]$val;n=("CN."+$k);d=""}; break}',
+      '  }',
+      '}',
+      '$norm=@($cands|Where-Object{$_.v -match "^\\d+\\.\\d+(\\.\\d+){0,3}$"})',
+      'if(-not $norm -or $norm.Count -eq 0){',
+      '  if($cands -and $cands.Count -gt 0){',
+      '    ($cands|Sort-Object p|Select-Object -First 1).v',
+      '  } else {',
+      '    ""',
+      '  }',
+      '} else {',
+      '  $pick=$norm|Sort-Object p | Select-Object -First 1',
+      '  $pick.v',
+      '}'
+    ];
+    const encoded = Buffer.from(psLines.join('\n'), 'utf16le').toString('base64');
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      { encoding: 'utf-8', timeout: 10000 }
+    );
+    const value = (stdout || '').trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
 async function getGpuInfo(options = {}) {
   const { namesOnly = false } = options;
 
@@ -52,7 +103,7 @@ async function getGpuInfo(options = {}) {
     try {
       const nvidiaQuery = namesOnly
         ? 'nvidia-smi --query-gpu=name --format=csv,noheader'
-        : 'nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits';
+        : 'nvidia-smi --query-gpu=name,driver_version,memory.total,memory.used,memory.free --format=csv,noheader,nounits';
       const { stdout } = await execAsync(nvidiaQuery, { encoding: 'utf-8', timeout: 3000 });
       const lines = stdout.trim().split('\n').filter(l => l.trim());
       if (lines.length > 0) {
@@ -61,11 +112,21 @@ async function getGpuInfo(options = {}) {
           return lines.map(line => ({ name: line.trim() }));
         }
         return lines.map(line => {
-          const [name, totalMB, usedMB, freeMB] = line.split(',').map(s => s.trim());
+          const parts = line.split(',').map(s => s.trim());
+          const [name, driverVersion, totalMB, usedMB, freeMB] = parts;
           const total = parseInt(totalMB) * 1024 * 1024;
           const used = parseInt(usedMB) * 1024 * 1024;
           const free = parseInt(freeMB) * 1024 * 1024;
-          return { name, total, used, free, usagePercent: total ? Math.round((used / total) * 100) : 0 };
+          return {
+            name,
+            preferredVersion: driverVersion || null,
+            driverVersion: driverVersion || null,
+            amdSoftwareVersion: null,
+            total,
+            used,
+            free,
+            usagePercent: total ? Math.round((used / total) * 100) : 0
+          };
         });
       }
       _nvidiaSmiAvailable = false;
@@ -106,12 +167,52 @@ async function getGpuInfo(options = {}) {
         '  @{u=([long](($_.Group|Measure-Object -Property CookedValue -Sum).Sum))}',
         '}|Sort-Object u -Descending)',
         '$totalUsed=[long]((($dedPhys|Measure-Object -Property CookedValue -Sum).Sum)+(($shrPhys|Measure-Object -Property CookedValue -Sum).Sum))',
+        '$amdSw=$null',
+        '$uninstallRoots=@(',
+        '  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",',
+        '  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"',
+        ')',
+        'foreach($root in $uninstallRoots){',
+        '  if($amdSw){break}',
+        '  $items=@(Get-ChildItem $root -EA SilentlyContinue|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+        '  $exact=$items|Where-Object{',
+        '    $_.DisplayName -and $_.DisplayVersion -and',
+        '    $_.DisplayName -like "AMD Software*"',
+        '  }|Select-Object -First 1',
+        '  if($exact){$amdSw=[string]$exact.DisplayVersion;break}',
+        '  $fallback=$items|Where-Object{',
+        '    $_.DisplayName -and $_.DisplayVersion -and',
+        '    ($_.DisplayName -match "Adrenalin" -or $_.DisplayName -match "AMD Settings")',
+        '  }|Select-Object -First 1',
+        '  if($fallback){$amdSw=[string]$fallback.DisplayVersion}',
+        '}',
+        'if(-not $amdSw){',
+        '  $cnPaths=@("HKLM:\SOFTWARE\AMD\CN","HKLM:\SOFTWARE\WOW6432Node\AMD\CN")',
+        '  foreach($cp in $cnPaths){',
+        '    if($amdSw){break}',
+        '    $p=Get-ItemProperty $cp -EA SilentlyContinue',
+        '    if($p){',
+        '      foreach($k in @("ReleaseVersion","RadeonSoftwareVersion","DriverVersion","Version")){',
+        '        if($p.$k){$amdSw=[string]$p.$k;break}',
+        '      }',
+        '    }',
+        '  }',
+        '}',
         '$out=@($vc|ForEach-Object{',
-        '  $v=$_; $total=$null',
+        '  $v=$_; $total=$null; $drv=$null; $pref=$null',
         '  $reg=$allReg|Where-Object{$_.DriverDesc -eq $v.Name}|Select-Object -First 1',
-        '  if($reg){$q=[long]$reg."HardwareInformation.qwMemorySize";if($q -gt 0){$total=$q}}',
+        '  if($reg){',
+        '    $q=[long]$reg."HardwareInformation.qwMemorySize";if($q -gt 0){$total=$q}',
+        '    if($reg.DriverVersion){$drv=[string]$reg.DriverVersion}',
+        '  }',
+        '  if(-not $drv -and $v.DriverVersion){$drv=[string]$v.DriverVersion}',
         '  if(-not $total -and $v.AdapterRAM -gt 0){$total=[long]$v.AdapterRAM}',
-        '  @{n=$v.Name;t=$total}',
+        '  if($v.Name -match "AMD|Radeon"){',
+        '    if($amdSw){$pref=$amdSw}else{$pref=$drv}',
+        '  } else {',
+        '    $pref=$drv',
+        '  }',
+        '  @{n=$v.Name;t=$total;d=$drv;pv=$pref;asv=$amdSw}',
         '})',
         '@{g=$out;p=$perf;tu=$totalUsed}|ConvertTo-Json -Depth 4 -Compress'
       ];
@@ -140,6 +241,9 @@ async function getGpuInfo(options = {}) {
         const used = usedFromPerf > 0 ? usedFromPerf : (totalUsed > 0 ? totalUsed : null);
         return [{
           name: g.n,
+          preferredVersion: g.pv || g.d || null,
+          driverVersion: g.d || null,
+          amdSoftwareVersion: g.asv || null,
           total,
           used,
           free: (total != null && used != null) ? total - used : null,
@@ -153,6 +257,9 @@ async function getGpuInfo(options = {}) {
         const used = usedValue > 0 ? usedValue : (i === 0 && totalUsed > 0 ? totalUsed : null);
         return {
           name: g.n,
+          preferredVersion: g.pv || g.d || null,
+          driverVersion: g.d || null,
+          amdSoftwareVersion: g.asv || null,
           total,
           used,
           free: (total != null && used != null) ? total - used : null,
@@ -216,8 +323,18 @@ router.get('/system/info', async (req, res) => {
     const freeMem = os.freemem();
     const cpuUsage = getCpuUsagePercent();
     const gpus = await getGpuInfo();
+    const amdSoftwareVersion = await getAmdSoftwareVersion();
+    const normalizedGpus = Array.isArray(gpus) ? gpus.map(gpu => {
+      if (!gpu || !gpu.name) return gpu;
+      const isAmd = /AMD|Radeon/i.test(gpu.name);
+      if (!isAmd || !amdSoftwareVersion) return gpu;
+      return {
+        ...gpu,
+        amdSoftwareVersion,
+        preferredVersion: amdSoftwareVersion
+      };
+    }) : gpus;
 
-    const memMap = await getProcessMemoryMap();
 
     const running = processManager.getAllRunning().map(p => {
       const memory = p.pid ? (memMap.get(p.pid) || 0) : 0;
@@ -277,7 +394,7 @@ router.get('/system/info', async (req, res) => {
             ((totalMem - freeMem) / totalMem) * 100
           )
         },
-        gpus: gpus,
+        gpus: normalizedGpus,
         platform: os.platform(),
         arch: os.arch(),
         hostname: os.hostname(),

@@ -1295,6 +1295,11 @@ const GlobalSettings = () => {
                     {hw.gpus.map((gpu, i) => (
                       <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
                         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
+                        {gpu.amdSoftwareVersion ? (
+                          <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>
+                            AMD Software: {gpu.amdSoftwareVersion}
+                          </div>
+                        ) : null}
                         {gpu.used != null ? (
                           <>
                             <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
