@@ -183,8 +183,28 @@ def _run_node_in_job(root_dir, node_exe, entry_js):
         [node_exe, entry_js],
         cwd=root_dir,
         env={**os.environ, "NODE_ENV": "development"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        bufsize=1,
         creationflags=CREATE_NO_WINDOW
     )
+
+    # 实时读取并打印子进程输出
+    def _forward_output():
+        try:
+            for line in proc.stdout:
+                line = line.rstrip('\n\r')
+                if line:
+                    print(line, flush=True)
+        except Exception:
+            pass
+
+    import threading
+    reader = threading.Thread(target=_forward_output, daemon=True)
+    reader.start()
 
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
@@ -225,6 +245,7 @@ def _run_node_in_job(root_dir, node_exe, entry_js):
             try:
                 ret = proc.poll()
                 if ret is not None:
+                    reader.join(timeout=2)
                     return ret
                 time.sleep(0.5)
             except KeyboardInterrupt:
