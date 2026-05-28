@@ -272,7 +272,6 @@ if (fs.existsSync(dataSrc)) {
 
 // 创建运行时必需的子目录
 const runtimeDirs = [
-  'tts_services/workspaces',
   'logs',
   'updates',
   'downloads',
@@ -284,18 +283,47 @@ const runtimeDirs = [
 for (const sub of runtimeDirs) {
   fs.mkdirSync(path.join(dataDest, sub), { recursive: true });
 }
-// 复制 TTS 参考音频（内置音色）
-const refAudioSrc = path.join(dataSrc, 'tts_services', 'reference_audio');
-const refAudioDest = path.join(dataDest, 'tts_services', 'reference_audio');
-fs.mkdirSync(refAudioDest, { recursive: true });
-if (fs.existsSync(refAudioSrc)) {
-  const refFiles = fs.readdirSync(refAudioSrc).filter(f => /\.(wav|mp3|flac|ogg)$/i.test(f));
-  for (const f of refFiles) {
-    fs.copyFileSync(path.join(refAudioSrc, f), path.join(refAudioDest, f));
+
+// 复制 TTS 预设数据（参考音频 + 工作区 + 音色库）
+const ttsSrc = path.join(dataSrc, 'tts_services');
+const ttsDest = path.join(dataDest, 'tts_services');
+fs.mkdirSync(ttsDest, { recursive: true });
+
+if (fs.existsSync(ttsSrc)) {
+  // 复制 SQLite 数据库（含 workspace / voice 元数据）
+  for (const dbFile of ['tts.db', 'tts.db-shm', 'tts.db-wal']) {
+    const src = path.join(ttsSrc, dbFile);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(ttsDest, dbFile));
+    }
   }
-  console.log(`   ✓ 参考音频: ${refFiles.length} 个文件`);
+
+  // 复制工作区目录（排除用户上传和历史合成记录）
+  const wsSrc = path.join(ttsSrc, 'workspaces');
+  if (fs.existsSync(wsSrc)) {
+    copyDirectory(wsSrc, path.join(ttsDest, 'workspaces'));
+  }
+
+  // 复制参考音频（内置音色）
+  const refSrc = path.join(ttsSrc, 'reference_audio');
+  const refDest = path.join(ttsDest, 'reference_audio');
+  fs.mkdirSync(refDest, { recursive: true });
+  if (fs.existsSync(refSrc)) {
+    const refFiles = fs.readdirSync(refSrc).filter(f => /\.(wav|mp3|flac|ogg)$/i.test(f));
+    for (const f of refFiles) {
+      fs.copyFileSync(path.join(refSrc, f), path.join(refDest, f));
+    }
+    console.log(`   ✓ 参考音频: ${refFiles.length} 个文件`);
+  }
+
+  // 复制音色音频文件
+  const voicesSrc = path.join(ttsSrc, 'voices');
+  if (fs.existsSync(voicesSrc)) {
+    copyDirectory(voicesSrc, path.join(ttsDest, 'voices'));
+  }
+
 }
-console.log('✅ 数据目录已创建 (含所有运行时子目录 + 参考音频)');
+console.log('✅ 数据目录已创建 (含 TTS 预设工作区 + 参考音频 + 音色库)');
 
 // 8. 复制 scripts/ 目录（启动脚本 + gpuinfo.exe 等二进制工具）
 console.log('📄 复制 scripts/ ...');
