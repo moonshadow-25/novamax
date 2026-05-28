@@ -3,8 +3,40 @@ import engineManager from '../services/engineManager.js';
 import engineDownloader from '../services/engineDownloader.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import processManager from '../services/processManager.js';
+import { getGpuInfo } from './system.js';
 
 const router = express.Router();
+
+function getLlamacppVariantPriority(gpus) {
+  const gpuNames = Array.isArray(gpus)
+    ? gpus.map(gpu => String(gpu?.name || '').toLowerCase())
+    : [];
+  const preferRocm = gpuNames.some(name => name.includes('8060s'));
+  return preferRocm ? ['rocm', 'vulkan', 'other'] : ['vulkan', 'rocm', 'other'];
+}
+
+function orderLlamacppEngine(engine, gpus) {
+  if (!engine || !Array.isArray(engine.variants)) return engine;
+
+  const priority = getLlamacppVariantPriority(gpus);
+  const rankMap = new Map(priority.map((variantId, index) => [variantId, index]));
+  const variants = [...engine.variants].sort((a, b) => {
+    const ar = rankMap.has(a?.id) ? rankMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+    const br = rankMap.has(b?.id) ? rankMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+    return ar - br;
+  });
+
+  return {
+    ...engine,
+    variants
+  };
+}
+
+async function getOrderedEngine(engineId, engine) {
+  if (engineId !== 'llamacpp') return engine;
+  const gpus = await getGpuInfo({ namesOnly: true }).catch(() => null);
+  return orderLlamacppEngine(engine, gpus);
+}
 
 /**
  * 获取所有引擎列表（含安装状态和下载状态）
@@ -14,12 +46,13 @@ router.get('/engines', async (req, res) => {
     const engines = engineManager.getEngines();
     const result = {};
 
-    for (const [id, engine] of Object.entries(engines)) {
+    for (const [id, rawEngine] of Object.entries(engines)) {
+      const engine = await getOrderedEngine(id, rawEngine);
       const installed = engineManager.getInstalledVersions(id);
       const broken = engineManager.getBrokenVersions(id);
-      const defaultVersion = engineManager.getDefaultVersion(id);
+      const installedSet = new Set(installed.map(v => v.version));
+      const defaultVersion = (engineManager.getEngineVersions(id).find(v => installedSet.has(v.version))?.version) || null;
 
-      // 查找该引擎所有进行中的下载（可能同时下载多个版本）
       const allStates = downloadStateManager.getAllStates();
       const downloadStates = Object.values(allStates).filter(
         s => s.type === 'engine' && (s.engineId === id || s.id === id)
@@ -32,7 +65,6 @@ router.get('/engines', async (req, res) => {
         broken_versions: broken,
         default_version: defaultVersion,
         download_states: downloadStates,
-        // 兼容旧字段：取第一个活跃下载
         download_state: downloadStates[0] || null
       };
     }
@@ -49,7 +81,8 @@ router.get('/engines', async (req, res) => {
 router.get('/engines/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const engine = engineManager.getEngine(id);
+    const rawEngine = engineManager.getEngine(id);
+    const engine = await getOrderedEngine(id, rawEngine);
 
     if (!engine) {
       return res.status(404).json({ error: 'Engine not found' });
@@ -57,7 +90,8 @@ router.get('/engines/:id', async (req, res) => {
 
     const installed = engineManager.getInstalledVersions(id);
     const broken = engineManager.getBrokenVersions(id);
-    const defaultVersion = engineManager.getDefaultVersion(id);
+    const installedSet = new Set(installed.map(v => v.version));
+    const defaultVersion = (engineManager.getEngineVersions(id).find(v => installedSet.has(v.version))?.version) || null;
 
     res.json({
       ...engine,

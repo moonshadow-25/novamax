@@ -131,16 +131,23 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     // 只有本地 LLM 类型才需要引擎版本选择，云 API 模型不需要
     if (model?.type !== 'llm' || isCloudApi) return;
     try {
-      const data = await engineService.getById('llamacpp');
-      const installedVersions = data.installed_versions || [];
-      const availableVersions = data.versions || [];
+      const engineData = await engineService.getById('llamacpp');
+      const installedVersions = engineData.installed_versions || [];
+      const availableVersions = Array.isArray(engineData.versions) && engineData.versions.length > 0
+        ? engineData.versions
+        : (engineData.variants || []).flatMap(variant =>
+            (variant.versions || []).map(version => ({
+              ...version,
+              variant_id: variant.id,
+              variant_name: variant.name
+            }))
+          );
       const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
         availableVersions,
         installedVersions
       );
       setEngineVersions(orderedInstalledVersions);
       setLatestEngineVersion(latestInstalledVersion);
-      // 读取模型当前配置的版本，没有则显示"默认（最新）"
       setSelectedEngineVersion(model?.engine_version || null);
     } catch (e) {
       console.error('加载引擎版本失败:', e);

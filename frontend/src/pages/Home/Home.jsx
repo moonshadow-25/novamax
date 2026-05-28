@@ -143,7 +143,9 @@ function Home() {
 
       if (dismissedEngineUpdates.has(id)) continue;
 
-      const latestVersion = engine.versions?.[0]?.version;
+      const latestVersion = Array.isArray(engine.variants) && engine.variants.length > 0
+        ? engine.variants.flatMap(variant => variant.versions || [])[0]?.version
+        : engine.versions?.[0]?.version;
       if (!latestVersion) continue;
 
       if (!engine.installed) {

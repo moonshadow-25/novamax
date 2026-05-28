@@ -95,7 +95,7 @@ async function getAmdSoftwareVersion() {
   }
 }
 
-async function getGpuInfo(options = {}) {
+export async function getGpuInfo(options = {}) {
   const { namesOnly = false } = options;
 
   // 1. NVIDIA nvidia-smi（仅在可用时调用，避免 AMD 机器重复失败回退）

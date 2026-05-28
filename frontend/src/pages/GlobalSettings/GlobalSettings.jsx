@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge } from 'antd';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Collapse } from 'antd';
 import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
+
 import './GlobalSettings.css';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
@@ -581,7 +582,11 @@ const GlobalSettings = () => {
     if (Array.isArray(engine.versions) && engine.versions.length > 0) return engine.versions;
     if (Array.isArray(engine.variants)) {
       return engine.variants.flatMap(variant =>
-        (variant.versions || []).map(v => ({ ...v, variant_name: variant.name }))
+        (variant.versions || []).map(v => ({
+          ...v,
+          variant_id: variant.id,
+          variant_name: variant.name
+        }))
       );
     }
     return [];
@@ -596,12 +601,81 @@ const GlobalSettings = () => {
   const getOrderedInstalledVersions = (engine) => {
     if (!engine) return [];
     const availableVersions = resolveEngineVersions(engine);
+    const availableVersionMap = new Map(
+      availableVersions.map(version => [String(version?.version || ''), version])
+    );
     const installedAndBroken = [
       ...(engine.installed_versions || []).map(v => ({ ...v, broken: false })),
       ...(engine.broken_versions || []).map(v => ({ ...v, broken: true }))
-    ];
+    ].map(version => {
+      const matchedAvailable = availableVersionMap.get(String(version?.version || ''));
+      return matchedAvailable
+        ? {
+            ...version,
+            variant_id: version.variant_id || matchedAvailable.variant_id,
+            variant_name: version.variant_name || matchedAvailable.variant_name
+          }
+        : version;
+    });
 
     return resolveVersionOrder(availableVersions, installedAndBroken).orderedInstalledVersions;
+  };
+
+  const getVersionVariantGroups = (engine, versions = []) => {
+    if (!engine || !Array.isArray(engine.variants) || engine.variants.length === 0) return null;
+
+    const variantMap = new Map(
+      engine.variants.map(variant => [
+        String(variant.id || '').toLowerCase(),
+        {
+          key: variant.id,
+          id: variant.id,
+          name: variant.name || variant.id,
+          versions: []
+        }
+      ])
+    );
+
+    const groups = [];
+    const fallbackGroup = {
+      key: '__ungrouped__',
+      id: '__ungrouped__',
+      name: '其他',
+      versions: []
+    };
+
+    for (const version of versions) {
+      const variantId = String(version?.variant_id || '').toLowerCase();
+      const directGroup = variantId ? variantMap.get(variantId) : null;
+      if (directGroup) {
+        directGroup.versions.push(version);
+        continue;
+      }
+
+      const matchedGroup = engine.variants.find(variant => {
+        const markers = [
+          String(variant.id || '').toLowerCase(),
+          String(variant.name || '').toLowerCase()
+        ].filter(Boolean);
+        const versionText = String(version?.version || '').toLowerCase();
+        const variantText = String(version?.variant_name || '').toLowerCase();
+        return markers.some(marker => versionText.includes(marker) || variantText.includes(marker));
+      });
+
+      if (matchedGroup) {
+        variantMap.get(String(matchedGroup.id || '').toLowerCase())?.versions.push(version);
+      } else {
+        fallbackGroup.versions.push(version);
+      }
+    }
+
+    for (const variant of engine.variants) {
+      const group = variantMap.get(String(variant.id || '').toLowerCase());
+      if (group?.versions.length) groups.push(group);
+    }
+
+    if (fallbackGroup.versions.length) groups.push(fallbackGroup);
+    return groups.length > 0 ? groups : null;
   };
 
   const resolveEngineRows = () => {
@@ -1487,135 +1561,185 @@ const GlobalSettings = () => {
     }
   };
 
-  const renderVersionDrawer = () => (
-    <Drawer
-      title={`${selectedEngine?.name} - 版本管理`}
-      placement="right"
-      width={600}
-      open={versionDrawerVisible}
-      onClose={() => setVersionDrawerVisible(false)}
-    >
-      {selectedEngine && (
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          {/* 已安装版本列表 */}
-          <Card size="small" title="已安装版本">
-            <Alert
-              message="版本说明"
-              description="默认使用版本号最高的版本。如需使用特定版本，请在模型设置中配置。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-            <List
-              dataSource={getOrderedInstalledVersions(selectedEngine)}
-              locale={{ emptyText: '暂无已安装版本' }}
-              renderItem={(version) => {
-                const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
-                return (
-                <List.Item
-                  actions={[
-                    version.broken ? (
-                      <Tag color="error">安装不完整</Tag>
-                    ) : version.version === latestInstalledVersion ? (
-                      <Tag color="green">最新版本</Tag>
-                    ) : null,
-                    <Button
-                      size="small"
-                      icon={<SyncOutlined />}
-                      onClick={() => handleReinstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
-                    >
-                      重装
-                    </Button>,
-                    <Popconfirm
-                      title="确认卸载"
-                      description={`确定要卸载版本 ${version.version} 吗？`}
-                      onConfirm={() => handleUninstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
-                      okText="确定"
-                      cancelText="取消"
-                    >
-                      <Button danger size="small" icon={<DeleteOutlined />}>卸载</Button>
-                    </Popconfirm>
-                  ].filter(Boolean)}
-                >
-                  <List.Item.Meta
-                    title={<Text strong>{version.version}</Text>}
-                    description={
-                      <Space direction="vertical" size={0}>
-                        {version.installed_at && (
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            安装时间: {new Date(version.installed_at).toLocaleString('zh-CN')}
-                          </Text>
-                        )}
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          路径: {version.path}
-                        </Text>
-                      </Space>
-                    }
-                  />
-                </List.Item>
-                );
-              }}
-            />
-          </Card>
+  const renderVersionDrawer = () => {
+    const installedVersions = getOrderedInstalledVersions(selectedEngine);
+    const availableVersions = resolveEngineVersions(selectedEngine);
+    const installedVariantGroups = getVersionVariantGroups(selectedEngine, installedVersions);
+    const availableVariantGroups = getVersionVariantGroups(selectedEngine, availableVersions);
+    const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
+    const allDownloadStates = selectedEngine?.download_states || (selectedEngine?.download_state ? [selectedEngine.download_state] : []);
 
-          {/* 下载新版本 */}
-          <Card size="small" title="可用版本">
-            <List
-              dataSource={resolveEngineVersions(selectedEngine)}
-              renderItem={version => {
-                const isInstalled = selectedEngine.installed_versions?.some(
-                  v => v.version === version.version
-                );
-                const allDs = selectedEngine.download_states || (selectedEngine.download_state ? [selectedEngine.download_state] : []);
-                const ds = allDs.find(s => s.targetQuantization === version.version);
-                const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
-                return (
-                  <List.Item
-                    actions={[
-                      isThisDownloading ? (
-                        <Progress
-                          type="circle"
-                          percent={ds.progress || 0}
-                          width={36}
-                          status="active"
-                        />
-                      ) : isInstalled ? (
-                        <Tag color="success">已安装</Tag>
-                      ) : (
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<DownloadOutlined />}
-                          onClick={() => {
-                            handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
-                          }}
-                        >
-                          下载
-                        </Button>
-                      )
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={version.version}
-                      description={
-                        isThisDownloading ? (
-                          <div style={{ fontSize: 12, color: '#888' }}>
-                            {ds.status === 'downloading' && `下载中${ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : ''}`}
-                            {ds.status === 'unpacking' && '解压中...'}
-                            {ds.status === 'installing' && '安装中...'}
-                          </div>
-                        ) : `大小: ${formatBytes(version.size)}`
-                      }
-                    />
-                  </List.Item>
-                );
-              }}
-            />
-          </Card>
-        </Space>
-      )}
-    </Drawer>
-  );
+    const renderInstalledVersionItem = (version) => (
+      <List.Item
+        actions={[
+          version.broken ? (
+            <Tag color="error">安装不完整</Tag>
+          ) : version.version === latestInstalledVersion ? (
+            <Tag color="green">最新版本</Tag>
+          ) : null,
+          <Button
+            size="small"
+            icon={<SyncOutlined />}
+            onClick={() => handleReinstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
+          >
+            重装
+          </Button>,
+          <Popconfirm
+            title="确认卸载"
+            description={`确定要卸载版本 ${version.version} 吗？`}
+            onConfirm={() => handleUninstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button danger size="small" icon={<DeleteOutlined />}>卸载</Button>
+          </Popconfirm>
+        ].filter(Boolean)}
+      >
+        <List.Item.Meta
+          title={
+            <Space>
+              <Text strong>{version.version}</Text>
+              {version.variant_name && <Tag>{version.variant_name}</Tag>}
+            </Space>
+          }
+          description={
+            <Space direction="vertical" size={0}>
+              {version.installed_at && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  安装时间: {new Date(version.installed_at).toLocaleString('zh-CN')}
+                </Text>
+              )}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                路径: {version.path}
+              </Text>
+            </Space>
+          }
+        />
+      </List.Item>
+    );
+
+    const renderAvailableVersionItem = (version) => {
+      const isInstalled = selectedEngine.installed_versions?.some(
+        v => v.version === version.version
+      );
+      const ds = allDownloadStates.find(s => s.targetQuantization === version.version);
+      const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
+
+      return (
+        <List.Item
+          actions={[
+            isThisDownloading ? (
+              <Progress
+                type="circle"
+                percent={ds.progress || 0}
+                width={36}
+                status="active"
+              />
+            ) : isInstalled ? (
+              <Tag color="success">已安装</Tag>
+            ) : (
+              <Button
+                type="primary"
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
+                }}
+              >
+                下载
+              </Button>
+            )
+          ]}
+        >
+          <List.Item.Meta
+            title={
+              <Space>
+                <Text strong>{version.version}</Text>
+                {version.variant_name && <Tag>{version.variant_name}</Tag>}
+              </Space>
+            }
+            description={
+              isThisDownloading ? (
+                <div style={{ fontSize: 12, color: '#888' }}>
+                  {ds.status === 'downloading' && `下载中${ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : ''}`}
+                  {ds.status === 'unpacking' && '解压中...'}
+                  {ds.status === 'installing' && '安装中...'}
+                </div>
+              ) : `大小: ${formatBytes(version.size)}`
+            }
+          />
+        </List.Item>
+      );
+    };
+
+    const renderGroupedVersionList = (groups, renderItem, emptyText) => {
+      if (!groups) {
+        return null;
+      }
+
+      return (
+        <Collapse
+          defaultActiveKey={[]}
+          items={groups.map(group => ({
+            key: group.key,
+            label: (
+              <Space>
+                <Text strong>{group.name}</Text>
+                <Tag>{group.versions.length}</Tag>
+              </Space>
+            ),
+            children: (
+              <List
+                dataSource={group.versions}
+                locale={{ emptyText }}
+                renderItem={renderItem}
+              />
+            )
+          }))}
+        />
+      );
+    };
+
+    return (
+      <Drawer
+        title={`${selectedEngine?.name} - 版本管理`}
+        placement="right"
+        width={600}
+        open={versionDrawerVisible}
+        onClose={() => setVersionDrawerVisible(false)}
+      >
+        {selectedEngine && (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <Card size="small" title="已安装版本">
+              <Alert
+                message="版本说明"
+                description="默认使用版本号最高的版本。如需使用特定版本，请在模型设置中配置。"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+              {installedVariantGroups ? renderGroupedVersionList(installedVariantGroups, renderInstalledVersionItem, '暂无已安装版本') : (
+                <List
+                  dataSource={installedVersions}
+                  locale={{ emptyText: '暂无已安装版本' }}
+                  renderItem={renderInstalledVersionItem}
+                />
+              )}
+            </Card>
+
+            <Card size="small" title="可用版本">
+              {availableVariantGroups ? renderGroupedVersionList(availableVariantGroups, renderAvailableVersionItem, '暂无可用版本') : (
+                <List
+                  dataSource={availableVersions}
+                  renderItem={renderAvailableVersionItem}
+                />
+              )}
+            </Card>
+          </Space>
+        )}
+      </Drawer>
+    );
+  };
 
   return (
     <Layout className="gs-layout">

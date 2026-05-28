@@ -262,6 +262,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const handleStart = async () => {
+    if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
       // LLM 模型启动前检查 llamacpp 引擎（云API不需要）
@@ -333,6 +334,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const doStartModel = async () => {
+    if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
       await backendService.start(model.id, 'single');

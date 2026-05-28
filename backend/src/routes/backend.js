@@ -15,6 +15,7 @@ router.post('/backend/start/:modelId', async (req, res) => {
     eventBus.broadcast('model-updated', { modelId: req.params.modelId });
     res.json(result);
   } catch (error) {
+    console.error(`[backend/start] ${req.params.modelId} mode=${req.query.mode || 'router'} failed: ${error.stack || error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
@@ -26,6 +27,7 @@ router.post('/backend/start-router/:type', async (req, res) => {
     eventBus.broadcast('model-updated', { type: req.params.type });
     res.json(result);
   } catch (error) {
+    console.error(`[backend/start-router] ${req.params.type} failed: ${error.stack || error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
