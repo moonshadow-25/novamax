@@ -135,6 +135,7 @@ class EngineDownloader {
 
       let resolveLock, rejectLock;
       const lockPromise = new Promise((res, rej) => { resolveLock = res; rejectLock = rej; });
+      lockPromise.catch(() => {}); // 防止无等待者时 unhandled rejection 导致进程崩溃
       this._activeEngineDownloads.set(lockKey, lockPromise);
 
       try {

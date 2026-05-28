@@ -51,7 +51,7 @@ def get_model_files(model_id, revision='master'):
         resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        files = data.get('Data', {}).get('Files', [])
+        files = (data.get('Data') or {}).get('Files') or []
         return [f for f in files if not f.get('IsDir', False)]
     except Exception as e:
         print(f"获取文件列表失败: {e}", file=sys.stderr)
