@@ -18,8 +18,8 @@ const BASE_URL = `http://${REGISTRAR_HOST}:${REGISTRAR_PORT}`;
 
 const ENDPOINTS = [
   { service_path: '3001/v1/audio/speech', node_path: '/v1/audio/speech', max_concurrent: 2 },
-  { service_path: '3001/v1/audio/models', node_path: '/v1/audio/models', max_concurrent: 2 },
-  { service_path: '3001/v1/audio/voices', node_path: '/v1/audio/voices', max_concurrent: 2 },
+  { service_path: '3001/v1/audio/models', node_path: '/v1/audio/models', max_concurrent: 100 },
+  { service_path: '3001/v1/audio/voices', node_path: '/v1/audio/voices', max_concurrent: 100 },
 ];
 
 const HEARTBEAT_INTERVAL = 5000;
