@@ -100,6 +100,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
   const [ttsStatus, setTtsStatus] = useState('idle');
   const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
+  const ttsInstallModeRef = useRef(false); // true = 首次安装引擎+模型，false = 更新引擎
 
   useEffect(() => {
     if (model.type !== 'tts') return;
@@ -1160,13 +1161,27 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             <span style={{ color: ttsStatus === 'error' ? ENGINE_STATUS_MAP.error.color : ENGINE_STATUS_MAP[ttsStatus]?.color || ENGINE_STATUS_MAP.idle.color }}>{ttsStatus === 'error' ? '引擎未安装' : ENGINE_STATUS_MAP[ttsStatus]?.label || ENGINE_STATUS_MAP.idle.label}</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {ttsEngineUpdate ? (
+            {ttsStatus === 'error' ? (
+              <Button type="primary" icon={<DownloadOutlined />} block style={{ flex: 1 }}
+                onClick={async () => {
+                  try {
+                    const engData = await engineService.getById('tts');
+                    setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                    setEngineTarget('tts');
+                    ttsInstallModeRef.current = true;
+                    setShowEngineModal(true);
+                  } catch { message.error('无法获取引擎信息'); }
+                }}>
+                安装引擎
+              </Button>
+            ) : ttsEngineUpdate ? (
               <Button type="primary" icon={<CloudSyncOutlined />} block style={{ flex: 1 }}
                 onClick={async () => {
                   try {
                     const engData = await engineService.getById('tts');
                     setEngineInfo(buildTtsVariantEngineInfo(engData, model));
                     setEngineTarget('tts');
+                    ttsInstallModeRef.current = false;
                     setShowEngineModal(true);
                   } catch { message.error('无法获取引擎信息'); }
                 }}>
@@ -1638,12 +1653,34 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         visible={showEngineModal}
         engineId={engineTarget}
         engineInfo={engineInfo}
-        onComplete={() => {
+        onComplete={async () => {
           setShowEngineModal(false);
           if (engineTarget === 'tts') {
             setTtsEngineUpdate(false);
             onUpdate();
-            message.success('引擎更新完成，请手动启动引擎');
+            if (ttsInstallModeRef.current) {
+              // 首次安装：自动下载所有模型文件
+              ttsInstallModeRef.current = false;
+              try {
+                const filesStatus = await ttsService.getFilesStatus(model.id);
+                const missing = filesStatus?.files?.filter(f => f.status === 'missing') || [];
+                if (missing.length > 0) {
+                  message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                  for (const f of missing) {
+                    await ttsService.downloadFile(model.id, f.name);
+                  }
+                  message.success({ content: '引擎与模型安装完成', key: 'tts-model-dl' });
+                } else {
+                  message.success('引擎安装完成，模型文件已就绪');
+                }
+                onUpdate();
+              } catch (e) {
+                message.warning('引擎安装完成，但部分模型下载失败，请手动检查');
+                onUpdate();
+              }
+            } else {
+              message.success('引擎更新完成，请手动启动引擎');
+            }
           } else if (engineTarget === 'comfyui') {
             handleComfyUILaunch();
           } else {
