@@ -100,6 +100,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
   const [ttsStatus, setTtsStatus] = useState('idle');
   const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
+  const [ttsModelMissing, setTtsModelMissing] = useState(false);
   const ttsInstallModeRef = useRef(false); // true = 首次安装引擎+模型，false = 更新引擎
 
   useEffect(() => {
@@ -126,6 +127,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           const { orderedInstalledVersions } = resolveVersionOrder(variantVersions, variantInstalled);
           setTtsEngineUpdate(latest !== orderedInstalledVersions[0]?.version);
         }
+
+        // 检测模型文件是否已下载
+        try {
+          const fs = await ttsService.getFilesStatus(model.id);
+          const files = fs?.files || [];
+          if (files.length > 0 && files.some(f => !f.downloaded)) {
+            setTtsModelMissing(true);
+            setTtsStatus('error');
+            return;
+          }
+        } catch {}
+        setTtsModelMissing(false);
 
         const h = await ttsService.health();
         const engines = h?.engines || {};
@@ -1164,6 +1177,26 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             {ttsStatus === 'error' ? (
               <Button type="primary" icon={<DownloadOutlined />} block style={{ flex: 1 }}
                 onClick={async () => {
+                  // 模型文件缺失但引擎已安装 → 直接下载模型，跳过引擎安装
+                  if (ttsModelMissing) {
+                    try {
+                      const filesStatus = await ttsService.getFilesStatus(model.id);
+                      const files = filesStatus?.files || [];
+                      const missing = files.filter(f => !f.downloaded);
+                      if (missing.length > 0) {
+                        message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                        for (const f of missing) {
+                          await ttsService.downloadFile(model.id, f.filename || f.name);
+                        }
+                        message.success({ content: '模型下载完成', key: 'tts-model-dl' });
+                        onUpdate();
+                      }
+                    } catch (e) {
+                      message.error('模型下载失败，请重试');
+                    }
+                    return;
+                  }
+                  // 引擎未安装 → 完整安装流程
                   try {
                     const engData = await engineService.getById('tts');
                     setEngineInfo(buildTtsVariantEngineInfo(engData, model));
