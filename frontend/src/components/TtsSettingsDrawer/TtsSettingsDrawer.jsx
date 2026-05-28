@@ -8,15 +8,24 @@ import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
 
-function resolveModelVariant(model) {
+function resolveModelVariant(model, variants) {
   const candidate = normalizeEngineType(
     model?.engine_version ||
     model?.remote_snapshot?.engine_version ||
     model?.id || ''
   );
-  if (candidate.includes('tts15')) return 'indextts1.5';
-  if (candidate.includes('tts2')) return 'indextts2';
-  return null;
+
+  if (variants && variants.length > 0) {
+    const matched = variants.find(v => {
+      const id = v?.id || v?.engine_type;
+      if (!id) return false;
+      const vNorm = normalizeEngineType(id);
+      return vNorm === candidate || vNorm.includes(candidate) || candidate.includes(vNorm);
+    });
+    if (matched) return matched.id || matched.engine_type;
+  }
+
+  return candidate;
 }
 
 function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
@@ -37,7 +46,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const refreshEngineStatus = useCallback(async () => {
     try {
       const res = await engineService.getById('tts');
-      const modelVariant = resolveModelVariant(model);
+      const modelVariant = resolveModelVariant(model, res.variants);
       const variantVersions = (res.variants || [])
         .filter(v => modelVariant ? normalizeEngineType(v.id) === normalizeEngineType(modelVariant) : true)
         .flatMap(v => v.versions || []);
@@ -79,8 +88,8 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     ttsStudioService.getTtsConfig().then(c => setIdleTimeout(c.idle_timeout_minutes ?? 5)).catch(() => {});
     // 加载 runtime_config（按 model variant 过滤）
     ttsStudioService.getEngineContracts().then(contracts => {
-      const mv = resolveModelVariant(model);
-      const match = mv ? contracts.find(c => normalizeEngineType(c.engine_type) === normalizeEngineType(mv)) : contracts[0];
+      const mv = resolveModelVariant(model, contracts);
+      const match = contracts.find(c => normalizeEngineType(c.engine_type) === normalizeEngineType(mv)) || contracts[0];
       const ct = match?.contract;
       const rc = ct?.runtime_config || {};
       const items = Object.entries(rc).map(([key, def]) => ({ key, ...def }));
@@ -213,8 +222,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
 function buildVariantEngineInfo(raw, model) {
   if (!raw || !Array.isArray(raw.variants)) return raw;
-  const mv = resolveModelVariant(model);
-  if (!mv) return raw;
+  const mv = resolveModelVariant(model, raw.variants);
   const mvNorm = normalizeEngineType(mv);
   const matched = raw.variants.filter(v => normalizeEngineType(v.id) === mvNorm);
   if (matched.length === 0) return raw;
