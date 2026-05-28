@@ -269,11 +269,40 @@ if (fs.existsSync(dataSrc)) {
     }
   });
 }
-console.log('✅ 数据目录已创建');
 
-// 8. 复制启动脚本（源文件在 scripts/ 目录下独立维护）
-console.log('📄 复制启动脚本...');
+// 创建运行时必需的子目录
+const runtimeDirs = [
+  'tts_services/voices',
+  'tts_services/workspaces',
+  'tts_services/reference_audio',
+  'tts_services/history',
+  'logs',
+  'updates',
+  'downloads',
+  'models',
+  'models_dir',
+  'presets',
+  'cache',
+];
+for (const sub of runtimeDirs) {
+  fs.mkdirSync(path.join(dataDest, sub), { recursive: true });
+}
+console.log('✅ 数据目录已创建 (含所有运行时子目录)');
+
+// 8. 复制 scripts/ 目录（启动脚本 + gpuinfo.exe 等二进制工具）
+console.log('📄 复制 scripts/ ...');
 const scriptsDir = path.join(PROJECT_ROOT, 'scripts');
+const releaseScriptsDir = path.join(RELEASE_DIR, 'scripts');
+fs.mkdirSync(releaseScriptsDir, { recursive: true });
+
+// gpuinfo.exe — GPU 信息查询工具
+const gpuinfoSrc = path.join(scriptsDir, 'gpuinfo.exe');
+if (fs.existsSync(gpuinfoSrc)) {
+  fs.copyFileSync(gpuinfoSrc, path.join(releaseScriptsDir, 'gpuinfo.exe'));
+  console.log('   ✓ gpuinfo.exe');
+} else {
+  console.warn('⚠️  scripts/gpuinfo.exe 不存在，跳过');
+}
 
 // NovaMax.bat / Stop-NovaMax.bat
 for (const script of ['NovaMax.bat', 'Stop-NovaMax.bat']) {
