@@ -1654,22 +1654,26 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         engineId={engineTarget}
         engineInfo={engineInfo}
         onComplete={async () => {
+          console.log('[ModelCard] onComplete triggered', { engineTarget, installMode: ttsInstallModeRef.current, modelId: model.id });
           setShowEngineModal(false);
           if (engineTarget === 'tts') {
             setTtsEngineUpdate(false);
             onUpdate();
             if (ttsInstallModeRef.current) {
-              // 首次安装：自动下载所有模型文件
+              console.log('[ModelCard] 首次安装模式，开始下载模型文件...');
               ttsInstallModeRef.current = false;
               try {
                 const filesStatus = await ttsService.getFilesStatus(model.id);
+                console.log('[ModelCard] getFilesStatus 返回:', filesStatus);
                 const files = filesStatus?.files || [];
                 const missing = files.filter(f => !f.downloaded);
+                console.log('[ModelCard] 模型文件:', { total: files.length, missing: missing.length });
                 if (files.length === 0) {
                   message.success('引擎安装完成，该模型无需额外模型文件');
                 } else if (missing.length > 0) {
                   message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
                   for (const f of missing) {
+                    console.log('[ModelCard] 下载模型文件:', f.filename || f.name);
                     await ttsService.downloadFile(model.id, f.filename || f.name);
                   }
                   message.success({ content: '引擎与模型安装完成', key: 'tts-model-dl' });
@@ -1678,10 +1682,12 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 }
                 onUpdate();
               } catch (e) {
+                console.error('[ModelCard] 模型下载失败:', e);
                 message.warning('引擎安装完成，但部分模型下载失败，请手动检查');
                 onUpdate();
               }
             } else {
+              console.log('[ModelCard] 更新模式，不下载模型');
               message.success('引擎更新完成，请手动启动引擎');
             }
           } else if (engineTarget === 'comfyui') {

@@ -108,11 +108,14 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
 
         setTasks(updatedTasks);
 
+        console.log('[EngineDownloadModal] poll statuses:', updatedTasks.map(t => `${t.taskId}:${t.status}`).join(', '));
+
         const allCompleted = updatedTasks.every(t => t.status === 'completed');
         const anyFailed = updatedTasks.some(t => t.status === 'failed');
 
         if (allCompleted) {
           clearInterval(interval);
+          console.log('[EngineDownloadModal] 所有任务完成，触发 onComplete');
           setDownloading(false);
           onComplete?.();
         } else if (anyFailed) {
