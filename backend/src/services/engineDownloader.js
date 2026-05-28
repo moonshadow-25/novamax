@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import fsp from 'fs/promises';
 import * as tar from 'tar';
 import axios from 'axios';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
@@ -8,7 +9,6 @@ import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 import engineManager from './engineManager.js';
 import downloadStateManager from './downloadStateManager.js';
 import eventBus from './eventBus.js';
-import AdmZip from 'adm-zip';
 
 /**
  * 引擎下载服务
@@ -72,7 +72,9 @@ class EngineDownloader {
    */
   async reinstall(engineId, version) {
     const installPath = path.join(PROJECT_ROOT, 'external', engineId, version);
-    if (!fs.existsSync(installPath)) {
+    try {
+      await fsp.access(installPath);
+    } catch {
       throw new Error(`目录不存在: ${installPath}，请重新下载`);
     }
 
@@ -86,15 +88,19 @@ class EngineDownloader {
       try {
         // 删除旧标记，确保重装
         const marker = path.join(installPath, '.installed');
-        if (fs.existsSync(marker)) fs.unlinkSync(marker);
+        await fsp.unlink(marker).catch(() => {});
 
-        const hasCiScript = fs.existsSync(path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`))
-          || fs.existsSync(path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`));
+        const ciPy = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
+        const ciBat = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
+        let hasCiScript = true;
+        try { await fsp.access(ciPy); } catch {
+          try { await fsp.access(ciBat); } catch { hasCiScript = false; }
+        }
 
         await this._runInstallScript(engineId, version, installPath);
 
         if (!hasCiScript) {
-          fs.writeFileSync(marker, JSON.stringify({ installed_at: new Date().toISOString(), engine: engineId }));
+          await fsp.writeFile(marker, JSON.stringify({ installed_at: new Date().toISOString(), engine: engineId }));
         }
 
         downloadStateManager.setState(engineId, 'completed', null, version);
@@ -180,7 +186,7 @@ class EngineDownloader {
     const versionInfo = engineManager.getEngineVersionInfo(engineId, version);
 
     const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
-    fs.mkdirSync(downloadDir, { recursive: true });
+    await fsp.mkdir(downloadDir, { recursive: true });
 
     // 确定文件名
     const filename = versionInfo.download_url
@@ -189,10 +195,7 @@ class EngineDownloader {
     const filePath = path.join(downloadDir, filename);
 
     // 清理上次可能残留的不完整压缩包
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log(`[engineDownloader] Removed stale archive before download: ${filePath}`);
-    }
+    await fsp.unlink(filePath).catch(() => {});
 
     // 下载
     try {
@@ -203,16 +206,15 @@ class EngineDownloader {
         await this._execDownload(engineId, version, repo, versionInfo.modelscope_file, downloadDir);
       }
     } catch (err) {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log(`[engineDownloader] Cleaned up incomplete archive after download failure: ${filePath}`);
-      }
+      await fsp.unlink(filePath).catch(() => {});
       throw err;
     }
 
     // 验证文件是否存在且非空
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    let fileStat;
+    try { fileStat = await fsp.stat(filePath); } catch { fileStat = null; }
+    if (!fileStat || fileStat.size === 0) {
+      await fsp.unlink(filePath).catch(() => {});
       throw new Error(`下载失败：文件不存在或大小为0，请重试`);
     }
 
@@ -222,15 +224,10 @@ class EngineDownloader {
     eventBus.broadcast('download-progress', { engineId, status: 'unpacking' });
     try {
       // 清理可能存在的残留临时目录
-      if (fs.existsSync(tempExtractPath)) {
-        fs.rmSync(tempExtractPath, { recursive: true, force: true });
-      }
+      await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
       await this._extract(filePath, tempExtractPath);
     } catch (err) {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log(`[engineDownloader] Cleaned up archive after extraction failure: ${filePath}`);
-      }
+      await fsp.unlink(filePath).catch(() => {});
       throw err;
     }
 
@@ -243,13 +240,10 @@ class EngineDownloader {
     const installPath = path.join(PROJECT_ROOT, 'external', engineId, installDirName);
 
     // 如果最终目录已存在（旧版本），先删除
-    if (fs.existsSync(installPath)) {
-      console.log(`[engineDownloader] 删除旧版本: ${installPath}`);
-      fs.rmSync(installPath, { recursive: true, force: true });
-    }
+    await fsp.rm(installPath, { recursive: true, force: true }).catch(() => {});
 
     // 重命名临时目录到最终目录
-    fs.renameSync(tempExtractPath, installPath);
+    await fsp.rename(tempExtractPath, installPath);
 
     // 安装步骤
     if (engine.category === 'app') {
@@ -259,9 +253,9 @@ class EngineDownloader {
       }
       // App 更新：写 pending 文件，然后自动重启
       const PENDING_FILE = path.join(DATA_DIR, 'updates', 'pending');
-      fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
-      fs.writeFileSync(PENDING_FILE, updateSource, 'utf8');
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      await fsp.mkdir(path.dirname(PENDING_FILE), { recursive: true });
+      await fsp.writeFile(PENDING_FILE, updateSource, 'utf8');
+      await fsp.unlink(filePath).catch(() => {});
       // 通知前端进入重启状态
       downloadStateManager.setState(engineId, 'restarting', null, version);
       eventBus.broadcast('download-progress', { engineId, status: 'restarting' });
@@ -277,18 +271,18 @@ class EngineDownloader {
 
     // 安装脚本可能覆盖 .installed，补充 version 字段
     const markerPath = path.join(installPath, '.installed');
-    if (fs.existsSync(markerPath) && engineId === 'tts') {
+    if (engineId === 'tts') {
       try {
-        const m = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
+        const m = JSON.parse(await fsp.readFile(markerPath, 'utf-8'));
         if (!m.version) {
           m.version = version;
-          fs.writeFileSync(markerPath, JSON.stringify(m));
+          await fsp.writeFile(markerPath, JSON.stringify(m));
         }
       } catch {}
     }
 
     // 清理下载文件
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    await fsp.unlink(filePath).catch(() => {});
   }
 
   _resolveUpdateBundleRoot(installPath) {
@@ -421,10 +415,10 @@ class EngineDownloader {
   }
 
   /**
-   * 解压文件，根据扩展名自动选择方式
+   * 解压文件，根据扩展名自动选择方式（全异步，不阻塞事件循环）
    */
   async _extract(filePath, targetPath) {
-    fs.mkdirSync(targetPath, { recursive: true });
+    await fsp.mkdir(targetPath, { recursive: true });
     const name = filePath.toLowerCase();
 
     if (name.endsWith('.tar.gz') || name.endsWith('.tgz') || name.endsWith('.tar')) {
@@ -432,13 +426,32 @@ class EngineDownloader {
       await tar.extract({ file: filePath, cwd: targetPath });
     } else if (name.endsWith('.zip')) {
       console.log(`Extracting zip: ${filePath} -> ${targetPath}`);
-      const zip = new AdmZip(filePath);
-      zip.extractAllTo(targetPath, true);
+      await this._extractZip(filePath, targetPath);
     } else {
       throw new Error(`不支持的压缩格式: ${path.basename(filePath)}`);
     }
 
     console.log('Extraction complete');
+  }
+
+  /**
+   * 使用 PowerShell 异步解压 zip，避免同步 AdmZip 阻塞事件循环
+   */
+  _extractZip(zipPath, targetPath) {
+    return new Promise((resolve, reject) => {
+      const ps = spawn('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -Path '${zipPath}' -DestinationPath '${targetPath}' -Force`
+      ], { windowsHide: true });
+
+      let stderr = '';
+      ps.stderr.on('data', (d) => { stderr += d.toString(); });
+      ps.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Zip extraction failed with code ${code}: ${stderr}`));
+      });
+      ps.on('error', reject);
+    });
   }
 
   /**
@@ -455,7 +468,8 @@ class EngineDownloader {
 
     if (!hasPy && !hasBat) {
       // 无需安装脚本的引擎（如 ffmpeg）：zip 解压后直接可用
-      const hasBin = fs.readdirSync(installPath).some(f => f.endsWith('.exe'));
+      const dirents = await fsp.readdir(installPath).catch(() => []);
+      const hasBin = dirents.some(f => f.endsWith('.exe'));
       if (hasBin) {
         console.log(`No install script needed for ${engineId}, marking as installed`);
         const markerPath = path.join(installPath, '.installed');
@@ -466,8 +480,8 @@ class EngineDownloader {
           markerData.version = version;
           markerData.variant_id = vInfo?.variant_id || installDirName;
         }
-        fs.writeFileSync(markerPath, JSON.stringify(markerData));
-        return Promise.resolve();
+        await fsp.writeFile(markerPath, JSON.stringify(markerData));
+        return;
       }
       return Promise.reject(new Error(`No install script found for ${engineId} in ci/`));
     }

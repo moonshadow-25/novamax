@@ -25,7 +25,11 @@ class EventBus {
     const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const client of this.clients) {
       try {
-        client.write(message);
+        const ok = client.write(message);
+        // 如果内核缓冲区满，注册 drain 回调防止阻塞
+        if (!ok) {
+          client.once('drain', () => {});
+        }
       } catch (e) {
         this.clients.delete(client);
       }
