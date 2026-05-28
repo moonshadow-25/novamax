@@ -2,5 +2,13 @@
   {
     "source": "src/utils/cloudApiProxy.js",
     "target": "utils/cloudApiProxy.js"
+  },
+  {
+    "source": "src/tts/ttsWorker.js",
+    "target": "ttsWorker.js"
+  },
+  {
+    "source": "src/tts/engineWorker.js",
+    "target": "engineWorker.js"
   }
 ]
