@@ -1663,11 +1663,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               ttsInstallModeRef.current = false;
               try {
                 const filesStatus = await ttsService.getFilesStatus(model.id);
-                const missing = filesStatus?.files?.filter(f => f.status === 'missing') || [];
-                if (missing.length > 0) {
+                const files = filesStatus?.files || [];
+                const missing = files.filter(f => !f.downloaded);
+                if (files.length === 0) {
+                  message.success('引擎安装完成，该模型无需额外模型文件');
+                } else if (missing.length > 0) {
                   message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
                   for (const f of missing) {
-                    await ttsService.downloadFile(model.id, f.name);
+                    await ttsService.downloadFile(model.id, f.filename || f.name);
                   }
                   message.success({ content: '引擎与模型安装完成', key: 'tts-model-dl' });
                 } else {
