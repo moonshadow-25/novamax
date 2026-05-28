@@ -49,6 +49,9 @@ const TTS_DEFAULT_RUNTIMES = {
   ],
   indextts15: [
     { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts1.5_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ],
+  omnivoice: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/omnivoice_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
   ]
 };
 
