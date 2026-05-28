@@ -293,13 +293,12 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       model?.id || ''
     );
 
-    let marker = null;
-    if (candidateNorm.includes('tts15')) marker = 'indextts1.5';
-    else if (candidateNorm.includes('tts2')) marker = 'indextts2';
-    if (!marker) return rawEngineInfo;
+    // 从 variants 中动态匹配：归一化后完全相等或 variant id 包含 candidateNorm
+    const matched = rawEngineInfo.variants.filter(v => {
+      const vNorm = normalizeEngineType(v.id);
+      return vNorm === candidateNorm || vNorm.includes(candidateNorm) || candidateNorm.includes(vNorm);
+    });
 
-    const markerNorm = normalizeEngineType(marker);
-    const matched = rawEngineInfo.variants.filter(v => normalizeEngineType(v.id) === markerNorm);
     if (matched.length === 0) return rawEngineInfo;
 
     return {
