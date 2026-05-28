@@ -47,14 +47,19 @@ def get_model_files(model_id, revision='master'):
     """获取模型文件列表"""
     url = f"{BASE_URL}/api/v1/models/{model_id}/repo/files"
     params = {'Revision': revision, 'Recursive': 'true', 'Root': ''}
+    print(f"请求 API: {url}?Revision={revision}&Recursive=true&Root=", file=sys.stderr, flush=True)
     try:
-        resp = requests.get(url, params=params, timeout=30)
+        resp = requests.get(url, params=params, timeout=(10, 30))
+        print(f"API 响应状态: {resp.status_code}", file=sys.stderr, flush=True)
         resp.raise_for_status()
         data = resp.json()
         files = (data.get('Data') or {}).get('Files') or []
+        print(f"获取到 {len(files)} 个文件", file=sys.stderr, flush=True)
         return [f for f in files if not f.get('IsDir', False)]
     except Exception as e:
-        print(f"获取文件列表失败: {e}", file=sys.stderr)
+        print(f"获取文件列表失败: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return []
 
 
@@ -99,7 +104,7 @@ def download_file(model_id, file_name, file_path_in_repo, output_dir, revision='
     if resume_pos > 0:
         headers['Range'] = f'bytes={resume_pos}-'
 
-    print(f"开始下载: {file_name} (续传位置: {fmt_size(resume_pos)})", file=sys.stderr)
+    print(f"开始下载: {file_name} (续传位置: {fmt_size(resume_pos)})", file=sys.stderr, flush=True)
 
     try:
         resp = requests.get(url, params=params, headers=headers, stream=True, timeout=60, allow_redirects=True)
@@ -136,17 +141,17 @@ def download_file(model_id, file_name, file_path_in_repo, output_dir, revision='
                         # "Downloading {name}: {N}%|{downloaded}/{total}|{speed}"
                         print(
                             f"Downloading {file_name}: {progress}%|{fmt_size(downloaded)}/{fmt_size(total_size)}|{fmt_speed(speed)}",
-                            file=sys.stderr
+                            file=sys.stderr, flush=True
                         )
                         last_print = now
 
         # 下载完成，重命名为正式文件（os.replace 在 Windows 上可覆盖已存在的同名文件）
         os.replace(part_path, final_path)
-        print(f"✓ 下载完成: {file_name}", file=sys.stderr)
+        print(f"✓ 下载完成: {file_name}", file=sys.stderr, flush=True)
         return True
 
     except Exception as e:
-        print(f"下载失败 {file_name}: {e}", file=sys.stderr)
+        print(f"下载失败 {file_name}: {e}", file=sys.stderr, flush=True)
         raise
 
 
@@ -163,23 +168,23 @@ def download_model(model_id, output_dir, files=None, revision='master'):
     try:
         os.makedirs(output_dir, exist_ok=True)
 
-        print(f"开始下载模型: {model_id}", file=sys.stderr)
-        print(f"目标目录: {output_dir}", file=sys.stderr)
-        print(f"版本: {revision}", file=sys.stderr)
+        print(f"开始下载模型: {model_id}", file=sys.stderr, flush=True)
+        print(f"目标目录: {output_dir}", file=sys.stderr, flush=True)
+        print(f"版本: {revision}", file=sys.stderr, flush=True)
 
         # 获取文件列表
-        print("获取文件列表...", file=sys.stderr)
+        print("获取文件列表...", file=sys.stderr, flush=True)
         all_files = get_model_files(model_id, revision)
 
         if not all_files:
             return {"success": False, "error": "无法获取模型文件列表，请检查模型 ID 和网络连接"}
 
-        print(f"共找到 {len(all_files)} 个文件", file=sys.stderr)
+        print(f"共找到 {len(all_files)} 个文件", file=sys.stderr, flush=True)
 
         # 过滤要下载的文件
         if files:
             files_to_download = [f for f in all_files if match_patterns(f.get('Path', '') or f.get('Name', ''), files)]
-            print(f"匹配 patterns {files}: {len(files_to_download)} 个文件", file=sys.stderr)
+            print(f"匹配 patterns {files}: {len(files_to_download)} 个文件", file=sys.stderr, flush=True)
         else:
             files_to_download = all_files
 
