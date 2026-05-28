@@ -1,10 +1,65 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import engineManager from '../services/engineManager.js';
 import engineDownloader from '../services/engineDownloader.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import processManager from '../services/processManager.js';
 
 const router = express.Router();
+
+function injectLocalTtsVariants(ttsEngine, installedVersions) {
+  if (!ttsEngine) return ttsEngine;
+
+  const variants = Array.isArray(ttsEngine.variants) ? [...ttsEngine.variants] : [];
+  const knownIds = new Set(variants.map(v => String(v?.id || '').toLowerCase()));
+
+  for (const ver of installedVersions || []) {
+    const contractPath = path.join(ver.path, 'contract.json');
+    if (!fs.existsSync(contractPath)) continue;
+
+    let contract;
+    try {
+      contract = JSON.parse(fs.readFileSync(contractPath, 'utf-8'));
+    } catch {
+      continue;
+    }
+
+    const type = contract?.engine?.type;
+    const name = contract?.engine?.name;
+    if (!type || knownIds.has(String(type).toLowerCase())) continue;
+
+    variants.push({
+      id: type,
+      name: name || type,
+      source: 'local',
+      versions: [{ version: ver.version, local_only: true }]
+    });
+    knownIds.add(String(type).toLowerCase());
+  }
+
+  return { ...ttsEngine, variants };
+}
+
+// TTS 各 variant 的默认运行时环境（当远程配置未提供 runtimes 时兜底）
+const TTS_DEFAULT_RUNTIMES = {
+  indextts2: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts2_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ],
+  indextts15: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts1.5_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ]
+};
+
+function ensureTtsRuntimes(ttsEngine) {
+  if (!ttsEngine || !Array.isArray(ttsEngine.variants)) return ttsEngine;
+  const variants = ttsEngine.variants.map(v => {
+    if (Array.isArray(v.runtimes) && v.runtimes.length > 0) return v;
+    const defaults = TTS_DEFAULT_RUNTIMES[v.id] || [];
+    return { ...v, runtimes: defaults };
+  });
+  return { ...ttsEngine, variants };
+}
 
 /**
  * 获取所有引擎列表（含安装状态和下载状态）
@@ -25,8 +80,17 @@ router.get('/engines', async (req, res) => {
         s => s.type === 'engine' && (s.engineId === id || s.id === id)
       );
 
+      let engineWithLocalVariants = id === 'tts'
+        ? injectLocalTtsVariants(engine, installed)
+        : engine;
+
+      // TTS 兜底：远程配置缺少 runtimes 时注入默认值
+      if (id === 'tts') {
+        engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
+      }
+
       result[id] = {
-        ...engine,
+        ...engineWithLocalVariants,
         installed: installed.length > 0,
         installed_versions: installed,
         broken_versions: broken,
@@ -59,8 +123,16 @@ router.get('/engines/:id', async (req, res) => {
     const broken = engineManager.getBrokenVersions(id);
     const defaultVersion = engineManager.getDefaultVersion(id);
 
+    let engineWithLocalVariants = id === 'tts'
+      ? injectLocalTtsVariants(engine, installed)
+      : engine;
+
+    if (id === 'tts') {
+      engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
+    }
+
     res.json({
-      ...engine,
+      ...engineWithLocalVariants,
       installed: installed.length > 0,
       installed_versions: installed,
       broken_versions: broken,
@@ -177,9 +249,9 @@ router.delete('/engines/:id/versions/:version', async (req, res) => {
 router.post('/engines/:id/download', async (req, res) => {
   try {
     const { id } = req.params;
-    const { version } = req.body;
+    const { version, runtime } = req.body;
 
-    const result = await engineDownloader.startDownloadWithDependencies(id, version);
+    const result = await engineDownloader.startDownloadWithDependencies(id, version, runtime || null);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

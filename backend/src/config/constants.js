@@ -51,6 +51,7 @@ export const PRESETS_DIR = path.join(DATA_DIR, 'presets');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');
+export const GPUINFO_PATH = path.join(PROJECT_ROOT, 'scripts', 'gpuinfo.exe');
 
 /**
  * 参数映射：LLM 模型的默认参数（与 llama-server 路由模式兼容）

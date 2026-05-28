@@ -102,10 +102,15 @@ class EngineManager {
         if (this._isValidEngineDir(engineId, versionPath)) {
           const stats = fs.statSync(path.join(versionPath, '.installed'));
           const marker = JSON.parse(fs.readFileSync(path.join(versionPath, '.installed'), 'utf-8'));
+          // 新格式：目录名 = variant_id（如 indextts2）
+          // 旧格式：目录名 = version 字符串（如 202605131733-index-tts2）
+          const isNewFormat = marker.variant_id && String(marker.variant_id).toLowerCase() === String(dir.name).toLowerCase();
           installed.push({
-            version: dir.name,
+            version: marker.version || dir.name,
             path: versionPath,
-            installed_at: marker.installed_at || stats.mtime.toISOString()
+            installed_at: marker.installed_at || stats.mtime.toISOString(),
+            variant_id: marker.variant_id || null,
+            legacy: !isNewFormat
           });
         }
       }

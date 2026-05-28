@@ -19,7 +19,7 @@ const USER_FIELDS = [
   'selected_quantization', 'user_parameter_mapping',
   'downloaded_files', 'downloaded_quantizations',
   'local_path',
-  'engine_path', 'engine_version', 'whisper_config', 'path'
+  'engine_path', 'whisper_config', 'path'
 ];
 
 // 远程控制字段（版本升级时从远端覆盖）

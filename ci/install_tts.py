@@ -72,6 +72,7 @@ def main():
     parser.add_argument('--install-root', required=True)
     parser.add_argument('--rocm-path', default='')
     parser.add_argument('--project-root', required=True)
+    parser.add_argument('--runtime-id', default='')
     args = parser.parse_args()
 
     install_root = args.install_root
@@ -96,11 +97,37 @@ def main():
     variant = detect_variant(install_root)
     MODELSCOPE_REPO = 'shoujiekeji/Novastudio3.0'
     if variant == 'tts2':
-        engine_file = 'tts/engines/index_tts2_engine.zip'
+        variant_id = 'indextts2'
         variant_name = 'IndexTTS 2.0'
+        default_engine_file = 'tts/engines/index_tts2_engine.zip'
     else:
-        engine_file = 'tts/engines/index_tts1.5_engine.zip'
+        variant_id = 'indextts15'
         variant_name = 'IndexTTS 1.5'
+        default_engine_file = 'tts/engines/index_tts1.5_engine.zip'
+
+    # 若指定了 --runtime-id，从 engines.json 中查找对应的 modelscope_file
+    engine_file = default_engine_file
+    runtime_name = ''
+    if args.runtime_id:
+        engines_json_path = os.path.join(project_root, 'data', 'engines.json')
+        if os.path.exists(engines_json_path):
+            with open(engines_json_path, 'r', encoding='utf-8') as f:
+                engines_data = json.load(f)
+            tts_engine = engines_data.get('engines', {}).get('tts', {})
+            for v in tts_engine.get('variants', []):
+                if v.get('id') == variant_id:
+                    for rt in v.get('runtimes', []):
+                        if rt.get('id') == args.runtime_id:
+                            engine_file = rt.get('modelscope_file', engine_file)
+                            runtime_name = rt.get('name', args.runtime_id)
+                            print(f"  [OK] Runtime selected: {runtime_name}")
+                            break
+                    break
+            if not runtime_name:
+                print(f"  [WARN] Runtime '{args.runtime_id}' not found, using default")
+        else:
+            print(f"  [WARN] engines.json not found, using default runtime")
+
     zip_filename = os.path.basename(engine_file)
     zip_path = os.path.join(install_root, zip_filename)
     print(f"  [OK] Variant: {variant_name}")
@@ -140,8 +167,15 @@ def main():
     print(f"  [OK] Removed archive: {zip_filename}")
 
     marker_path = os.path.join(install_root, '.installed')
+    marker_data = {
+        'installed_at': datetime.now(timezone.utc).isoformat(),
+        'engine': f'indextts_{variant}'
+    }
+    if args.runtime_id:
+        marker_data['runtime_id'] = args.runtime_id
+        marker_data['runtime_name'] = runtime_name
     with open(marker_path, 'w', encoding='utf-8') as f:
-        json.dump({'installed_at': datetime.now(timezone.utc).isoformat(), 'engine': f'indextts_{variant}'}, f)
+        json.dump(marker_data, f)
     print("  [OK] .installed marker written")
 
     print()

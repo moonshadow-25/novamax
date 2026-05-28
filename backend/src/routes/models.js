@@ -1,11 +1,13 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { encrypt } from '../utils/crypto.js';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import parameterService from '../services/parameterService.js';
+import engineManager from '../services/engineManager.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
@@ -173,6 +175,7 @@ router.get('/models/type/:type', async (req, res) => {
         active_file_ok: checkActiveFileIntegrity(m)
       };
     }));
+
     res.json({ models: modelsWithStatus });
   } catch (error) {
     res.status(500).json({ error: error.message });

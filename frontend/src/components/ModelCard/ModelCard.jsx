@@ -25,7 +25,10 @@ import {
   RedoOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService } from '../../services/api';
+import { normalizeEngineType } from '../../utils/engineType';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
+import { ENGINE_STATUS_MAP } from '../../utils/engineStatus';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService, ttsStudioService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
@@ -95,6 +98,49 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // whisper / tts 管理弹窗
   const [whisperModelsVisible, setWhisperModelsVisible] = useState(false);
   const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
+  const [ttsStatus, setTtsStatus] = useState('idle');
+  const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
+
+  useEffect(() => {
+    if (model.type !== 'tts') return;
+    const variantNorm = normalizeEngineType(
+      model?.engine_version || model?.id || ''
+    );
+    const variantMatch = (v) => normalizeEngineType(v).includes(variantNorm);
+
+    const poll = async () => {
+      try {
+        const engData = await engineService.getById('tts');
+        const variantInstalled = (engData.installed_versions || [])
+          .filter(v => variantMatch(v.version));
+        if (variantInstalled.length === 0) { setTtsStatus('error'); return; }
+
+        // 检测引擎更新
+        const variantVersions = (engData.variants || [])
+          .filter(v => normalizeEngineType(v.id) === variantNorm)
+          .flatMap(v => v.versions || []);
+        if (variantVersions.length > 0 && variantInstalled.length > 0) {
+          const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+          const latest = sorted[0].version;
+          const { orderedInstalledVersions } = resolveVersionOrder(variantVersions, variantInstalled);
+          setTtsEngineUpdate(latest !== orderedInstalledVersions[0]?.version);
+        }
+
+        const h = await ttsService.health();
+        const engines = h?.engines || {};
+        const match = Object.entries(engines).find(([key]) =>
+          normalizeEngineType(key).includes(variantNorm)
+        );
+        const engStatus = match?.[1]?.status;
+        if (engStatus === 'running' || engStatus === 'busy') setTtsStatus('running');
+        else if (engStatus === 'starting') setTtsStatus('starting');
+        else setTtsStatus('idle');
+      } catch { /* 保持当前状态 */ }
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => clearInterval(t);
+  }, [model.type, model.id, model.engine_version]);
 
   // ComfyUI 启动相关
   const [comfyuiLaunchVisible, setComfyuiLaunchVisible] = useState(false);
@@ -241,18 +287,19 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const buildTtsVariantEngineInfo = (rawEngineInfo) => {
     if (!rawEngineInfo || !Array.isArray(rawEngineInfo.variants)) return rawEngineInfo;
 
-    const candidate = String(
+    const candidateNorm = normalizeEngineType(
       model?.engine_version ||
       model?.remote_snapshot?.engine_version ||
       model?.id || ''
-    ).toLowerCase();
+    );
 
     let marker = null;
-    if (candidate.includes('1.5') || candidate.includes('tts1.5')) marker = 'indextts1.5';
-    if (candidate.includes('tts2') || candidate.includes('index_tts2') || candidate.includes('index-tts2')) marker = 'indextts2';
+    if (candidateNorm.includes('tts15')) marker = 'indextts1.5';
+    else if (candidateNorm.includes('tts2')) marker = 'indextts2';
     if (!marker) return rawEngineInfo;
 
-    const matched = rawEngineInfo.variants.filter(v => String(v.id || '').toLowerCase() === marker);
+    const markerNorm = normalizeEngineType(marker);
+    const matched = rawEngineInfo.variants.filter(v => normalizeEngineType(v.id) === markerNorm);
     if (matched.length === 0) return rawEngineInfo;
 
     return {
@@ -1097,7 +1144,65 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* Whisper / TTS 专属按钮 */}
+      {/* TTS 专属按钮 */}
+      {model.type === 'tts' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: ttsStatus === 'error' ? ENGINE_STATUS_MAP.error.color : ENGINE_STATUS_MAP[ttsStatus]?.color || ENGINE_STATUS_MAP.idle.color, display: 'inline-block', boxShadow: ttsStatus === 'running' ? `0 0 6px ${ENGINE_STATUS_MAP.running.color}` : 'none' }} />
+            <span style={{ color: ttsStatus === 'error' ? ENGINE_STATUS_MAP.error.color : ENGINE_STATUS_MAP[ttsStatus]?.color || ENGINE_STATUS_MAP.idle.color }}>{ttsStatus === 'error' ? '引擎未安装' : ENGINE_STATUS_MAP[ttsStatus]?.label || ENGINE_STATUS_MAP.idle.label}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {ttsEngineUpdate ? (
+              <Button type="primary" icon={<CloudSyncOutlined />} block style={{ flex: 1 }}
+                onClick={async () => {
+                  try {
+                    const engData = await engineService.getById('tts');
+                    setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                    setEngineTarget('tts');
+                    setShowEngineModal(true);
+                  } catch { message.error('无法获取引擎信息'); }
+                }}>
+                升级引擎
+              </Button>
+            ) : ttsStatus === 'starting' ? (
+              <Button icon={<LoadingOutlined />} block style={{ flex: 1 }} disabled>启动中...</Button>
+            ) : ttsStatus === 'running' ? (
+              <Popconfirm
+                title="确定要停止引擎吗？"
+                onConfirm={async () => {
+                  try {
+                    const engineType = model.engine_version || model.engine_type || model.id;
+                    await ttsStudioService.stopEngine(engineType);
+                    message.success('引擎已停止');
+                    onUpdate();
+                  } catch { message.error('停止失败'); }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button danger icon={<StopOutlined />} block style={{ flex: 1 }}>停止引擎</Button>
+              </Popconfirm>
+            ) : (
+              <Button type="primary" icon={<PlayCircleOutlined />} block style={{ flex: 1 }}
+                onClick={async () => {
+                  try {
+                    const engineType = model.engine_version || model.engine_type || model.id;
+                    await ttsStudioService.startEngine(engineType);
+                    message.success('引擎启动中');
+                    onUpdate();
+                  } catch { message.error('启动失败'); }
+                }}>
+                启动引擎
+              </Button>
+            )}
+            <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block style={{ flex: 1 }}>
+              管理模型
+            </Button>
+          </div>
+        </Space>
+      )}
+
+      {/* Whisper 专属按钮 */}
       {(model.type === 'whisper' && model.source !== 'custom') && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
@@ -1136,39 +1241,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {model.type === 'tts' && (
-        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
-          {isStarting ? (
-            <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
-              中断启动
-            </Button>
-          ) : isRunning ? (
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                停止
-              </Button>
-              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                使用
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleStart}
-              loading={loading}
-              block
-              color="blue"
-              variant="solid"
-            >
-              运行
-            </Button>
-          )}
-          <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
-            管理工作流
-          </Button>
-        </Space>
-      )}
 
       <Modal
         title="多机互连设备验证"
@@ -1560,7 +1632,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         engineInfo={engineInfo}
         onComplete={() => {
           setShowEngineModal(false);
-          if (engineTarget === 'comfyui') {
+          if (engineTarget === 'tts') {
+            setTtsEngineUpdate(false);
+            onUpdate();
+            message.success('引擎更新完成，请手动启动引擎');
+          } else if (engineTarget === 'comfyui') {
             handleComfyUILaunch();
           } else {
             doStartModel();

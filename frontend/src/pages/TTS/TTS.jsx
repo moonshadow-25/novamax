@@ -1,31 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Layout, Button, Select, Space, Typography, message, Spin, Tooltip, Slider, Input, Collapse, Switch, InputNumber } from 'antd';
+import { Layout, Button, Select, Space, Typography, message, Spin, Tooltip, Input, Collapse } from 'antd';
 import {
   ArrowLeftOutlined, UploadOutlined, DeleteOutlined, SoundOutlined,
   DownloadOutlined, PauseCircleOutlined, CaretRightOutlined, ReloadOutlined,
-  SettingOutlined, SmileOutlined, ClearOutlined
+  SettingOutlined, ClearOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { ttsService } from '../../services/api';
+import { normalizeEngineType } from '../../utils/engineType';
+import DynamicParamPanel from '../../components/DynamicParamPanel';
 import './TTS.css';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
 const { TextArea } = Input;
 
-const EMOTION_PRESETS = [
-  { value: '', label: '无（默认）' },
-  { value: '开心', label: '开心' },
-  { value: '悲伤', label: '悲伤' },
-  { value: '愤怒', label: '愤怒' },
-  { value: '恐惧', label: '恐惧' },
-  { value: '惊讶', label: '惊讶' },
-  { value: '厌恶', label: '厌恶' },
-  { value: '温柔', label: '温柔' },
-  { value: '严肃', label: '严肃' },
-  { value: '兴奋', label: '兴奋' },
-  { value: '低沉', label: '低沉' },
-];
+function normalizeParams(params) {
+  if (!params) return [];
+  if (Array.isArray(params)) return params;           // v3.0
+  if (params.flat && Array.isArray(params.flat)) return params.flat; // v4.0
+  return [];
+}
 
 function TTS() {
   const navigate = useNavigate();
@@ -36,37 +31,29 @@ function TTS() {
   const [connected, setConnected] = useState(false);
   const [checking, setChecking] = useState(true);
 
+  // Voice — NovaMax 自有体系
   const [voices, setVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState(null);
   const [previewingVoice, setPreviewingVoice] = useState(null);
 
+  // 引擎选择
+  const [engineTypes, setEngineTypes] = useState([]);
+  const [selectedEngine, setSelectedEngine] = useState(null);
+
+  // 文本
   const [text, setText] = useState('');
   const [generating, setGenerating] = useState(false);
 
-  // 基础参数
-  const [speed, setSpeed] = useState(1.0);
-  const [responseFormat, setResponseFormat] = useState('wav');
-  const [inferMode, setInferMode] = useState('normal');
-
-  // 情感参数
-  const [emotionPreset, setEmotionPreset] = useState('');
-  const [emoAlpha, setEmoAlpha] = useState(1.0);
-
-  // 高级参数
-  const [temperature, setTemperature] = useState(1.0);
-  const [topP, setTopP] = useState(0.8);
-  const [topK, setTopK] = useState(50);
-  const [doSample, setDoSample] = useState(true);
-  const [numBeams, setNumBeams] = useState(1);
-  const [repetitionPenalty, setRepetitionPenalty] = useState(1.0);
-  const [lengthPenalty, setLengthPenalty] = useState(1.0);
-  const [maxMelTokens, setMaxMelTokens] = useState(600);
+  // 动态参数
+  const [paramDefinitions, setParamDefinitions] = useState([]);
+  const [paramValues, setParamValues] = useState({});
+  const [outputFormat, setOutputFormat] = useState('wav');
 
   const [history, setHistory] = useState([]);
   const [activeHistoryId, setActiveHistoryId] = useState(null);
   const [playingId, setPlayingId] = useState(null);
 
-  /* ── 检查 TTS 服务连接 ── */
+  /* ── 检查服务连接 ── */
   useEffect(() => {
     const check = async () => {
       try { await ttsService.health(); setConnected(true); }
@@ -78,12 +65,40 @@ function TTS() {
     return () => clearInterval(t);
   }, []);
 
-  /* ── 加载音色列表 ── */
+  /* ── 加载引擎列表 ── */
+  useEffect(() => {
+    if (!connected) return;
+    ttsService.getEngineContracts?.().then(data => {
+      const contracts = data || [];
+      setEngineTypes(contracts);
+      if (contracts.length > 0 && !selectedEngine) {
+        setSelectedEngine(contracts[0].engine_type);
+      }
+    }).catch(() => {});
+  }, [connected]);
+
+  /* ── 引擎切换时加载参数定义 ── */
+  useEffect(() => {
+    if (!selectedEngine) return;
+    const contract = engineTypes.find(c => normalizeEngineType(c.engine_type) === normalizeEngineType(selectedEngine));
+    const params = normalizeParams(contract?.contract?.parameters);
+    if (params.length > 0) {
+      setParamDefinitions(params);
+      const defaults = {};
+      params.forEach(p => { defaults[p.key] = p.default; });
+      setParamValues(defaults);
+    } else {
+      setParamDefinitions([]);
+      setParamValues({});
+    }
+  }, [selectedEngine, engineTypes]);
+
+  /* ── 加载音色列表（NovaMax 自有） ── */
   const loadVoices = useCallback(async () => {
     if (!connected) { setVoices([]); return; }
     try {
       const data = await ttsService.getVoices();
-      const list = data?.data || [];
+      const list = data?.items || data?.data || [];
       setVoices(list);
       if (list.length > 0 && !selectedVoice) setSelectedVoice(list[0].id);
     } catch { setVoices([]); }
@@ -96,7 +111,7 @@ function TTS() {
     if (!connected) return;
     try {
       const data = await ttsService.getHistory();
-      setHistory(data?.data || data?.history || []);
+      setHistory(data?.items || data?.data || []);
     } catch { setHistory([]); }
   }, [connected]);
 
@@ -131,15 +146,6 @@ function TTS() {
     e.target.value = '';
   };
 
-  /* ── 自动注册音色 ── */
-  const autoRegister = async () => {
-    try {
-      const data = await ttsService.autoRegisterVoices();
-      message.success(`注册完成: ${data?.registered || 0} 个音色`);
-      loadVoices();
-    } catch { message.error('自动注册失败'); }
-  };
-
   /* ── 删除音色 ── */
   const deleteVoice = async (voiceId) => {
     try {
@@ -156,37 +162,25 @@ function TTS() {
     if (!selectedVoice) return message.warning('请选择音色');
     setGenerating(true);
     try {
-      const params = {
-        input: text,
+      await ttsService.speech({
+        text: text.trim(),
         voice: selectedVoice,
-        speed,
-        response_format: responseFormat,
-        infer_mode: inferMode,
-        temperature,
-        top_p: topP,
-        top_k: topK,
-        do_sample: doSample,
-        num_beams: numBeams,
-        repetition_penalty: repetitionPenalty,
-        length_penalty: lengthPenalty,
-        max_mel_tokens: maxMelTokens,
-      };
-      // 情感参数
-      if (emotionPreset) {
-        params.use_emo_text = true;
-        params.emo_text = emotionPreset;
-        params.emo_alpha = emoAlpha;
-      }
-      await ttsService.speech(params);
+        engine_type: selectedEngine,
+        output_format: outputFormat,
+        ...paramValues
+      });
       message.success('生成完成');
       loadHistory();
-    } catch (e) { message.error('生成失败: ' + (e.message || '未知错误')); }
+    } catch (e) {
+      const errMsg = e?.response?.data?.error || e.message || '未知错误';
+      message.error('生成失败: ' + errMsg);
+    }
     finally { setGenerating(false); }
   };
 
   /* ── 播放历史 ── */
   const playHistoryItem = (item) => {
-    const id = item.id || item.filename;
+    const id = item.id;
     if (playingId === id) {
       historyAudioRef.current?.pause();
       setPlayingId(null);
@@ -202,21 +196,17 @@ function TTS() {
 
   /* ── 下载历史 ── */
   const downloadHistoryItem = (item) => {
-    const id = item.id || item.filename;
-    const url = ttsService.getHistoryAudioUrl(id);
+    const url = ttsService.getHistoryAudioUrl(item.id);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${id}.wav`;
+    a.download = `${item.id}.${item.output_format || 'wav'}`;
     a.click();
   };
 
   /* ── 删除历史 ── */
   const deleteHistoryItem = async (item) => {
-    const id = item.id || item.filename;
-    try {
-      await ttsService.deleteHistoryItem(id);
-      loadHistory();
-    } catch { message.error('删除失败'); }
+    try { await ttsService.deleteHistoryItem(item.id); loadHistory(); }
+    catch { message.error('删除失败'); }
   };
 
   if (checking) return <Spin style={{ display: 'flex', justifyContent: 'center', marginTop: 120 }} />;
@@ -240,16 +230,25 @@ function TTS() {
         </Content>
       ) : (
         <Content className="tts-content tts-body">
-          {/* ── 左栏：音色列表 ── */}
+          {/* ── 左栏：引擎 + 音色 ── */}
           <div className="tts-col tts-col-left">
+            {/* 引擎选择 */}
+            <div className="tts-section-title">引擎</div>
+            {engineTypes.length > 0 && (
+              <Select
+                value={selectedEngine}
+                onChange={setSelectedEngine}
+                style={{ width: '100%', marginBottom: 12 }}
+                options={engineTypes.map(e => ({ value: e.engine_type, label: e.engine_name || e.engine_type }))}
+              />
+            )}
+
+            {/* 音色列表 */}
             <div className="tts-section-title">
-              <span>音色列表</span>
+              <span>音色</span>
               <Space size={4}>
                 <Tooltip title="上传音色">
                   <Button size="small" icon={<UploadOutlined />} onClick={() => voiceInputRef.current?.click()} />
-                </Tooltip>
-                <Tooltip title="自动注册">
-                  <Button size="small" icon={<ReloadOutlined />} onClick={autoRegister} />
                 </Tooltip>
               </Space>
             </div>
@@ -261,16 +260,20 @@ function TTS() {
                   className={`tts-voice-item ${selectedVoice === v.id ? 'active' : ''}`}
                   onClick={() => setSelectedVoice(v.id)}>
                   <span className="tts-voice-name">{v.name || v.id}</span>
-                  <Button type="text" size="small"
-                    icon={previewingVoice === v.id ? <PauseCircleOutlined /> : <SoundOutlined />}
-                    onClick={e => { e.stopPropagation(); previewVoice(v); }} />
+                  <Space size={2}>
+                    <Button type="text" size="small"
+                      icon={previewingVoice === v.id ? <PauseCircleOutlined /> : <SoundOutlined />}
+                      onClick={e => { e.stopPropagation(); previewVoice(v); }} />
+                    <Button type="text" size="small" icon={<DeleteOutlined />}
+                      onClick={e => { e.stopPropagation(); deleteVoice(v.id); }} />
+                  </Space>
                 </div>
               ))}
               {voices.length === 0 && <div style={{ color: '#666', textAlign: 'center', padding: 20 }}>暂无音色</div>}
             </div>
           </div>
 
-          {/* ── 中栏：文本输入 + 参数 ── */}
+          {/* ── 中栏：文本 + 动态参数 ── */}
           <div className="tts-col tts-col-mid">
             <TextArea
               value={text} onChange={e => setText(e.target.value)}
@@ -281,90 +284,30 @@ function TTS() {
               style={{ marginBottom: 12 }}
             />
 
-            {/* 基础参数 */}
-            <div className="tts-param-group">
-              <div className="tts-param-row">
-                <span className="tts-param-label">语速</span>
-                <Slider min={0.5} max={2.0} step={0.1} value={speed} onChange={setSpeed} style={{ flex: 1 }} />
-                <span className="tts-param-value">{speed.toFixed(1)}</span>
-              </div>
-              <div className="tts-param-row">
-                <span className="tts-param-label">格式</span>
-                <Select size="small" value={responseFormat} onChange={setResponseFormat} style={{ width: 100 }}
-                  options={[{ value: 'wav', label: 'WAV' }, { value: 'mp3', label: 'MP3' }, { value: 'flac', label: 'FLAC' }]} />
-                <span className="tts-param-label" style={{ marginLeft: 16 }}>推理模式</span>
-                <Select size="small" value={inferMode} onChange={setInferMode} style={{ width: 100 }}
-                  options={[{ value: 'normal', label: '标准' }, { value: 'fast', label: '快速' }]} />
-              </div>
+            {/* 输出格式 */}
+            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: '#666' }}>输出格式</span>
+              <Select size="small" value={outputFormat} onChange={setOutputFormat} style={{ width: 90 }}
+                options={[{ value: 'wav', label: 'WAV' }, { value: 'mp3', label: 'MP3' }, { value: 'flac', label: 'FLAC' }]} />
             </div>
 
-            {/* 情感参数 */}
-            <Collapse ghost size="small" defaultActiveKey={['emotion']} style={{ marginBottom: 8 }}
-              items={[{
-                key: 'emotion',
-                label: <span><SmileOutlined style={{ marginRight: 6 }} />情感控制</span>,
-                children: (
-                  <div className="tts-param-group">
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">情感模板</span>
-                      <Select size="small" value={emotionPreset} onChange={setEmotionPreset}
-                        style={{ flex: 1 }} options={EMOTION_PRESETS} allowClear
-                        placeholder="选择情感" />
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">情感强度</span>
-                      <Slider min={0} max={1} step={0.05} value={emoAlpha} onChange={setEmoAlpha}
-                        style={{ flex: 1 }} disabled={!emotionPreset} />
-                      <span className="tts-param-value">{emoAlpha.toFixed(2)}</span>
-                    </div>
-                  </div>
-                )
-              }]}
-            />
-
-            {/* 高级参数 */}
-            <Collapse ghost size="small" defaultActiveKey={['advanced']} style={{ marginBottom: 12 }}
-              items={[{
-                key: 'advanced',
-                label: <span><SettingOutlined style={{ marginRight: 6 }} />高级参数</span>,
-                children: (
-                  <div className="tts-param-group">
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">Temperature</span>
-                      <Slider min={0.1} max={2.0} step={0.05} value={temperature} onChange={setTemperature} style={{ flex: 1 }} />
-                      <span className="tts-param-value">{temperature.toFixed(2)}</span>
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">Top P</span>
-                      <Slider min={0} max={1} step={0.05} value={topP} onChange={setTopP} style={{ flex: 1 }} />
-                      <span className="tts-param-value">{topP.toFixed(2)}</span>
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">Top K</span>
-                      <InputNumber size="small" min={1} max={200} value={topK} onChange={setTopK} style={{ width: 80 }} />
-                      <span className="tts-param-label" style={{ marginLeft: 16 }}>Num Beams</span>
-                      <InputNumber size="small" min={1} max={10} value={numBeams} onChange={setNumBeams} style={{ width: 80 }} />
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">采样</span>
-                      <Switch size="small" checked={doSample} onChange={setDoSample} />
-                      <span className="tts-param-label" style={{ marginLeft: 16 }}>Max Mel Tokens</span>
-                      <InputNumber size="small" min={100} max={2000} value={maxMelTokens} onChange={setMaxMelTokens} style={{ width: 80 }} />
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">Repetition Penalty</span>
-                      <Slider min={1.0} max={3.0} step={0.1} value={repetitionPenalty} onChange={setRepetitionPenalty} style={{ flex: 1 }} />
-                      <span className="tts-param-value">{repetitionPenalty.toFixed(1)}</span>
-                    </div>
-                    <div className="tts-param-row">
-                      <span className="tts-param-label">Length Penalty</span>
-                      <Slider min={0.5} max={2.0} step={0.1} value={lengthPenalty} onChange={setLengthPenalty} style={{ flex: 1 }} />
-                      <span className="tts-param-value">{lengthPenalty.toFixed(1)}</span>
-                    </div>
-                  </div>
-                )
-              }]}
-            />
+            {/* 动态参数面板 */}
+            {paramDefinitions.length > 0 && (
+              <Collapse ghost size="small" defaultActiveKey={['params']} style={{ marginBottom: 12 }}
+                items={[{
+                  key: 'params',
+                  label: <span><SettingOutlined style={{ marginRight: 6 }} />引擎参数</span>,
+                  children: (
+                    <DynamicParamPanel
+                      definitions={paramDefinitions}
+                      values={paramValues}
+                      onChange={(key, value) => setParamValues(prev => ({ ...prev, [key]: value }))}
+                      disabled={generating}
+                    />
+                  )
+                }]}
+              />
+            )}
 
             <Button type="primary" block loading={generating} onClick={handleGenerate}
               icon={<SoundOutlined />} disabled={!text.trim() || !selectedVoice}>
@@ -372,7 +315,7 @@ function TTS() {
             </Button>
           </div>
 
-          {/* ── 右栏：历史记录 ── */}
+          {/* ── 右栏：历史 ── */}
           <div className="tts-col tts-col-right">
             <div className="tts-section-title">
               <span>生成历史</span>
@@ -386,31 +329,32 @@ function TTS() {
             </div>
             <audio ref={historyAudioRef} onEnded={() => setPlayingId(null)} />
             <div className="tts-history">
-              {history.map(item => {
-                const id = item.id || item.filename;
-                return (
-                  <div key={id} className={`tts-history-item ${activeHistoryId === id ? 'active' : ''}`}
-                    onClick={() => setActiveHistoryId(id === activeHistoryId ? null : id)}>
-                    <div className="tts-history-top">
-                      <span className="tts-history-text">{item.text || item.input || '...'}</span>
-                      <Space size={4}>
-                        <Tooltip title="播放">
-                          <Button type="text" size="small"
-                            icon={playingId === id ? <PauseCircleOutlined /> : <CaretRightOutlined />}
-                            onClick={e => { e.stopPropagation(); playHistoryItem(item); }} />
-                        </Tooltip>
-                        <Tooltip title="下载">
-                          <Button type="text" size="small" icon={<DownloadOutlined />}
-                            onClick={e => { e.stopPropagation(); downloadHistoryItem(item); }} />
-                        </Tooltip>
-                      </Space>
-                    </div>
-                    <div className="tts-history-meta">
-                      {item.created_at || ''} · {(item.format || 'wav').toUpperCase()} · {item.voice_id || ''}
-                    </div>
+              {history.map(item => (
+                <div key={item.id} className={`tts-history-item ${activeHistoryId === item.id ? 'active' : ''}`}
+                  onClick={() => setActiveHistoryId(item.id === activeHistoryId ? null : item.id)}>
+                  <div className="tts-history-top">
+                    <span className="tts-history-text">{item.text?.slice(0, 60) || '...'}</span>
+                    <Space size={4}>
+                      <Tooltip title="播放">
+                        <Button type="text" size="small"
+                          icon={playingId === item.id ? <PauseCircleOutlined /> : <CaretRightOutlined />}
+                          onClick={e => { e.stopPropagation(); playHistoryItem(item); }} />
+                      </Tooltip>
+                      <Tooltip title="下载">
+                        <Button type="text" size="small" icon={<DownloadOutlined />}
+                          onClick={e => { e.stopPropagation(); downloadHistoryItem(item); }} />
+                      </Tooltip>
+                      <Tooltip title="删除">
+                        <Button type="text" size="small" icon={<DeleteOutlined />}
+                          onClick={e => { e.stopPropagation(); deleteHistoryItem(item); }} />
+                      </Tooltip>
+                    </Space>
                   </div>
-                );
-              })}
+                  <div className="tts-history-meta">
+                    {item.created_at?.slice(0, 19) || ''} · {(item.output_format || 'wav').toUpperCase()} · {item.voice_id || ''}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </Content>

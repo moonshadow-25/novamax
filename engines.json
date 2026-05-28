@@ -1,0 +1,257 @@
+{
+  "version": "1.0.2",
+  "last_updated": "2026-05-28T00:00:00.000000+00:00",
+  "engines": {
+    "rocm": {
+      "id": "rocm",
+      "name": "ROCm + PyTorch",
+      "category": "runtime",
+      "description": "AMD GPU 运行时和 PyTorch ROCm 版本",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "7.12+2.12",
+          "modelscope_file": "torch_rocm_env_313.tar.gz",
+          "size": 976870912
+        }
+      ],
+      "dependencies": []
+    },
+    "llamacpp": {
+      "id": "llamacpp",
+      "name": "llama.cpp",
+      "category": "engine",
+      "description": "LLM 推理引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "variants": [
+        {
+          "id": "rocm",
+          "name": "ROCm",
+          "gpu_backend": "rocm",
+          "versions": [
+            {
+              "version": "202605212000",
+              "modelscope_file": "llamacpp/llamacpp_202605212000.tar.gz",
+              "size": 126122698,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202604161710",
+              "modelscope_file": "llamacpp/llamacpp_202604161710.tar.gz",
+              "size": 179844898,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202604031826",
+              "modelscope_file": "llamacpp/llamacpp_202604031826.tar.gz",
+              "size": 177917949,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202603261948",
+              "modelscope_file": "llamacpp/llamacpp_202603261948.tar.gz",
+              "size": 176623662,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202603261030",
+              "modelscope_file": "llamacpp/llamacpp_202603261030.tar.gz",
+              "size": 69675881,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202603182234",
+              "modelscope_file": "llamacpp/llamacpp_202603182234.tar.gz",
+              "size": 69675881,
+              "rocm_version": "7.12+2.12"
+            },
+            {
+              "version": "202603141238",
+              "modelscope_file": "llamacpp/llamacpp_202603141238.tar.gz",
+              "size": 69675881,
+              "rocm_version": "7.12+2.12"
+            }
+          ]
+        },
+        {
+          "id": "vulkan",
+          "name": "Vulkan",
+          "gpu_backend": "vulkan",
+          "versions": [
+            {
+              "version": "vulkan_202605072158",
+              "modelscope_file": "llamacpp/llamacpp_vulkan_202605072158.tar.gz",
+              "size": 34735267
+            }
+          ]
+        },
+        {
+          "id": "other",
+          "name": "Other",
+          "gpu_backend": "other",
+          "versions": [
+            {
+              "version": "mtp_202605111200",
+              "modelscope_file": "llamacpp/llamacpp_mtp_202605111200.tar.gz",
+              "size": 123820521,
+              "rocm_version": "7.12+2.12"
+            }
+          ]
+        }
+      ],
+      "dependencies": [
+        "rocm"
+      ]
+    },
+    "comfyui": {
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "category": "engine",
+      "description": "图像生成工作流引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "0.22.0",
+          "modelscope_file": "comfyui/comfyui_0220_202605212011.tar.gz",
+          "size": 11232806,
+          "rocm_version": "7.12+2.12"
+        },
+        {
+          "version": "v0.17.0",
+          "modelscope_file": "comfyui/comfyui_0170_202603141237.tar.gz",
+          "size": 7225165,
+          "rocm_version": "7.12+2.12"
+        }
+      ],
+      "dependencies": [
+        "rocm"
+      ]
+    },
+    "tts": {
+      "id": "tts",
+      "name": "TTS",
+      "category": "engine",
+      "description": "文本转语音引擎",
+      "variants": [
+        {
+          "id": "indextts2",
+          "name": "IndexTTS 2.0",
+          "modelscope_repo": "shoujiekeji/Novastudio3.0",
+          "versions": [
+            {
+              "version": "202605131733-index-tts2",
+              "modelscope_file": "tts/index_tts2/index_tts2_202605131733.tar.gz",
+              "size": 68614808
+            },
+            {
+              "version": "202605072144-index-tts2",
+              "modelscope_file": "tts/index_tts2/index_tts2_202605072144.tar.gz",
+              "size": 68572393
+            },
+            {
+              "version": "202605072006-index-tts2",
+              "modelscope_file": "tts/index_tts2/index_tts2_202605072006.tar.gz",
+              "size": 68572425
+            },
+            {
+              "version": "202604302020-index-tts2",
+              "modelscope_file": "tts/index_tts2/index_tts2_202604302020.tar.gz",
+              "size": 68040592
+            }
+          ],
+          "runtimes": [
+            {
+              "id": "rocm",
+              "name": "ROCm + PyTorch",
+              "modelscope_file": "tts/engines/index_tts2_engine.zip",
+              "description": "AMD GPU 加速 (ROCm)"
+            }
+          ]
+        },
+        {
+          "id": "indextts1.5",
+          "name": "IndexTTS 1.5",
+          "modelscope_repo": "shoujiekeji/Novastudio3.0",
+          "versions": [
+            {
+              "version": "202605131733-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/index_tts1.5_202605131733.tar.gz",
+              "size": 55772876
+            },
+            {
+              "version": "202605071945-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/index_tts1.5_202605071945.tar.gz",
+              "size": 55745740
+            },
+            {
+              "version": "202604302021-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/index_tts1.5_202604302021.tar.gz",
+              "size": 55246383
+            }
+          ],
+          "runtimes": [
+            {
+              "id": "rocm",
+              "name": "ROCm + PyTorch",
+              "modelscope_file": "tts/engines/index_tts1.5_engine.zip",
+              "description": "AMD GPU 加速 (ROCm)"
+            }
+          ]
+        }
+      ],
+      "dependencies": []
+    },
+    "whisper": {
+      "id": "whisper",
+      "name": "Whisper",
+      "category": "engine",
+      "description": "语音识别引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "202604302055",
+          "modelscope_file": "whisper/whisper_202604302055.tar.gz",
+          "size": 90732006
+        },
+        {
+          "version": "3.0",
+          "modelscope_file": "whisper/whisper_202604231858.tar.gz",
+          "size": 90732011
+        }
+      ],
+      "dependencies": []
+    },
+    "ffmpeg": {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "category": "engine",
+      "description": "音视频处理工具",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "versions": [
+        {
+          "version": "1.0",
+          "modelscope_file": "ffmpeg/ffmpeg.zip",
+          "size": 139255757
+        }
+      ],
+      "dependencies": []
+    },
+    "app": {
+      "id": "app",
+      "name": "NovaMax",
+      "category": "app",
+      "description": "NovaMax 主程序",
+      "versions": [
+        {
+          "version": "2.0.5",
+          "size": 96871997,
+          "release_notes": "",
+          "min_version": "1.0.0",
+          "release_date": "2026-05-21T12:56:33Z",
+          "download_url": "https://www.firstarpc.com/download/novamax/test/novamax-2.0.5-update.tar.gz"
+        }
+      ],
+      "dependencies": []
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Bad
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
+import { normalizeEngineType } from '../../utils/engineType';
 import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
@@ -10,6 +11,7 @@ import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
 import ComfyUIInstanceCard from '../../components/ComfyUIInstanceCard/ComfyUIInstanceCard';
 import ComfyUIInstanceSettings from '../../components/ComfyUIInstanceSettings/ComfyUIInstanceSettings';
 import MultiConnectModal from '../../components/MultiConnectModal/MultiConnectModal';
+import TTSStudio from '../TTS/TTSStudio';
 import './Home.css';
 
 const { Header, Content } = Layout;
@@ -101,13 +103,13 @@ function Home() {
           const latestVersion = variantVersions[0]?.version;
           if (!latestVersion) continue;
 
-          const matchKey = variantId.replace('indextts', 'index-tts');
+          const variantNorm = normalizeEngineType(variantId);
           const variantInstalled = (engine.installed_versions || []).filter(v =>
-            String(v.version || '').toLowerCase().includes(matchKey)
+            normalizeEngineType(v.version).includes(variantNorm)
           );
           const variantDownloading = (engine.download_states || []).some(s => {
-            const stateKey = String(s.targetQuantization || '').toLowerCase();
-            return stateKey.includes(matchKey) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
+            const stateKey = normalizeEngineType(s.targetQuantization || '');
+            return stateKey.includes(variantNorm) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
           });
           if (variantDownloading) continue;
 
@@ -530,6 +532,12 @@ function Home() {
           />
         )}
 
+        {/* TTS Tab: 直接渲染统一工作室 */}
+        {activeTab === 'tts' ? (
+          <TTSStudio />
+        ) : (
+          <>
+
         <div className="model-grid">
           {filteredModels.map(model => (
             <ModelCard
@@ -549,6 +557,8 @@ function Home() {
               </div>
             )}
         </div>
+          </>
+        )}
           </div>
         </div>
       </Content>

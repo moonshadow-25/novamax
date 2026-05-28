@@ -14,6 +14,7 @@ import engineManager from './services/engineManager.js';
 import engineDownloader from './services/engineDownloader.js';
 import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
+import ttsWorkerManager from './tts/ttsWorkerManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
 import { PROJECT_ROOT } from './config/constants.js';
 
@@ -29,6 +30,8 @@ import enginesRouter from './routes/engines.js';
 import systemRouter from './routes/system.js';
 import whisperRouter from './routes/whisper.js';
 import ttsRouter from './routes/tts.js';
+import ttsStudioRouter from './routes/tts-studio.js';
+import openaiTtsRouter from './routes/openai-tts.js';
 import multiconnectRouter from './routes/multiconnect.js';
 import eventBus from './services/eventBus.js';
 
@@ -43,7 +46,21 @@ async function init() {
   await configManager.init();
   await modelManager.init();
   await engineManager.init();
-  comfyuiInstanceManager.init(); // 初始化 ComfyUI 实例管理器
+
+  // 启动时清理残留的 TTS 引擎 Python 进程
+  const ttsModels = modelManager.getByType('tts');
+  for (const m of ttsModels) {
+    try {
+      const info = processManager.getStatus(m.id);
+      if (info.running) {
+        console.log(`[init] 停止残留 TTS 引擎进程: ${m.id}`);
+        await processManager.stopBackend(m.id);
+      }
+    } catch {}
+  }
+
+  ttsWorkerManager.start();
+  comfyuiInstanceManager.init();
 
   // 一次性清理所有临时状态字段（重构后不再需要持久化这些字段）
   console.log('清理旧的临时状态字段...');
@@ -153,6 +170,8 @@ app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
 app.use('/api', whisperRouter);
 app.use('/api', ttsRouter);
+app.use('/api/tts-studio', ttsStudioRouter);
+app.use('/v1', openaiTtsRouter);
 app.use('/api', multiconnectRouter);
 
 // SSE 实时事件推送

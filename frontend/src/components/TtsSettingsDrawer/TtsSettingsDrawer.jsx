@@ -1,123 +1,105 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
-import { DeleteOutlined, UndoOutlined, QuestionCircleOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import { engineService, modelService, backendService } from '../../services/api';
+import { Drawer, Select, Button, Space, message, Alert, Popconfirm, Typography, InputNumber, Slider } from 'antd';
+import { DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { engineService, modelService, backendService, ttsStudioService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
+import { normalizeEngineType } from '../../utils/engineType';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
 
+function resolveModelVariant(model) {
+  const candidate = normalizeEngineType(
+    model?.engine_version ||
+    model?.remote_snapshot?.engine_version ||
+    model?.id || ''
+  );
+  if (candidate.includes('tts15')) return 'indextts1.5';
+  if (candidate.includes('tts2')) return 'indextts2';
+  return null;
+}
+
 function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
-  const [form] = Form.useForm();
-  const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
   const [engines, setEngines] = useState([]);
   const [engineInstalled, setEngineInstalled] = useState(false);
   const [showEngineModal, setShowEngineModal] = useState(false);
-  const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
   const [latestEngineVersion, setLatestEngineVersion] = useState(null);
-
-  const inferVariantMarker = useCallback(() => {
-    const candidate = String(
-      model?.engine_version ||
-      model?.remote_snapshot?.engine_version ||
-      model?.id || ''
-    ).toLowerCase();
-
-    if (candidate.includes('1.5') || candidate.includes('tts1.5')) return 'index-tts1.5';
-    if (candidate.includes('tts2') || candidate.includes('index_tts2') || candidate.includes('index-tts2')) return 'index-tts2';
-    return null;
-  }, [model]);
-
-  const filterVersionsByVariant = useCallback((versions) => {
-    const marker = inferVariantMarker();
-    if (!marker) return versions || [];
-    return (versions || []).filter(v => String(v.version || '').toLowerCase().includes(marker));
-  }, [inferVariantMarker]);
-
-  const buildVariantEngineInfo = useCallback((raw) => {
-    if (!raw) return null;
-    const marker = inferVariantMarker();
-    if (!marker) return raw;
-
-    const matchedVariants = Array.isArray(raw.variants)
-      ? raw.variants.filter(v => String(v.id || '').toLowerCase() === marker.replace('index-', 'index'))
-      : [];
-
-    if (matchedVariants.length > 0) {
-      return {
-        ...raw,
-        variants: matchedVariants
-      };
-    }
-
-    return {
-      ...raw,
-      variants: [{
-        id: marker.replace('index-', 'index'),
-        name: marker.includes('1.5') ? 'IndexTTS 1.5' : 'IndexTTS 2.0',
-        versions: (raw.versions || []).filter(v => String(v.version || '').toLowerCase().includes(marker))
-      }]
-    };
-  }, [inferVariantMarker]);
+  const [idleTimeout, setIdleTimeout] = useState(5);
+  const [runtimeItems, setRuntimeItems] = useState([]);
+  const [runtimeValues, setRuntimeValues] = useState({});
+  const runtimeEngineTypeRef = React.useRef(null);
+  const [selectedRuntime, setSelectedRuntime] = useState(null);
+  const [availableRuntimes, setAvailableRuntimes] = useState([]);
+  const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
+  const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
 
   const refreshEngineStatus = useCallback(async () => {
     try {
       const res = await engineService.getById('tts');
-      const installedVersions = filterVersionsByVariant(res.installed_versions || []);
-      const availableVersions = filterVersionsByVariant(
-        Array.isArray(res.versions) && res.versions.length > 0
-          ? res.versions
-          : (res.variants || []).flatMap(variant => variant.versions || [])
-      );
+      const modelVariant = resolveModelVariant(model);
+      const variantVersions = (res.variants || [])
+        .filter(v => modelVariant ? normalizeEngineType(v.id) === normalizeEngineType(modelVariant) : true)
+        .flatMap(v => v.versions || []);
+      const variantVersionSet = new Set(variantVersions.map(v => v.version));
+      const variantInstalled = (res.installed_versions || []).filter(v => variantVersionSet.has(v.version));
       const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
-        availableVersions,
-        installedVersions
+        variantVersions, variantInstalled
       );
-      setEngineInfo(buildVariantEngineInfo(res));
+      setEngineInfo(buildVariantEngineInfo(res, model));
       setEngines(orderedInstalledVersions);
       setLatestEngineVersion(latestInstalledVersion);
-      setEngineInstalled(installedVersions.length > 0);
+      setEngineInstalled(variantInstalled.length > 0);
 
-      const pinnedVersion = model?.engine_version || null;
-      if (pinnedVersion && orderedInstalledVersions.some(v => v.version === pinnedVersion)) {
-        setSelectedEngineVersion(pinnedVersion);
-      } else {
-        setSelectedEngineVersion(null);
+      // 检测引擎更新
+      if (variantVersions.length > 0 && variantInstalled.length > 0) {
+        const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+        const latest = sorted[0].version;
+        setLatestAvailableVersion(latest);
+        setEngineUpdateAvailable(latest !== latestInstalledVersion);
+      }
+
+      // 获取运行时选项
+      const matchedVariant = (res.variants || []).find(v =>
+        modelVariant ? normalizeEngineType(v.id) === normalizeEngineType(modelVariant) : true
+      );
+      const runtimes = matchedVariant?.runtimes || [];
+      setAvailableRuntimes(runtimes);
+      if (runtimes.length > 0 && !selectedRuntime) {
+        setSelectedRuntime(runtimes[0].id);
       }
     } catch {
-      setEngineInfo(null);
-      setEngines([]);
-      setEngineInstalled(false);
+      setEngineInfo(null); setEngines([]); setEngineInstalled(false);
     }
-  }, [buildVariantEngineInfo, filterVersionsByVariant, model]);
+  }, [model]);
 
   useEffect(() => {
     if (!visible || !model) return;
-    const defaults = model.parameters || model.default_parameters || {};
-    const cfg = model.tts_config || {};
-    form.setFieldsValue({
-      api_port: cfg.api_port ?? defaults['api-port'] ?? 7863,
-      webui_port: cfg.webui_port ?? defaults['webui-port'] ?? 7864,
-      workers: cfg.workers ?? defaults.workers ?? 1,
-      fp16: cfg.fp16 ?? defaults.fp16 ?? false,
-    });
-  }, [visible, model, form]);
-
-  useEffect(() => {
-    if (!visible) return;
     refreshEngineStatus();
+    ttsStudioService.getTtsConfig().then(c => setIdleTimeout(c.idle_timeout_minutes ?? 5)).catch(() => {});
+    // 加载 runtime_config（按 model variant 过滤）
+    ttsStudioService.getEngineContracts().then(contracts => {
+      const mv = resolveModelVariant(model);
+      const match = mv ? contracts.find(c => normalizeEngineType(c.engine_type) === normalizeEngineType(mv)) : contracts[0];
+      const ct = match?.contract;
+      const rc = ct?.runtime_config || {};
+      const items = Object.entries(rc).map(([key, def]) => ({ key, ...def }));
+      setRuntimeItems(items);
+      const et = match?.engine_type;
+      if (et) runtimeEngineTypeRef.current = et;
+      if (items.length > 0 && et) {
+        ttsStudioService.getEngineRuntimeConfig(et).then(vals => {
+          const merged = {};
+          items.forEach(it => { merged[it.key] = vals[it.key] ?? it.default; });
+          setRuntimeValues(merged);
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   }, [visible, refreshEngineStatus]);
 
-  const handleEngineVersionChange = async (version) => {
-    try {
-      await modelService.update(model.id, { engine_version: version || null });
-      setSelectedEngineVersion(version || null);
-      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
-      onSave?.();
-    } catch (e) {
-      message.error('切换引擎版本失败');
-    }
+  const handleIdleTimeoutChange = async (val) => {
+    setIdleTimeout(val);
+    try { await ttsStudioService.setTtsConfig({ idle_timeout_minutes: val }); } catch {}
   };
 
   const handleDelete = async () => {
@@ -128,187 +110,115 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       onClose();
       onDelete?.();
       onSave?.();
-    } catch (error) {
-      message.error(error.response?.data?.error || error.message || '删除失败');
-    }
-  };
-
-  const handleSubmit = async ({ closeAfter = true, successText = 'TTS 配置已保存' } = {}) => {
-    if (!model?.id) return;
-    try {
-      const values = await form.validateFields();
-      setSaving(true);
-
-      await modelService.update(model.id, {
-        tts_config: {
-          api_port: values.api_port,
-          webui_port: values.webui_port,
-          workers: values.workers,
-          fp16: values.fp16,
-        }
-      });
-
-      message.success(successText);
-      if (closeAfter) onClose();
-      onSave?.();
-    } catch (error) {
-      if (error?.errorFields) return;
-      message.error(error.response?.data?.error || error.message || '保存失败');
-    } finally {
-      setSaving(false);
-    }
+    } catch (error) { message.error(error.response?.data?.error || error.message || '删除失败'); }
   };
 
   return (
     <>
       <Drawer
         title={`${model?.name || 'TTS'} 配置`}
-        placement="right"
-        width={520}
-        open={visible}
-        onClose={onClose}
+        placement="right" width={480} open={visible} onClose={onClose}
         extra={
-          <Space>
-            <Button
-              icon={<UndoOutlined />}
-              size="small"
-              loading={saving}
-              onClick={async () => {
-                const defaults = model?.parameters || model?.default_parameters || {};
-                form.setFieldsValue({
-                  api_port: defaults['api-port'] ?? 7863,
-                  webui_port: defaults['webui-port'] ?? 7864,
-                  workers: defaults.workers ?? 1,
-                  fp16: defaults.fp16 ?? false,
-                });
-                await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
-              }}
-            >
-              恢复默认
-            </Button>
-            <Popconfirm
-              title="删除卡片"
-              description="将删除此卡片配置及所有已下载的模型文件，此操作不可撤销。"
-              okText="删除"
-              okButtonProps={{ danger: true }}
-              cancelText="取消"
-              onConfirm={handleDelete}
-            >
-              <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
-            </Popconfirm>
-          </Space>
-        }
-        footer={
-          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={onClose}>取消</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}>保存</Button>
-          </Space>
+          <Popconfirm title="删除卡片" description="将删除此卡片配置，此操作不可撤销。"
+            okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={handleDelete}>
+            <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
+          </Popconfirm>
         }
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {/* 引擎版本 */}
           <div>
+            <Text strong>引擎版本</Text>
             {!engineInstalled ? (
-              <Alert
-                type="warning"
-                showIcon
-                message="未检测到已安装的 TTS 引擎"
-                description={
-                  <Button type="primary" size="small" onClick={() => setShowEngineModal(true)}>
-                    安装 TTS 引擎
-                  </Button>
-                }
-              />
+              <Alert type="warning" showIcon message="未检测到已安装的 TTS 引擎" style={{ marginTop: 8 }}
+                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>安装引擎</Button>} />
+            ) : engineUpdateAvailable ? (
+              <Alert type="info" showIcon message={`新版本可用: ${latestAvailableVersion}（当前: ${latestEngineVersion}）`} style={{ marginTop: 8 }}
+                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>更新引擎</Button>} />
             ) : (
-              <Form layout="vertical" style={{ marginTop: 8 }}>
-                <Form.Item
-                  label={
-                    <span>
-                      引擎版本
-                      <Tooltip title="选择运行此卡片使用的 TTS 引擎版本；留空表示默认（最新版本）。">
-                        <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
-                      </Tooltip>
-                    </span>
-                  }
-                  style={{ marginBottom: 8 }}
-                >
-                  <Select
-                    value={selectedEngineVersion}
-                    onChange={handleEngineVersionChange}
-                    placeholder="默认（最新版本）"
-                    allowClear
-                  >
-                    {engines.map((v) => (
-                      <Select.Option key={v.version} value={v.version}>
-                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Form>
+              <div style={{ marginTop: 4 }}>
+                <Text>{latestEngineVersion || '—'}</Text>
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>（最新版本）</Text>
+              </div>
             )}
           </div>
 
-          <Divider style={{ margin: '6px 0' }} />
-
-          <Form form={form} layout="vertical">
-            <Form.Item label="API 端口" name="api_port" rules={[{ required: true, message: '请输入 API 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="WebUI 端口" name="webui_port" rules={[{ required: true, message: '请输入 WebUI 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="Workers" name="workers" rules={[{ required: true, message: '请输入 workers 数' }]}>
-              <InputNumber min={1} max={8} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item style={{ marginBottom: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span>
-                  启用 FP16
-                  <Tooltip title="启用后使用半精度推理，通常可降低显存占用并提升速度，可能对音质稳定性有轻微影响。">
-                    <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
-                  </Tooltip>
-                </span>
-                <Form.Item name="fp16" valuePropName="checked" noStyle>
-                  <Switch />
-                </Form.Item>
+          {/* 运行时环境选择 */}
+          {engineInstalled && availableRuntimes.length > 0 && (
+            <div>
+              <Text strong>运行时环境</Text>
+              <Select
+                value={selectedRuntime}
+                onChange={setSelectedRuntime}
+                style={{ width: '100%', marginTop: 4 }}
+              >
+                {availableRuntimes.map(rt => (
+                  <Select.Option key={rt.id} value={rt.id}>
+                    {rt.name}{rt.description ? ` — ${rt.description}` : ''}
+                  </Select.Option>
+                ))}
+              </Select>
+              <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
+                如需切换运行时，请重新安装引擎
               </div>
-            </Form.Item>
-          </Form>
+            </div>
+          )}
 
-          <Divider />
-          <Button
-            icon={<FolderOpenOutlined />}
-            onClick={async () => {
-              try {
-                await backendService.openLogsFolder();
-                message.success('已打开日志文件夹');
-              } catch {
-                message.error('打开失败');
-              }
-            }}
-            block
-          >
-            打开日志文件夹
-          </Button>
+          {/* 运行时配置 */}
+          {runtimeItems.length > 0 && (
+            <div>
+              <Text strong>运行时配置</Text>
+              {runtimeItems.map(item => (
+                <div key={item.key} style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
+                    {item.label}{item.description && <Text type="secondary" style={{ marginLeft: 8, fontSize: 11 }}>{item.description}</Text>}
+                  </div>
+                  <Slider min={item.min} max={item.max} step={item.step}
+                    value={runtimeValues[item.key] ?? item.default}
+                    onChange={val => setRuntimeValues(prev => ({ ...prev, [item.key]: val }))}
+                    onAfterChange={val => {
+                      const et = runtimeEngineTypeRef.current;
+                      if (et) ttsStudioService.setEngineRuntimeConfig(et, item.key, val).catch(() => {});
+                    }}
+                    marks={{ [item.min]: item.min, [item.default]: item.default, [item.max]: item.max }} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 闲置自动关闭 */}
+          <div>
+            <Text strong>闲置自动关闭</Text>
+            <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>引擎收到外部请求时会自动启动，此设置不影响外部调用。</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span>闲置</span>
+              <InputNumber min={3} max={30} step={1} value={idleTimeout} onChange={handleIdleTimeoutChange} style={{ width: 72 }} />
+              <span>分钟后自动关闭以节约资源</span>
+            </div>
+          </div>
+
+          <Button icon={<FolderOpenOutlined />} onClick={async () => {
+            try { await backendService.openLogsFolder(); message.success('已打开日志文件夹'); }
+            catch { message.error('打开失败'); }
+          }} block>打开日志文件夹</Button>
         </Space>
       </Drawer>
 
-      <EngineDownloadModal
-        visible={showEngineModal}
-        engineId="tts"
-        engineInfo={engineInfo}
-        onComplete={async () => {
-          setShowEngineModal(false);
-          await refreshEngineStatus();
-          message.success('TTS 引擎安装完成');
-        }}
-        onCancel={() => setShowEngineModal(false)}
-      />
+      <EngineDownloadModal visible={showEngineModal} engineId="tts" engineInfo={engineInfo}
+        onComplete={async () => { setShowEngineModal(false); await refreshEngineStatus(); message.success('TTS 引擎安装完成'); }}
+        onCancel={() => setShowEngineModal(false)} />
     </>
   );
+}
+
+function buildVariantEngineInfo(raw, model) {
+  if (!raw || !Array.isArray(raw.variants)) return raw;
+  const mv = resolveModelVariant(model);
+  if (!mv) return raw;
+  const mvNorm = normalizeEngineType(mv);
+  const matched = raw.variants.filter(v => normalizeEngineType(v.id) === mvNorm);
+  if (matched.length === 0) return raw;
+  return { ...raw, variants: matched };
 }
 
 export default TtsSettingsDrawer;

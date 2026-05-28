@@ -28,7 +28,7 @@ class EngineDownloader {
    * @param {string} version
    * @returns {Object} { tasks: [{ engineId, version }] }
    */
-  async startDownloadWithDependencies(engineId, version) {
+  async startDownloadWithDependencies(engineId, version, runtimeId = null) {
     const engine = engineManager.getEngine(engineId);
     if (!engine) {
       throw new Error('Engine not found');
@@ -62,7 +62,7 @@ class EngineDownloader {
     tasks.push({ taskId, engineId, version });
 
     // 后台执行下载链
-    this._runDownloadChain(tasks);
+    this._runDownloadChain(tasks, runtimeId);
 
     return { tasks };
   }
@@ -114,7 +114,7 @@ class EngineDownloader {
   /**
    * 执行下载链（依赖 -> 主引擎）
    */
-  async _runDownloadChain(tasks) {
+  async _runDownloadChain(tasks, runtimeId = null) {
     for (const taskInfo of tasks) {
       const lockKey = `${taskInfo.engineId}::${taskInfo.version}`;
 
@@ -144,7 +144,7 @@ class EngineDownloader {
           status: 'downloading'
         });
 
-        await this._downloadEngine(taskInfo.engineId, taskInfo.version);
+        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId);
 
         downloadStateManager.setState(taskInfo.engineId, 'completed', null, taskInfo.version);
         downloadStateManager.updateProgress(taskInfo.engineId, 100, 0, taskInfo.version);
@@ -174,7 +174,7 @@ class EngineDownloader {
    *   - download_url：直接 HTTP 下载（测试版）
    *   - modelscope_repo + modelscope_file：ModelScope 下载（正式版）
    */
-  async _downloadEngine(engineId, version) {
+  async _downloadEngine(engineId, version, runtimeId = null) {
     const engine = engineManager.getEngine(engineId);
     const versionInfo = engineManager.getEngineVersionInfo(engineId, version);
 
@@ -215,20 +215,40 @@ class EngineDownloader {
       throw new Error(`下载失败：文件不存在或大小为0，请重试`);
     }
 
-    // 解压
-    const installPath = path.join(PROJECT_ROOT, 'external', engineId, version);
+    // 解压到临时目录
+    const tempExtractPath = path.join(PROJECT_ROOT, 'external', engineId, `_temp_${version}`);
     downloadStateManager.setState(engineId, 'unpacking', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'unpacking' });
     try {
-      await this._extract(filePath, installPath);
+      // 清理可能存在的残留临时目录
+      if (fs.existsSync(tempExtractPath)) {
+        fs.rmSync(tempExtractPath, { recursive: true, force: true });
+      }
+      await this._extract(filePath, tempExtractPath);
     } catch (err) {
-      // 解压失败时清理压缩包，确保下次重试能重新完整下载
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         console.log(`[engineDownloader] Cleaned up archive after extraction failure: ${filePath}`);
       }
       throw err;
     }
+
+    // 确定最终安装目录名：TTS 引擎使用 variant.id，其他引擎使用 version
+    let installDirName = version;
+    if (engineId === 'tts') {
+      const vInfo = engineManager.getEngineVersionInfo(engineId, version);
+      installDirName = vInfo?.variant_id || version;
+    }
+    const installPath = path.join(PROJECT_ROOT, 'external', engineId, installDirName);
+
+    // 如果最终目录已存在（旧版本），先删除
+    if (fs.existsSync(installPath)) {
+      console.log(`[engineDownloader] 删除旧版本: ${installPath}`);
+      fs.rmSync(installPath, { recursive: true, force: true });
+    }
+
+    // 重命名临时目录到最终目录
+    fs.renameSync(tempExtractPath, installPath);
 
     // 安装步骤
     if (engine.category === 'app') {
@@ -252,7 +272,19 @@ class EngineDownloader {
     }
 
     // 普通引擎：运行安装脚本（脚本负责写 .installed）
-    await this._runInstallScript(engineId, version, installPath);
+    await this._runInstallScript(engineId, version, installPath, runtimeId);
+
+    // 安装脚本可能覆盖 .installed，补充 version 字段
+    const markerPath = path.join(installPath, '.installed');
+    if (fs.existsSync(markerPath) && engineId === 'tts') {
+      try {
+        const m = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
+        if (!m.version) {
+          m.version = version;
+          fs.writeFileSync(markerPath, JSON.stringify(m));
+        }
+      } catch {}
+    }
 
     // 清理下载文件
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -399,7 +431,7 @@ class EngineDownloader {
    * 运行引擎安装脚本（从 ci/ 目录读取，支持热更新）
    * 优先 .py，回退 .bat；找不到则报错
    */
-  _runInstallScript(engineId, version, installPath) {
+  _runInstallScript(engineId, version, installPath, runtimeId = null) {
     const python313 = path.join(PROJECT_ROOT, 'external', 'python313', 'python.exe');
     const pyScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
     const batScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
@@ -408,6 +440,21 @@ class EngineDownloader {
     const hasBat = fs.existsSync(batScript);
 
     if (!hasPy && !hasBat) {
+      // 无需安装脚本的引擎（如 ffmpeg）：zip 解压后直接可用
+      const hasBin = fs.readdirSync(installPath).some(f => f.endsWith('.exe'));
+      if (hasBin) {
+        console.log(`No install script needed for ${engineId}, marking as installed`);
+        const markerPath = path.join(installPath, '.installed');
+        // TTS 引擎记录 variant_id 和实际 version
+        const markerData = { installed_at: new Date().toISOString(), engine: engineId };
+        if (engineId === 'tts') {
+          const vInfo = engineManager.getEngineVersionInfo(engineId, version);
+          markerData.version = version;
+          markerData.variant_id = vInfo?.variant_id || installDirName;
+        }
+        fs.writeFileSync(markerPath, JSON.stringify(markerData));
+        return Promise.resolve();
+      }
       return Promise.reject(new Error(`No install script found for ${engineId} in ci/`));
     }
 
@@ -423,12 +470,18 @@ class EngineDownloader {
       console.log(`Running Python install script: ci/install_${engineId}.py`);
       cmd = python313;
       args = [pyScript, '--install-root', installRoot, '--rocm-path', rocmPath, '--project-root', PROJECT_ROOT];
+      if (runtimeId) {
+        args.push('--runtime-id', runtimeId);
+      }
       spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' };
     } else {
       console.log(`Running bat install script: ci/install_${engineId}.bat`);
       cmd = 'cmd.exe';
       args = ['/c', batScript];
       spawnEnv = { ...process.env, INSTALL_ROOT: installRoot, ROCM_PATH: rocmPath, PROJECT_ROOT };
+      if (runtimeId) {
+        spawnEnv.NOVAMAX_RUNTIME_ID = runtimeId;
+      }
     }
 
     return new Promise((resolve, reject) => {

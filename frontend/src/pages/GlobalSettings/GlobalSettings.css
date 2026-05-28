@@ -90,3 +90,35 @@
   background: #141414;
   border-color: rgba(255, 255, 255, 0.12);
 }
+
+/* ===== 日志查看器布局 ===== */
+
+/* 让 Tabs 子容器撑满高度，使 flex: 1 的日志区域能正常工作 */
+.gs-section-card .ant-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.gs-section-card .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+}
+
+.gs-section-card .ant-tabs-content {
+  height: 100%;
+}
+
+.gs-section-card .ant-tabs-tabpane-active {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

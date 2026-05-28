@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000
+  timeout: 120000
 });
 
 api.interceptors.response.use(
@@ -125,17 +125,17 @@ export const comfyuiService = {
 };
 
 export const ttsService = {
-  speech: (data) => api.post('/tts/speech', data, { timeout: 300000, responseType: 'blob' }),
+  speech: (data) => api.post('/tts/speech', data, { timeout: 0, responseType: 'blob' }),
   getVoices: () => api.get('/tts/voices'),
   createVoice: (formData) => api.post('/tts/voices', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  autoRegisterVoices: () => api.post('/tts/voices/auto-register'),
   getVoiceAudioUrl: (voiceId) => `/api/tts/voices/${voiceId}/audio`,
   deleteVoice: (voiceId) => api.delete(`/tts/voices/${voiceId}`),
-  getHistory: () => api.get('/tts/history'),
+  getHistory: (workspaceId) => api.get('/tts/history', { params: workspaceId ? { workspace_id: workspaceId } : {} }),
   getHistoryAudioUrl: (itemId) => `/api/tts/history/${itemId}/audio`,
   deleteHistoryItem: (itemId) => api.delete(`/tts/history/${itemId}`),
   clearHistory: () => api.delete('/tts/history'),
   health: () => api.get('/tts/health'),
+  getEngineContracts: () => api.get('/tts-studio/engine-contracts'),
   getFilesStatus: (modelId) => api.get(`/tts/models/${modelId}/files-status`),
   downloadFile: (modelId, filename) => api.post(`/tts/models/${modelId}/download`, { filename }),
   getDownloadStatus: (taskId) => api.get(`/tts/download-status/${taskId}`),
@@ -185,7 +185,7 @@ export const engineService = {
   checkInstalled: (id) => api.get(`/engines/${id}/check`),
   getVersions: (id) => api.get(`/engines/${id}/versions`),
   validate: (id, version) => api.post(`/engines/${id}/validate`, { version }),
-  download: (id, version) => api.post(`/engines/${id}/download`, { version }),
+  download: (id, version, runtimeId) => api.post(`/engines/${id}/download`, { version, runtime: runtimeId }),
   getDownloadStatus: (taskId) => api.get(`/engines/download/${taskId}`),
   uninstall: (id, version) => api.delete(`/engines/${id}/versions/${version}`),
   reinstall: (id, version) => api.post(`/engines/${id}/versions/${version}/reinstall`)
@@ -201,7 +201,9 @@ export const systemService = {
   getInfo: () => api.get('/system/info'),
   getStorage: () => api.get('/system/storage'),
   getLogs: (limit = 200, level = 'all') => api.get(`/system/logs?limit=${limit}&level=${level}`),
+  getTtsLogs: (limit = 500, level = 'all') => api.get(`/system/logs/tts?limit=${limit}&level=${level}`),
   clearLogs: () => api.delete('/system/logs'),
+  clearTtsLogs: () => api.delete('/system/logs/tts'),
   openFolder: (dirPath) => api.post('/system/storage/open', { dirPath }),
   migrateStorage: (type, targetPath, backup = false) => api.post('/system/storage/migrate', { type, targetPath, backup }),
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),
@@ -234,6 +236,38 @@ export const multiConnectService = {
   getUSBNetworkStatus: () => api.get('/system/usb-network-status'),
   configureUSBNetwork: (ip, mask) => api.post('/system/configure-usb-network', { ip, mask }),
   validateRpcDevice: (device) => api.post('/system/validate-rpc-device', { device })
+};
+
+export const ttsStudioService = {
+  getReferenceAudios: (params) => api.get('/tts-studio/reference-audios', { params }),
+  uploadReferenceAudio: (formData) => api.post('/tts-studio/reference-audios', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getReferenceAudio: (id) => api.get(`/tts-studio/reference-audios/${id}`),
+  deleteReferenceAudio: (id) => api.delete(`/tts-studio/reference-audios/${id}`),
+  renameReferenceAudio: (id, name) => api.put(`/tts-studio/reference-audios/${id}/rename`, { name }),
+  getWorkspaces: () => api.get('/tts-studio/workspaces'),
+  createWorkspace: (formData) => api.post('/tts-studio/workspaces', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getWorkspace: (id) => api.get(`/tts-studio/workspaces/${id}`),
+  deleteWorkspace: (id) => api.delete(`/tts-studio/workspaces/${id}`),
+  cloneWorkspace: (id, data) => api.post(`/tts-studio/workspaces/${id}/clone`, data),
+  updateOutputDir: (id, outputDir) => api.put(`/tts-studio/workspaces/${id}/output-dir`, { output_dir: outputDir }),
+  getWorkspaceFiles: (id) => api.get(`/tts-studio/workspaces/${id}/files`),
+  getFileContent: (id, filename) => api.get(`/tts-studio/workspaces/${id}/files/${encodeURIComponent(filename)}/content`),
+  getWorkspaceParams: (id) => api.get(`/tts-studio/workspaces/${id}/params`),
+  updateWorkspaceParams: (id, params) => api.put(`/tts-studio/workspaces/${id}/params`, { params }),
+  openOutputDir: (id, outputDir) => api.post(`/tts-studio/workspaces/${id}/open-output-dir`, { output_dir: outputDir }),
+  openFileInPlayer: (filePath) => api.post('/tts-studio/open-file', { file_path: filePath }),
+  uploadWorkspaceFiles: (id, formData) => api.post(`/tts-studio/workspaces/${id}/files`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteWorkspaceFiles: (id, filenames) => api.delete(`/tts-studio/workspaces/${id}/files`, { data: { filenames } }),
+  updateFileStatus: (id, filename, status) => api.put(`/tts-studio/workspaces/${id}/files/status`, { filename, status }),
+  deleteCompletedFiles: (id) => api.delete(`/tts-studio/workspaces/${id}/files/completed`),
+  getEngineContracts: () => api.get('/tts-studio/engine-contracts'),
+  getEngineRuntimeConfig: (engineType) => api.get('/tts-studio/engine-runtime-config', { params: { engine_type: engineType } }),
+  setEngineRuntimeConfig: (engineType, key, value) => api.put('/tts-studio/engine-runtime-config', { engine_type: engineType, key, value }),
+  getEngineMemory: (engineType) => api.get('/tts-studio/engine-memory', { params: { engine_type: engineType } }),
+  getTtsConfig: () => api.get('/tts-studio/config'),
+  setTtsConfig: (config) => api.put('/tts-studio/config', config),
+  startEngine: (engineType) => api.post(`/tts-studio/engines/${encodeURIComponent(engineType)}/start`),
+  stopEngine: (engineType) => api.post(`/tts-studio/engines/${encodeURIComponent(engineType)}/stop`),
 };
 
 export default api;

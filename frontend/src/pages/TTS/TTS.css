@@ -42,7 +42,7 @@
   font-size: 14px; font-weight: 600;
   margin-bottom: 12px;
   color: var(--ant-color-text, inherit);
-  padding: 16px 16px 0;
+  padding: 0;
 }
 .tts-col-mid .tts-section-title { padding: 0; }
 
