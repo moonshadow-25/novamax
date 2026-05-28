@@ -101,6 +101,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [ttsStatus, setTtsStatus] = useState('idle');
   const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
   const [ttsModelMissing, setTtsModelMissing] = useState(false);
+  const [ttsModelDownloading, setTtsModelDownloading] = useState(false);
   const ttsInstallModeRef = useRef(false); // true = 首次安装引擎+模型，false = 更新引擎
 
   useEffect(() => {
@@ -1176,9 +1177,12 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           <div style={{ display: 'flex', gap: 8 }}>
             {ttsStatus === 'error' ? (
               <Button type="primary" icon={<DownloadOutlined />} block style={{ flex: 1 }}
+                loading={ttsModelDownloading}
+                disabled={ttsModelDownloading}
                 onClick={async () => {
                   // 模型文件缺失但引擎已安装 → 直接下载模型，跳过引擎安装
                   if (ttsModelMissing) {
+                    setTtsModelDownloading(true);
                     try {
                       const filesStatus = await ttsService.getFilesStatus(model.id);
                       const files = filesStatus?.files || [];
@@ -1189,10 +1193,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                           await ttsService.downloadFile(model.id, f.filename || f.name);
                         }
                         message.success({ content: '模型下载完成', key: 'tts-model-dl' });
-                        onUpdate();
                       }
+                      setTtsModelMissing(false);
+                      setTtsStatus('idle');
+                      onUpdate();
                     } catch (e) {
                       message.error('模型下载失败，请重试');
+                    } finally {
+                      setTtsModelDownloading(false);
                     }
                     return;
                   }
