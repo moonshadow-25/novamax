@@ -2,6 +2,7 @@ import React from 'react';
 import { Layout, Typography, Button } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
@@ -9,6 +10,7 @@ const { Title } = Typography;
 function Settings() {
   const navigate = useNavigate();
   const { modelId } = useParams();
+  const { t } = useTranslation('settings');
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -18,10 +20,10 @@ function Settings() {
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate('/')}
         />
-        <Title level={4} style={{ display: 'inline', marginLeft: 16 }}>模型设置</Title>
+        <Title level={4} style={{ display: 'inline', marginLeft: 16 }}>{t('modelSettings')}</Title>
       </Header>
       <Content style={{ padding: 24 }}>
-        <div>设置界面开发中... (Model ID: {modelId})</div>
+        <div>{t('settingsInProgress', { modelId })}</div>
       </Content>
     </Layout>
   );

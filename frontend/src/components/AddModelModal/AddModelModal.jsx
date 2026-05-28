@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Tabs, Input, List, Button, message, Radio, Space, Alert, Typography, Tag, Form, Select } from 'antd';
 import { SearchOutlined, LinkOutlined, LoadingOutlined, DownOutlined, UpOutlined, FolderOpenOutlined, CloudOutlined } from '@ant-design/icons';
 import { modelscopeService, modelService, systemService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 import ModelPreviewDialog from './ModelPreviewDialog';
 import AddWorkflowTab from './AddWorkflowTab';
 import AddWhisperModal from './AddWhisperModal';
@@ -13,6 +14,7 @@ const { Option } = Select;
 const INITIAL_DISPLAY_COUNT = 8;
 
 function AddModelModal({ visible, type, onClose, onSuccess }) {
+  const { t } = useTranslation('home');
   const [activeTab, setActiveTab] = useState('modelscope');
   const [inputMode, setInputMode] = useState('search'); // 'url' | 'search'
   const [urlInput, setUrlInput] = useState('');
@@ -38,15 +40,15 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   // 云API模型相关状态
   const CLOUD_PLATFORMS = [
-    { label: '阿里云百炼', value: '阿里云百炼', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-    { label: '文心一言', value: '文心一言', url: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1' },
-    { label: '豆包', value: '豆包', url: 'https://ark.cn-beijing.volces.com/api/v3' },
-    { label: '智谱开放平台', value: '智谱开放平台', url: 'https://open.bigmodel.cn/api/paas/v4' },
-    { label: '腾讯混元', value: '腾讯混元', url: 'https://api.hunyuan.cloud.tencent.com/v1' },
-    { label: '硅基流动', value: '硅基流动', url: 'https://api.siliconflow.cn/v1' },
-    { label: '深度求索', value: '深度求索', url: 'https://api.deepseek.com/v1' },
-    { label: '月之暗面', value: '月之暗面', url: 'https://api.moonshot.cn/v1' },
-    { label: '其他', value: '其他', url: '' },
+    { label: t('addModelModal.platform.aliyun'), value: t('addModelModal.platform.aliyun'), url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+    { label: t('addModelModal.platform.ernie'), value: t('addModelModal.platform.ernie'), url: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1' },
+    { label: t('addModelModal.platform.doubao'), value: t('addModelModal.platform.doubao'), url: 'https://ark.cn-beijing.volces.com/api/v3' },
+    { label: t('addModelModal.platform.zhipu'), value: t('addModelModal.platform.zhipu'), url: 'https://open.bigmodel.cn/api/paas/v4' },
+    { label: t('addModelModal.platform.hunyuan'), value: t('addModelModal.platform.hunyuan'), url: 'https://api.hunyuan.cloud.tencent.com/v1' },
+    { label: t('addModelModal.platform.siliconflow'), value: t('addModelModal.platform.siliconflow'), url: 'https://api.siliconflow.cn/v1' },
+    { label: t('addModelModal.platform.deepseek'), value: t('addModelModal.platform.deepseek'), url: 'https://api.deepseek.com/v1' },
+    { label: t('addModelModal.platform.moonshot'), value: t('addModelModal.platform.moonshot'), url: 'https://api.moonshot.cn/v1' },
+    { label: t('addModelModal.platform.other'), value: t('addModelModal.platform.other'), url: '' },
   ];
   const [cloudName, setCloudName] = useState('');
   const [cloudPlatform, setCloudPlatform] = useState(null);
@@ -93,10 +95,10 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
   // 验证 URL
   const validateUrl = (url) => {
     if (!url || url.trim().length === 0) {
-      return 'URL 不能为空';
+      return t('addModelModal.urlRequired');
     }
     if (!url.includes('modelscope.cn/models/')) {
-      return 'URL 必须是 ModelScope 模型链接';
+      return t('addModelModal.urlMustBeModelscope');
     }
     return null;
   };
@@ -121,10 +123,10 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         setPreviewConfig(response.config);
         setPreviewVisible(true);
       } else {
-        setError(response.error || '解析失败');
+        setError(response.error || t('addModelModal.parseFailed'));
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || err.message || '解析 URL 失败';
+      const errorMsg = err.response?.data?.error || err.message || t('addModelModal.parseUrlFailed');
       setError(errorMsg);
       message.error(errorMsg);
     } finally {
@@ -153,13 +155,13 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         setTotalCount(response.totalCount || 0);
         setShowAllResults(false); // 重置展开状态
         if (response.models.length === 0) {
-          setError('未找到匹配的模型');
+          setError(t('addModelModal.noMatchedModels'));
         }
       } else {
-        setError(response.error || '搜索失败');
+        setError(response.error || t('addModelModal.searchFailed'));
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || err.message || '搜索失败';
+      const errorMsg = err.response?.data?.error || err.message || t('addModelModal.searchFailed');
       setError(errorMsg);
       message.error(errorMsg);
     } finally {
@@ -198,7 +200,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
       const response = await modelscopeService.confirmModel(config);
 
       if (response.success) {
-        message.success('模型添加成功');
+        message.success(t('addModelModal.modelAddSuccess'));
         setPreviewVisible(false);
         handleClose();
         // 异步生成 AI 描述
@@ -209,21 +211,21 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
           onSuccess(response.model);
         }
       } else {
-        message.error(response.error || '保存模型失败');
+        message.error(response.error || t('addModelModal.saveModelFailed'));
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || err.message || '保存模型失败';
+      const errorMsg = err.response?.data?.error || err.message || t('addModelModal.saveModelFailed');
       message.error(errorMsg);
     }
   };
 
   // 云 API 连接测试
   const handleTestCloudApiConnection = async () => {
-    if (!cloudName.trim()) { setCloudError('模型名称不能为空'); return false; }
-    if (!cloudPlatform) { setCloudError('请选择云平台'); return false; }
-    if (!cloudApiUrl.trim()) { setCloudError('API基础URL不能为空'); return false; }
-    if (!cloudApiKey.trim()) { setCloudError('API密钥不能为空'); return false; }
-    if (!cloudApiModel.trim()) { setCloudError('API模型标识不能为空'); return false; }
+    if (!cloudName.trim()) { setCloudError(t('addModelModal.modelNameRequired')); return false; }
+    if (!cloudPlatform) { setCloudError(t('addModelModal.selectCloudPlatform')); return false; }
+    if (!cloudApiUrl.trim()) { setCloudError(t('addModelModal.apiBaseUrlRequired')); return false; }
+    if (!cloudApiKey.trim()) { setCloudError(t('addModelModal.apiKeyRequired')); return false; }
+    if (!cloudApiModel.trim()) { setCloudError(t('addModelModal.apiModelIdRequired')); return false; }
 
     setCloudTestLoading(true);
     setCloudError('');
@@ -236,14 +238,14 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
       if (response.success) {
         setCloudTested(true);
-        message.success('云API连接测试成功');
+        message.success(t('addModelModal.cloudConnectSuccess'));
         return true;
       }
 
-      setCloudError(response.error || '连接测试失败');
+      setCloudError(response.error || t('addModelModal.testConnectionFailed'));
       return false;
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message || '连接测试失败';
+      const errMsg = err.response?.data?.error || err.message || t('addModelModal.testConnectionFailed');
       setCloudError(errMsg);
       return false;
     } finally {
@@ -270,14 +272,14 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         description: cloudDesc.trim() || cloudName.trim(),
       });
       if (response.success) {
-        message.success('云API模型添加成功');
+        message.success(t('addModelModal.cloudAddSuccess'));
         handleClose();
         if (onSuccess) onSuccess(response.model);
       } else {
-        setCloudError(response.error || '添加失败');
+        setCloudError(response.error || t('addModelModal.addFailed'));
       }
     } catch (err) {
-      setCloudError(err.response?.data?.error || err.message || '添加失败');
+      setCloudError(err.response?.data?.error || err.message || t('addModelModal.addFailed'));
     } finally {
       setCloudLoading(false);
     }
@@ -293,7 +295,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         setCustomError('');
       }
     } catch (err) {
-      message.error('打开文件夹选择器失败');
+      message.error(t('addModelModal.pickFolderFailed'));
     } finally {
       setBrowseLoading(false);
     }
@@ -302,11 +304,11 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
   // 添加自定义模型
   const handleAddCustomModel = async () => {
     if (!customName.trim()) {
-      setCustomError('模型名称不能为空');
+      setCustomError(t('addModelModal.modelNameRequired'));
       return;
     }
     if (!customPath.trim()) {
-      setCustomError('请选择模型文件夹');
+      setCustomError(t('addModelModal.modelFolderRequired'));
       return;
     }
     setCustomLoading(true);
@@ -319,14 +321,14 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         type: type || 'llm'
       });
       if (response.success) {
-        message.success('自定义模型添加成功');
+        message.success(t('addModelModal.customAddSuccess'));
         handleClose();
         if (onSuccess) onSuccess(response.model);
       } else {
-        setCustomError(response.error || '添加失败');
+        setCustomError(response.error || t('addModelModal.addFailed'));
       }
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message || '添加失败';
+      const errMsg = err.response?.data?.error || err.message || t('addModelModal.addFailed');
       setCustomError(errMsg);
     } finally {
       setCustomLoading(false);
@@ -343,7 +345,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
         />
       ) : (
         <Modal
-          title="添加新模型"
+          title={t('addModelModal.title')}
           open={visible}
           onCancel={handleClose}
           footer={null}
@@ -356,7 +358,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
           {type === 'comfyui' ? (
             <AddWorkflowTab
               onSuccess={(model) => {
-                message.success('工作流添加成功');
+                message.success(t('addModelModal.workflowAddSuccess'));
                 handleClose();
                 if (onSuccess) {
                   onSuccess(model);
@@ -370,9 +372,9 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                 activeKey={activeTab}
                 onChange={setActiveTab}
                 items={[
-                  { key: 'modelscope', label: 'ModelScope' },
-                  { key: 'custom', label: '自定义' },
-                  { key: 'cloudapi', label: '云API' },
+                  { key: 'modelscope', label: t('addModelModal.tabModelscope') },
+                  { key: 'custom', label: t('addModelModal.tabCustom') },
+                  { key: 'cloudapi', label: t('addModelModal.tabCloudApi') },
                 ]}
               />
 
@@ -388,8 +390,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                       setSearchResults([]);
                     }}
                   >
-                    <Radio.Button value="search">名称搜索</Radio.Button>
-                    <Radio.Button value="url">URL 输入</Radio.Button>
+                    <Radio.Button value="search">{t('addModelModal.searchByName')}</Radio.Button>
+                    <Radio.Button value="url">{t('addModelModal.urlInput')}</Radio.Button>
                   </Radio.Group>
 
                   {/* URL 输入模式 */}
@@ -412,7 +414,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                         loading={loading}
                         icon={loading ? <LoadingOutlined /> : null}
                       >
-                        解析 URL
+                        {t('addModelModal.parseUrl')}
                       </Button>
                     </Space.Compact>
                   )}
@@ -421,7 +423,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                   {inputMode === 'search' && (
                     <>
                       <Input
-                        placeholder="输入模型名称 (例如: Qwen3.5) - 自动搜索"
+                        placeholder={t('addModelModal.searchPlaceholder')}
                         prefix={<SearchOutlined />}
                         suffix={loading && <LoadingOutlined />}
                         value={searchQuery}
@@ -436,8 +438,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                           <div style={{ marginTop: 8 }}>
                             <Space>
                               <Text type="secondary">
-                                找到 {totalCount} 个模型
-                                {searchResults.length < totalCount && ` (显示前 30 个)`}
+                                {t('addModelModal.searchResultCount', { count: totalCount })}
+                                {searchResults.length < totalCount && ` ${t('addModelModal.showingFirst30')}`}
                               </Text>
                             </Space>
                           </div>
@@ -467,8 +469,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                                 onClick={() => setShowAllResults(!showAllResults)}
                               >
                                 {showAllResults
-                                  ? '收起'
-                                  : `显示更多 (还有 ${searchResults.length - INITIAL_DISPLAY_COUNT} 个)`
+                                  ? t('addModelModal.collapse')
+                                  : t('addModelModal.showMore', { count: searchResults.length - INITIAL_DISPLAY_COUNT })
                                 }
                               </Button>
                             </div>
@@ -494,17 +496,17 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
             {activeTab === 'custom' && (
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <Form layout="vertical" style={{ marginTop: 8 }}>
-                  <Form.Item label="模型名称" required>
+                  <Form.Item label={t('addModelModal.modelName')} required>
                     <Input
-                      placeholder="请输入模型显示名称（如：My-Qwen3.5-35B）"
+                      placeholder={t('addModelModal.inputCustomModelName')}
                       value={customName}
                       onChange={(e) => { setCustomName(e.target.value); setCustomError(''); }}
                     />
                   </Form.Item>
-                  <Form.Item label="模型文件夹" required extra="选择包含 .gguf 文件的文件夹">
+                  <Form.Item label={t('addModelModal.modelFolder')} required extra={t('addModelModal.modelFolderHint')}>
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
-                        placeholder="请输入模型文件夹路径（例如：D:\models\Qwen3.5-35B）"
+                        placeholder={t('addModelModal.inputModelFolderPath')}
                         value={customPath}
                         onChange={(e) => { setCustomPath(e.target.value); setCustomError(''); }}
                       />
@@ -513,13 +515,13 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                         loading={browseLoading}
                         onClick={handleBrowseFolder}
                       >
-                        浏览
+                        {t('addModelModal.browse')}
                       </Button>
                     </Space.Compact>
                   </Form.Item>
-                  <Form.Item label="模型说明">
+                  <Form.Item label={t('addModelModal.modelDescription')}>
                     <Input.TextArea
-                      placeholder="输入模型说明，未输入时显示模型名称（可选）"
+                      placeholder={t('addModelModal.inputDescription')}
                       rows={3}
                       value={customDesc}
                       onChange={(e) => setCustomDesc(e.target.value)}
@@ -540,23 +542,23 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                   loading={customLoading}
                   onClick={handleAddCustomModel}
                 >
-                  确认添加
+                  {t('addModelModal.confirmAdd')}
                 </Button>
               </Space>
             )}
             {activeTab === 'cloudapi' && (
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <Form layout="vertical" style={{ marginTop: 8 }}>
-                  <Form.Item label="模型名称" required>
+                  <Form.Item label={t('addModelModal.modelName')} required>
                     <Input
-                      placeholder="请输入模型显示名称（如：qwen-plus）"
+                      placeholder={t('addModelModal.inputModelName')}
                       value={cloudName}
                       onChange={(e) => { setCloudName(e.target.value); setCloudError(''); setCloudTested(false); }}
                     />
                   </Form.Item>
-                  <Form.Item label="云平台名称" required>
+                  <Form.Item label={t('addModelModal.cloudPlatformName')} required>
                     <Select
-                      placeholder="请选择云平台"
+                      placeholder={t('addModelModal.selectCloudPlatform')}
                       value={cloudPlatform}
                       onChange={(val) => {
                         setCloudPlatform(val);
@@ -571,30 +573,30 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                       ))}
                     </Select>
                   </Form.Item>
-                  <Form.Item label="API基础URL" required>
+                  <Form.Item label={t('addModelModal.apiBaseUrl')} required>
                     <Input
-                      placeholder="请输入自定义API地址"
+                      placeholder={t('addModelModal.inputApiBaseUrl')}
                       value={cloudApiUrl}
                       onChange={(e) => { setCloudApiUrl(e.target.value); setCloudError(''); }}
                     />
                   </Form.Item>
-                  <Form.Item label="API密钥" required>
+                  <Form.Item label={t('addModelModal.apiKey')} required>
                     <Input.Password
-                      placeholder="请输入API密钥"
+                      placeholder={t('addModelModal.inputApiKey')}
                       value={cloudApiKey}
                       onChange={(e) => { setCloudApiKey(e.target.value); setCloudError(''); }}
                     />
                   </Form.Item>
-                  <Form.Item label="API模型标识" required>
+                  <Form.Item label={t('addModelModal.apiModelId')} required>
                     <Input
-                      placeholder="请输入API模型标识（如：qwen-plus）"
+                      placeholder={t('addModelModal.inputApiModelId')}
                       value={cloudApiModel}
                       onChange={(e) => { setCloudApiModel(e.target.value); setCloudError(''); }}
                     />
                   </Form.Item>
-                  <Form.Item label="模型说明">
+                  <Form.Item label={t('addModelModal.modelDescription')}>
                     <Input.TextArea
-                      placeholder="输入模型说明，未输入时显示模型名称（可选）"
+                      placeholder={t('addModelModal.inputDescription')}
                       rows={2}
                       value={cloudDesc}
                       onChange={(e) => { setCloudDesc(e.target.value); setCloudTested(false); }}
@@ -611,7 +613,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                 )}
                 {cloudTested && (
                   <Alert
-                    message="连接测试已通过，可直接添加"
+                    message={t('addModelModal.cloudTestPassed')}
                     type="success"
                     showIcon
                     style={{ marginBottom: 8 }}
@@ -625,7 +627,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                     loading={cloudTestLoading}
                     onClick={handleTestCloudApiConnection}
                   >
-                    测试连接
+                    {t('addModelModal.testConnection')}
                   </Button>
                   <Button
                     type="primary"
@@ -633,7 +635,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
                     loading={cloudLoading}
                     onClick={handleAddCloudApiModel}
                   >
-                    确认添加
+                    {t('addModelModal.confirmAdd')}
                   </Button>
                 </Space>
               </Space>
