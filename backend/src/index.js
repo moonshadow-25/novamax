@@ -16,6 +16,7 @@ import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
 import ttsWorkerManager from './tts/ttsWorkerManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
+import novaAirouterRegistrar from './services/novaAirouterRegistrar.js';
 import { PROJECT_ROOT } from './config/constants.js';
 
 import modelsRouter from './routes/models.js';
@@ -61,6 +62,7 @@ async function init() {
   }
 
   ttsWorkerManager.start();
+  novaAirouterRegistrar.init();
   comfyuiInstanceManager.init();
 
   // 一次性清理所有临时状态字段（重构后不再需要持久化这些字段）
@@ -212,6 +214,11 @@ console.log("=".repeat(50));
 
 async function gracefulShutdown(signal) {
   console.log(`\n[${signal}] Shutting down, deregistering services...`);
+  try {
+    await novaAirouterRegistrar.dispose();
+  } catch (err) {
+    console.warn('[shutdown] Error during airouter deregistration:', err.message);
+  }
   try {
     await processManager.shutdown();
   } catch (err) {
