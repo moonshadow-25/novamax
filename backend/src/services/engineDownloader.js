@@ -341,8 +341,13 @@ class EngineDownloader {
 
       const proc = spawn(this.pythonPath, args, {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        stdio: ['pipe', 'pipe', 'pipe']
       });
+
+      // 必须消费 stdout，防止管道缓冲区满导致子进程阻塞
+      let stdout = '';
+      proc.stdout.on('data', (data) => { stdout += data.toString(); });
 
       let stderr = '';
 
@@ -366,7 +371,15 @@ class EngineDownloader {
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`Download failed with code ${code}`));
+          // 尝试从 stdout JSON 中提取错误信息
+          let detail = stderr.trim();
+          if (!detail) {
+            try {
+              const json = JSON.parse(stdout.trim());
+              detail = json.error || json.message || '';
+            } catch {}
+          }
+          reject(new Error(detail || `Download failed with code ${code}`));
         }
       });
 
