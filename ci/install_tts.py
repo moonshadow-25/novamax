@@ -57,14 +57,15 @@ def run(cmd, cwd=None, check=True, env=None, stream=False):
 
 
 def detect_variant(install_root):
-    """从 install_root 路径判断 TTS 变体（tts2 或 tts15）"""
+    """从 install_root 路径判断 TTS 变体"""
     normalized = install_root.replace('\\', '/').lower()
-    # 先匹配 tts2，避免 tts1.5 中的子串误匹配
+    if 'omnivoice' in normalized:
+        return 'omnivoice'
     if 'index-tts2' in normalized or 'index_tts2' in normalized or 'indextts2' in normalized:
         return 'tts2'
     if 'index-tts1' in normalized or 'index_tts1' in normalized or 'indextts1' in normalized or 'tts1.5' in normalized:
         return 'tts15'
-    raise RuntimeError(f"无法从路径判断 TTS 变体（tts2/tts1.5）：{install_root}")
+    raise RuntimeError(f"无法从路径判断 TTS 变体：{install_root}")
 
 
 def main():
@@ -96,7 +97,11 @@ def main():
     print("[2/4] Detecting engine variant...")
     variant = detect_variant(install_root)
     MODELSCOPE_REPO = 'shoujiekeji/Novastudio3.0'
-    if variant == 'tts2':
+    if variant == 'omnivoice':
+        variant_id = 'omnivoice'
+        variant_name = 'OmniVoice'
+        default_engine_file = 'tts/engines/omnivoice_engine.zip'
+    elif variant == 'tts2':
         variant_id = 'indextts2'
         variant_name = 'IndexTTS 2.0'
         default_engine_file = 'tts/engines/index_tts2_engine.zip'
