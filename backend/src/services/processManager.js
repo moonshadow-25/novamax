@@ -213,7 +213,8 @@ class ProcessManager {
         eventBus.broadcast('model-updated', { modelId });
         const embedding = isEmbeddingModel(model);
         const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-        register(port).catch((err) =>
+        const maxConc = effectiveParams.parallel || 1;
+        register(port, maxConc).catch((err) =>
           console.warn(`[service-registrar] CloudAPI registration failed: ${err.message}`)
         );
       }
@@ -456,7 +457,8 @@ class ProcessManager {
       await startupResult;
       const embedding = isEmbeddingModel(model);
       const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-      register(port).catch((err) =>
+      const maxConc = effectiveParams.parallel || 1;
+      register(port, maxConc).catch((err) =>
         console.warn(`[service-registrar] Single model registration failed: ${err.message}`)
       );
 
@@ -527,13 +529,18 @@ class ProcessManager {
 
     const hasEmbedding = downloadedModels.some(isEmbeddingModel);
     const hasChat = downloadedModels.some((model) => !isEmbeddingModel(model));
+    // 路由并发 = 所有已加载模型的 parallel 之和
+    const routerMaxConc = downloadedModels.reduce((sum, m) => {
+      const params = parameterService.getEffectiveParameters(m);
+      return sum + (params.parallel || 1);
+    }, 0);
     if (hasEmbedding) {
-      registerEmbeddingsService(router.port).catch((err) =>
+      registerEmbeddingsService(router.port, routerMaxConc).catch((err) =>
         console.warn(`[service-registrar] Router embeddings registration failed: ${err.message}`)
       );
     }
     if (hasChat) {
-      registerChatCompletionService(router.port).catch((err) =>
+      registerChatCompletionService(router.port, routerMaxConc).catch((err) =>
         console.warn(`[service-registrar] Router chat registration failed: ${err.message}`)
       );
     }
@@ -576,7 +583,8 @@ class ProcessManager {
       if (loadedModel?.status?.value === 'loaded') {
         const embedding = isEmbeddingModel(model);
         const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-        register(router.port).catch((err) =>
+        const params = parameterService.getEffectiveParameters(model);
+        register(router.port, params.parallel || 1).catch((err) =>
           console.warn(`[service-registrar] Router model registration failed: ${err.message}`)
         );
         return { port: router.port, status: MODEL_STATUS.RUNNING, mode: 'router' };

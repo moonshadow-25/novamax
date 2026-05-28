@@ -42,44 +42,8 @@ const HEARTBEAT_LOG_ENABLED = String(process.env.SERVICE_HEARTBEAT_LOG || '').to
  */
 const registeredServices = new Map();
 
-/** 生成本地缓存 key */
-function getServiceKey(port, nodePath) {
-  return `${port}:${nodePath}`;
-}
-
-/**
- * 向网关注册一个端点。
- * 使用精确匹配模式（service_path 和 node_path 均不以 / 结尾）。
- * @param {{port: number, nodePath: string, servicePath: string}} options
- * @returns {Promise<string>} service_id
- */
-async function registerEndpoint({ port, nodePath, servicePath }) {
-  const payload = [{
-    service_path: servicePath,
-    node_path: nodePath,
-    max_concurrent: 1
-  }];
-
-  const response = await axios.post(`${ADMIN_URL}/v1/endpoints`, payload, {
-    timeout: 5000,
-    headers: { 'Content-Type': 'application/json' }
-  });
-
-  if (response.status !== 200) {
-    throw new Error(`Admin registration failed: ${response.status} ${response.statusText}`);
-  }
-
-  const serviceId = response.data?.service_id;
-  if (!serviceId) {
-    throw new Error('Admin registration returned no service_id');
-  }
-
-  return serviceId;
-}
-
 /**
  * 向网关发送一次心跳，表示服务健康。
- * @param {string} serviceId
  */
 async function sendHeartbeat(serviceId) {
   if (!serviceId) {
@@ -128,46 +92,65 @@ function startHeartbeat(serviceId) {
  * @param {boolean} isEmbedding  true → 注册 /v1/embeddings，false → 注册 /v1/chat/completions
  * @returns {Promise<object|null>} serviceInfo，失败时返回 null（不抛出，避免中断主流程）
  */
-export async function registerLLMService(port, isEmbedding = false) {
-  const nodePath = isEmbedding ? '/v1/embeddings' : '/v1/chat/completions';
-  const servicePath = `${port}${nodePath}`;
-  const key = getServiceKey(port, nodePath);
+/**
+ * 批量注册一组端点，共享一个 service_id。
+ * @param {number} port
+ * @param {Array<{nodePath: string, maxConcurrent: number}>} endpoints
+ * @param {string} cacheKey - 本地缓存 key 前缀（如 "chat" 或 "embedding"）
+ * @returns {Promise<object|null>}
+ */
+async function registerEndpoints(port, endpoints, cacheKey) {
+  const key = `${port}:${cacheKey}`;
 
   if (registeredServices.has(key)) {
     return registeredServices.get(key);
   }
 
-  const serviceInfo = {
-    port,
-    nodePath,
-    servicePath,
-    // service_id 由网关返回，表示已成功注册的服务记录
-    serviceId: null,
-    // 心跳定时器句柄，用于停止时清理定时器
-    heartbeatTimer: null
-  };
+  const payload = endpoints.map(ep => ({
+    service_path: `${port}${ep.nodePath}`,
+    node_path: ep.nodePath,
+    max_concurrent: ep.maxConcurrent
+  }));
 
   try {
-    const serviceId = await registerEndpoint({ port, nodePath, servicePath });
-    serviceInfo.serviceId = serviceId;
+    const response = await axios.post(`${ADMIN_URL}/v1/endpoints`, payload, {
+      timeout: 5000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const serviceId = response.data?.service_id;
+    if (!serviceId) {
+      throw new Error('Admin registration returned no service_id');
+    }
+
+    const serviceInfo = { port, endpoints, serviceId, heartbeatTimer: null };
     serviceInfo.heartbeatTimer = startHeartbeat(serviceId);
     registeredServices.set(key, serviceInfo);
-    console.log(`[service-registrar] Registered ${nodePath} on port ${port} with service_id=${serviceId}`);
+
+    const paths = endpoints.map(e => e.nodePath).join(', ');
+    console.log(`[service-registrar] Registered [${paths}] on port ${port} (concurrent: ${endpoints.map(e => e.maxConcurrent).join(',')}), service_id=${serviceId}`);
     return serviceInfo;
   } catch (error) {
-    console.warn(`[service-registrar] Failed to register service on port ${port}: ${error.message}`);
+    console.warn(`[service-registrar] Failed to register endpoints on port ${port}: ${error.message}`);
     return null;
   }
 }
 
-/** 注册 Chat Completion 端点（/v1/chat/completions） */
-export function registerChatCompletionService(port) {
-  return registerLLMService(port, false);
+/** 注册 Chat Completion 端点（/v1/chat/completions + /v1/models + /v1/messages） */
+export function registerChatCompletionService(port, maxConcurrent = 1) {
+  return registerEndpoints(port, [
+    { nodePath: '/v1/chat/completions', maxConcurrent },
+    { nodePath: '/v1/models', maxConcurrent: 100 },
+    { nodePath: '/v1/messages', maxConcurrent },
+  ], 'chat');
 }
 
-/** 注册 Embeddings 端点（/v1/embeddings） */
-export function registerEmbeddingsService(port) {
-  return registerLLMService(port, true);
+/** 注册 Embeddings 端点（/v1/embeddings + /v1/models） */
+export function registerEmbeddingsService(port, maxConcurrent = 1) {
+  return registerEndpoints(port, [
+    { nodePath: '/v1/embeddings', maxConcurrent },
+    { nodePath: '/v1/models', maxConcurrent: 100 },
+  ], 'embedding');
 }
 
 /** 返回当前所有已注册服务的快照列表 */
@@ -179,18 +162,19 @@ export function getRegisteredServices() {
  * 确保指定端口+类型已注册；若本地缓存缺失则自动补注册。
  */
 export async function ensureServiceRegistration(port, isEmbedding = false) {
-  const nodePath = isEmbedding ? '/v1/embeddings' : '/v1/chat/completions';
-  const key = getServiceKey(port, nodePath);
+  const cacheKey = isEmbedding ? 'embedding' : 'chat';
+  const key = `${port}:${cacheKey}`;
   if (registeredServices.has(key)) {
     return registeredServices.get(key);
   }
-  return registerLLMService(port, isEmbedding);
+  if (isEmbedding) {
+    return registerEmbeddingsService(port);
+  }
+  return registerChatCompletionService(port);
 }
 
 /**
  * 向网关发送 DELETE 请求，主动注销指定 service_id 下的所有端点。
- * 该方法仅负责发送注销请求，不负责清理本地缓存与心跳定时器。
- * @param {string} serviceId
  */
 async function deregisterEndpoint(serviceId) {
   await axios.delete(`${ADMIN_URL}/v1/endpoints?service_id=${encodeURIComponent(serviceId)}`, {
@@ -199,18 +183,11 @@ async function deregisterEndpoint(serviceId) {
 }
 
 /**
- * 停止指定端口+类型的服务注册：
- *   1. 清除心跳定时器
- *   2. 从本地缓存移除
- *   3. 向网关发送注销请求
- *
- * @param {number} port
- * @param {boolean} isEmbedding
- * @returns {Promise<boolean>} 服务存在并已注销返回 true，不存在返回 false
+ * 停止指定端口+类型的服务注册。
  */
 export async function stopServiceRegistration(port, isEmbedding = false) {
-  const nodePath = isEmbedding ? '/v1/embeddings' : '/v1/chat/completions';
-  const key = getServiceKey(port, nodePath);
+  const cacheKey = isEmbedding ? 'embedding' : 'chat';
+  const key = `${port}:${cacheKey}`;
   const info = registeredServices.get(key);
   if (!info) return false;
   if (info.heartbeatTimer) clearInterval(info.heartbeatTimer);
@@ -228,8 +205,6 @@ export async function stopServiceRegistration(port, isEmbedding = false) {
 
 /**
  * 批量注销所有已注册服务，用于主进程退出时的清理。
- * 使用 Promise.allSettled 确保单个注销失败不影响其他服务的注销。
- * 完成后清空本地缓存。
  */
 export async function deregisterAllServices() {
   const services = Array.from(registeredServices.values());
