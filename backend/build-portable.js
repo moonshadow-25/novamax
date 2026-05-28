@@ -272,10 +272,8 @@ if (fs.existsSync(dataSrc)) {
 
 // 创建运行时必需的子目录
 const runtimeDirs = [
-  'tts_services/voices',
   'tts_services/workspaces',
   'tts_services/reference_audio',
-  'tts_services/history',
   'logs',
   'updates',
   'downloads',
