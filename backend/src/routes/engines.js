@@ -92,7 +92,6 @@ async function getOrderedEngine(engineId, engine) {
   const gpus = await getGpuInfo({ namesOnly: true }).catch(() => null);
   return orderLlamacppEngine(engine, gpus);
 }
-}
 
 /**
  * 获取所有引擎列表（含安装状态和下载状态）
