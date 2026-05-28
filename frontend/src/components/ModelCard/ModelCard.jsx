@@ -309,6 +309,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const handleStart = async () => {
+    if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
       // LLM 模型启动前检查 llamacpp 引擎（云API不需要）
@@ -380,6 +381,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const doStartModel = async () => {
+    if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
       await backendService.start(model.id, 'single');
@@ -864,21 +866,21 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     if (!quantName) return '';
 
     // 尝试匹配常见的量化类型模式（在字符串末尾）
-    const match = quantName.match(/(Q\d+_[KM]_[MS]|Q\d+_[KM]|Q\d+_\d+|IQ\d+_[A-Z]+|BF16|F16|F32)$/i);
+    const fullPattern = /((?:UD-)?(?:Q|IQ)\w+(?:_[A-Z]+)?|BF16|F16|F32|MXFP4_MOE(?:_(?:BF16|F16|16))?|APEX(?:-I)?-(?:BALANCED|COMPACT|MINI|QUALITY))$/i;
+    const match = quantName.match(fullPattern);
     if (match) {
       return match[1].toUpperCase();
     }
 
-    // 如果没有匹配到，尝试从下划线分隔的最后一部分提取
-    const parts = quantName.split(/[-_]/);
-    const lastPart = parts[parts.length - 1];
-
-    // 检查最后一部分是否看起来像量化类型
-    if (/^(Q\d+|IQ\d+|BF16|F16|F32)/i.test(lastPart)) {
-      return lastPart.toUpperCase();
+    // 如果没匹配到且名称过长，取最后一个分隔段
+    if (quantName.length > 8) {
+      const parts = quantName.split(/[-_]/);
+      const lastPart = parts[parts.length - 1];
+      if (lastPart && lastPart.length <= 12) {
+        return lastPart.toUpperCase();
+      }
     }
 
-    // 如果都失败，返回原始名称
     return quantName;
   };
 
@@ -977,7 +979,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </span>
         ) : <span />}
       </div>
-      <p className="model-description">{model.description || '暂无描述'}</p>
+      {model.description_generating ? (
+        <p className="model-description" style={{ color: '#999' }}>
+          <LoadingOutlined style={{ marginRight: 6 }} />
+          AI 正在生成描述...
+        </p>
+      ) : (
+        <p className="model-description" title={model.description || ''}>{model.description || '暂无描述'}</p>
+      )}
 
       <div className="model-card-footer">
       {/* 显示量化版本信息和模型大小 */}

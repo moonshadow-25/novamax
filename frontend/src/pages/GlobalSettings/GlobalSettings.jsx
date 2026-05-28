@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Tabs } from 'antd';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Tabs, Collapse } from 'antd';
 import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService, ttsStudioService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
 import { normalizeEngineType } from '../../utils/engineType';
@@ -17,6 +18,7 @@ const { Text } = Typography;
 const GlobalSettings = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation('globalSettings');
   const { token } = theme.useToken();
   const [form] = Form.useForm();
   const [checking, setChecking] = useState(false);
@@ -192,7 +194,7 @@ const GlobalSettings = () => {
     if (appDownloadState?.status === 'restarting') {
       setRestarting(true);
     } else if (appDownloadState?.status === 'failed') {
-      message.error(`下载失败: ${appDownloadState.error || '未知错误'}`);
+      message.error(t('messages.downloadFailed', { error: appDownloadState.error || t('common.unknownError') }));
     }
   }, [appDownloadState?.status]);
 
@@ -243,7 +245,7 @@ const GlobalSettings = () => {
         server_url: s.server_url || ''
       });
     } catch (error) {
-      message.error('加载设置失败');
+      message.error(t('messages.loadSettingsFailed'));
       console.error('Failed to load settings:', error);
     }
   };
@@ -288,7 +290,7 @@ const GlobalSettings = () => {
         return latest ? { ...prev, ...latest } : prev;
       });
     } catch (error) {
-      message.error('加载引擎列表失败');
+      message.error(t('messages.loadEnginesFailed'));
       console.error('Failed to load engines:', error);
     }
   };
@@ -335,7 +337,7 @@ const GlobalSettings = () => {
       const data = await systemService.getCacheInfo();
       setCacheInfo(data);
     } catch (e) {
-      message.error('加载缓存信息失败');
+      message.error(t('messages.loadCacheInfoFailed'));
     } finally {
       setCacheLoading(false);
     }
@@ -412,10 +414,10 @@ const GlobalSettings = () => {
       setCacheClearing(clearKey);
       await systemService.clearCache(keys || null);
       await clearBrowserSiteData();
-      message.success('本地缓存和浏览器站点数据已清除');
+      message.success(t('messages.cacheCleared'));
       await loadCacheInfo();
     } catch (e) {
-      message.error('清除缓存失败');
+      message.error(t('messages.clearCacheFailed'));
     } finally {
       setCacheClearing(null);
     }
@@ -440,9 +442,9 @@ const GlobalSettings = () => {
     try {
       await systemService.clearLogs();
       setLogEntries([]);
-      message.success('日志已清空');
+      message.success(t('messages.logsCleared'));
     } catch (e) {
-      message.error('清空失败');
+      message.error(t('messages.clearLogsFailed'));
     }
   };
 
@@ -499,13 +501,13 @@ const GlobalSettings = () => {
     try {
       await systemService.openFolder(dirPath);
     } catch (e) {
-      message.error('打开失败: ' + (e.response?.data?.error || e.message));
+      message.error(t('messages.openFailedWithReason', { reason: e.response?.data?.error || e.message }));
     }
   };
 
   const handleMigrate = async () => {
     if (!migratePath.trim()) {
-      message.warning('请输入目标路径');
+      message.warning(t('migrate.inputTargetPath'));
       return;
     }
     setMigrating(true);
@@ -513,7 +515,7 @@ const GlobalSettings = () => {
     try {
       const res = await systemService.migrateStorage(migrateModal.type, migratePath.trim(), migrateBackup);
       const jobId = res.jobId;
-      await pollJobStatus(jobId, '迁移', (job) => setMigrateProgress({
+      await pollJobStatus(jobId, t('migrate.operationName'), (job) => setMigrateProgress({
         progress: job.progress || 0,
         copiedBytes: job.copiedBytes || 0,
         totalBytes: job.totalBytes || 0,
@@ -526,7 +528,7 @@ const GlobalSettings = () => {
       setMigrateBackup(false);
       loadStorage();
     } catch (e) {
-      message.error(e.response?.data?.error || e.message || '迁移失败');
+      message.error(e.response?.data?.error || e.message || t('migrate.failed'));
     } finally {
       setMigrating(false);
       setMigrateProgress(null);
@@ -540,7 +542,7 @@ const GlobalSettings = () => {
     setRestoreModal(prev => ({ ...prev, step: 'progress' }));
     try {
       const res = await systemService.restoreStorage(type);
-      await pollJobStatus(res.jobId, '还原', (job) => setRestoreProgress({
+      await pollJobStatus(res.jobId, t('restore.operationName'), (job) => setRestoreProgress({
         progress: job.progress || 0,
         copiedBytes: job.copiedBytes || 0,
         totalBytes: job.totalBytes || 0,
@@ -549,7 +551,7 @@ const GlobalSettings = () => {
       }));
       loadStorage();
     } catch (e) {
-      message.error(e.response?.data?.error || e.message || '还原失败');
+      message.error(e.response?.data?.error || e.message || t('restore.failed'));
     } finally {
       setRestoringType(null);
       setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' });
@@ -565,16 +567,16 @@ const GlobalSettings = () => {
         if (onProgress) onProgress(job);
         if (job.status === 'success') {
           clearInterval(interval);
-          message.success(job.message || `${opName}成功`);
+          message.success(job.message || `${opName}${t('common.successSuffix')}`);
           resolve();
         } else if (job.status === 'failed') {
           clearInterval(interval);
-          reject(new Error(job.message || `${opName}失败`));
+          reject(new Error(job.message || `${opName}${t('common.failedSuffix')}`));
         }
         // status === 'running' 继续等待
       } catch (e) {
         clearInterval(interval);
-        reject(new Error(`查询${opName}状态失败`));
+        reject(new Error(t('common.queryStatusFailed', { name: opName })));
       }
     }, 2000);
   });
@@ -582,8 +584,8 @@ const GlobalSettings = () => {
   const handleStopProcess = async (proc) => {
     setStoppingId(proc.id);
     try {
-      if (proc.id === 'novamax-server') {
-        message.warning('无法停止 NovaMax 主服务');
+      if (proc.category === 'system') {
+        message.warning(t('runtime.cannotStopMainService'));
         return;
       }
       if (proc.id.startsWith('tts-engine-')) {
@@ -601,10 +603,10 @@ const GlobalSettings = () => {
       } else {
         await backendService.stop(proc.id);
       }
-      message.success(`已停止 ${proc.name}`);
+      message.success(t('runtime.stoppedProcess', { name: proc.name }));
       loadSystemInfo();
     } catch (e) {
-      message.error(`停止失败: ${e.response?.data?.error || e.message}`);
+      message.error(t('runtime.stopFailed', { reason: e.response?.data?.error || e.message }));
     } finally {
       setStoppingId(null);
     }
@@ -622,19 +624,19 @@ const GlobalSettings = () => {
     const d = Math.floor(seconds / 86400);
     const h = Math.floor((seconds % 86400) / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    if (d > 0) return `${d}天 ${h}小时`;
-    if (h > 0) return `${h}小时 ${m}分钟`;
-    return `${m}分钟`;
+    if (d > 0) return t('runtime.uptimeDayHour', { days: d, hours: h });
+    if (h > 0) return t('runtime.uptimeHourMinute', { hours: h, minutes: m });
+    return t('runtime.uptimeMinute', { minutes: m });
   };
 
   const formatDuration = (startTime) => {
     if (!startTime) return '-';
     const sec = Math.floor((Date.now() - startTime) / 1000);
-    if (sec < 60) return `${sec}秒`;
-    if (sec < 3600) return `${Math.floor(sec / 60)}分${sec % 60}秒`;
+    if (sec < 60) return t('runtime.durationSecond', { seconds: sec });
+    if (sec < 3600) return t('runtime.durationMinuteSecond', { minutes: Math.floor(sec / 60), seconds: sec % 60 });
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
-    return `${h}时${m}分`;
+    return t('runtime.durationHourMinute', { hours: h, minutes: m });
   };
 
   const resolveEngineVersions = (engine) => {
@@ -642,7 +644,11 @@ const GlobalSettings = () => {
     if (Array.isArray(engine.versions) && engine.versions.length > 0) return engine.versions;
     if (Array.isArray(engine.variants)) {
       return engine.variants.flatMap(variant =>
-        (variant.versions || []).map(v => ({ ...v, variant_id: variant.id, variant_name: variant.name }))
+        (variant.versions || []).map(v => ({
+          ...v,
+          variant_id: variant.id,
+          variant_name: variant.name
+        }))
       );
     }
     return [];
@@ -657,12 +663,81 @@ const GlobalSettings = () => {
   const getOrderedInstalledVersions = (engine) => {
     if (!engine) return [];
     const availableVersions = resolveEngineVersions(engine);
+    const availableVersionMap = new Map(
+      availableVersions.map(version => [String(version?.version || ''), version])
+    );
     const installedAndBroken = [
       ...(engine.installed_versions || []).map(v => ({ ...v, broken: false })),
       ...(engine.broken_versions || []).map(v => ({ ...v, broken: true }))
-    ];
+    ].map(version => {
+      const matchedAvailable = availableVersionMap.get(String(version?.version || ''));
+      return matchedAvailable
+        ? {
+            ...version,
+            variant_id: version.variant_id || matchedAvailable.variant_id,
+            variant_name: version.variant_name || matchedAvailable.variant_name
+          }
+        : version;
+    });
 
     return resolveVersionOrder(availableVersions, installedAndBroken).orderedInstalledVersions;
+  };
+
+  const getVersionVariantGroups = (engine, versions = []) => {
+    if (!engine || !Array.isArray(engine.variants) || engine.variants.length === 0) return null;
+
+    const variantMap = new Map(
+      engine.variants.map(variant => [
+        String(variant.id || '').toLowerCase(),
+        {
+          key: variant.id,
+          id: variant.id,
+          name: variant.name || variant.id,
+          versions: []
+        }
+      ])
+    );
+
+    const groups = [];
+    const fallbackGroup = {
+      key: '__ungrouped__',
+      id: '__ungrouped__',
+      name: t('engines.other'),
+      versions: []
+    };
+
+    for (const version of versions) {
+      const variantId = String(version?.variant_id || '').toLowerCase();
+      const directGroup = variantId ? variantMap.get(variantId) : null;
+      if (directGroup) {
+        directGroup.versions.push(version);
+        continue;
+      }
+
+      const matchedGroup = engine.variants.find(variant => {
+        const markers = [
+          String(variant.id || '').toLowerCase(),
+          String(variant.name || '').toLowerCase()
+        ].filter(Boolean);
+        const versionText = String(version?.version || '').toLowerCase();
+        const variantText = String(version?.variant_name || '').toLowerCase();
+        return markers.some(marker => versionText.includes(marker) || variantText.includes(marker));
+      });
+
+      if (matchedGroup) {
+        variantMap.get(String(matchedGroup.id || '').toLowerCase())?.versions.push(version);
+      } else {
+        fallbackGroup.versions.push(version);
+      }
+    }
+
+    for (const variant of engine.variants) {
+      const group = variantMap.get(String(variant.id || '').toLowerCase());
+      if (group?.versions.length) groups.push(group);
+    }
+
+    if (fallbackGroup.versions.length) groups.push(fallbackGroup);
+    return groups.length > 0 ? groups : null;
   };
 
   const resolveEngineRows = () => {
@@ -742,7 +817,7 @@ const GlobalSettings = () => {
 
   const handleCopyExport = () => {
     const json = exportJson || buildExportJson();
-    navigator.clipboard.writeText(json).then(() => message.success('已复制到剪贴板'));
+    navigator.clipboard.writeText(json).then(() => message.success(t('export.copied')));
   };
 
   const handleDownloadExport = () => {
@@ -767,12 +842,12 @@ const GlobalSettings = () => {
       }
       setUpdateInfo(result);
       if (result.hasUpdate) {
-        message.info(`发现新版本: ${result.latestVersion}`);
+        message.info(t('update.newVersionFoundWithColon', { version: result.latestVersion }));
       } else {
-        message.success(`已是最新版本 (${result.currentVersion})`);
+        message.success(t('update.latestVersionShort', { version: result.currentVersion }));
       }
     } catch (error) {
-      message.error('检查更新失败');
+      message.error(t('messages.checkUpdateFailed'));
       setUpdateInfo(null);
       console.error('Failed to check update:', error);
     } finally {
@@ -785,7 +860,7 @@ const GlobalSettings = () => {
     try {
       await engineService.download(updateInfo.engineId, updateInfo.version);
     } catch (err) {
-      message.error(`启动下载失败: ${err?.response?.data?.error || err.message}`);
+      message.error(t('messages.downloadStartFailedWithReason', { reason: err?.response?.data?.error || err.message }));
     }
   };
 
@@ -800,7 +875,7 @@ const GlobalSettings = () => {
       // 立即刷新一次，确保主列表拿到 download_state 并启动轮询
       await loadEngines();
     } catch (error) {
-      message.error('启动下载失败');
+      message.error(t('messages.downloadStartFailed'));
       console.error('Failed to start download:', error);
     }
   };
@@ -808,15 +883,15 @@ const GlobalSettings = () => {
   const handleUninstall = async (engineId, version) => {
     try {
       await engineService.uninstall(engineId, version);
-      message.success(`已卸载 ${version}`);
+      message.success(t('engines.uninstalled', { version }));
       try {
         await loadEngines();
       } catch (refreshError) {
-        message.warning('卸载完成，但刷新状态失败，请手动刷新');
+        message.warning(t('engines.uninstalledButRefreshFailed'));
         console.error('Failed to refresh engine list after uninstall:', refreshError);
       }
     } catch (error) {
-      message.error(error?.response?.data?.error || error?.message || '卸载失败');
+      message.error(error?.response?.data?.error || error?.message || t('engines.uninstallFailed'));
       console.error('Failed to uninstall:', error);
     }
   };
@@ -824,11 +899,11 @@ const GlobalSettings = () => {
   const handleReinstall = async (engineId, version) => {
     try {
       const result = await engineService.reinstall(engineId, version);
-      message.info(`正在重新安装 ${version}...`);
+      message.info(t('engines.reinstalling', { version }));
       // 复用下载进度轮询逻辑
       pollReinstallProgress(result.tasks);
     } catch (error) {
-      message.error('重新安装失败');
+      message.error(t('engines.reinstallFailed'));
       console.error('Failed to reinstall:', error);
     }
   };
@@ -844,9 +919,9 @@ const GlobalSettings = () => {
           clearInterval(interval);
           const anyFailed = statuses.some(s => s.status === 'failed');
           if (anyFailed) {
-            message.error('重新安装失败');
+            message.error(t('engines.reinstallFailed'));
           } else {
-            message.success('重新安装完成');
+            message.success(t('engines.reinstallCompleted'));
           }
           await loadEngines();
         }
@@ -864,8 +939,8 @@ const GlobalSettings = () => {
   const renderEnginesContent = () => (
     <>
     <div className="gs-section-head">
-      <span className="gs-section-title">引擎管理</span>
-      <Button icon={<SyncOutlined />} onClick={loadEngines}>刷新</Button>
+      <span className="gs-section-title">{t('sections.engines')}</span>
+      <Button icon={<SyncOutlined />} onClick={loadEngines}>{t('common.refresh')}</Button>
     </div>
     <div className="gs-section-body">
     <Card className="gs-section-card">
@@ -937,13 +1012,15 @@ const GlobalSettings = () => {
                         </Button>
                       ) : (
                         <Space>
-                          <Tag icon={<CheckCircleOutlined />} color="success">已安装</Tag>
-                          <Button
-                            icon={<HistoryOutlined />}
-                            onClick={() => openVersionDrawer(engine)}
-                          >
-                            管理版本
-                          </Button>
+                          <Tag icon={<CheckCircleOutlined />} color="success">{t('engines.installed')}</Tag>
+                          <Badge dot={hasNewerVersion} color="orange" offset={[-4, 4]}>
+                            <Button
+                              icon={<HistoryOutlined />}
+                              onClick={() => openVersionDrawer(engine)}
+                            >
+                              {t('engines.manageVersions')}
+                            </Button>
+                          </Badge>
                         </Space>
                       )
                     ) : (
@@ -952,7 +1029,7 @@ const GlobalSettings = () => {
                         icon={<DownloadOutlined />}
                         onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version, selectedRuntime)}
                       >
-                        安装
+                        {t('engines.download')}
                       </Button>
                     )}
                   </Space>
@@ -969,12 +1046,12 @@ const GlobalSettings = () => {
                     <div>{engine.description}</div>
                     {latestVersion && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
-                        最新版本: {latestVersion.version} ({formatBytes(latestVersion.size)})
+                        {t('engines.latestVersion')}: {latestVersion.version} ({formatBytes(latestVersion.size)})
                       </div>
                     )}
                     {engine.dependencies?.length > 0 && (
                       <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                        依赖: {engine.dependencies.join(', ')}
+                        {t('engines.dependencies')}: {engine.dependencies.join(', ')}
                       </div>
                     )}
                     {engine.installed_versions?.length > 0 && (
@@ -994,9 +1071,9 @@ const GlobalSettings = () => {
                           <div key={ds.targetQuantization} style={{ marginBottom: 4 }}>
                             <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>
                               {ds.targetQuantization}
-                              {ds.status === 'downloading' && ` — 下载中${ds.speed > 0 ? ` ${formatBytes(ds.speed)}/s` : ''}`}
-                              {ds.status === 'unpacking' && ' — 解压中...'}
-                              {ds.status === 'installing' && ' — 安装中...'}
+                              {ds.status === 'downloading' && t('engines.downloadingWithSpeed', { speed: ds.speed > 0 ? ` ${formatBytes(ds.speed)}/s` : '' })}
+                              {ds.status === 'unpacking' && t('engines.unpacking')}
+                              {ds.status === 'installing' && t('engines.installing')}
                             </div>
                             <Progress
                               percent={ds.progress || 0}
@@ -1024,7 +1101,7 @@ const GlobalSettings = () => {
 
     const columns = [
       {
-        title: '模型名称',
+        title: t('export.modelName'),
         dataIndex: 'name',
         ellipsis: true,
         render: (name, record) => (
@@ -1034,13 +1111,13 @@ const GlobalSettings = () => {
         )
       },
       {
-        title: '类型',
+        title: t('export.type'),
         dataIndex: 'type',
         width: 90,
         render: t => <Tag color={t === 'llm' ? 'blue' : 'purple'}>{t.toUpperCase()}</Tag>
       },
       {
-        title: '版本号',
+        title: t('export.version'),
         width: 120,
         render: (_, record) => (
           <Input
@@ -1059,17 +1136,17 @@ const GlobalSettings = () => {
     return (
       <>
       <div className="gs-section-head">
-        <span className="gs-section-title">导出配置</span>
+        <span className="gs-section-title">{t('sections.export')}</span>
       </div>
       <div className="gs-section-body">
       <Card className="gs-section-card" style={{ maxWidth: 900 }}>
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
 
           {/* 基本信息 */}
-          <Card size="small" title="导出信息">
+          <Card size="small" title={t('export.exportInfo')}>
             <Space wrap>
               <Form layout="inline">
-                <Form.Item label="文件版本">
+                <Form.Item label={t('export.fileVersion')}>
                   <Input
                     value={exportFileVersion}
                     onChange={e => { setExportFileVersion(e.target.value); setExportJson(''); }}
@@ -1077,14 +1154,14 @@ const GlobalSettings = () => {
                     placeholder="1.0"
                   />
                 </Form.Item>
-                <Form.Item label="更新时间">
+                <Form.Item label={t('export.updatedAt')}>
                   <Input
                     value={exportUpdatedAt}
                     onChange={e => { setExportUpdatedAt(e.target.value); setExportJson(''); }}
                     style={{ width: 200 }}
                   />
                 </Form.Item>
-                <Form.Item label="导出范围">
+                <Form.Item label={t('export.scope')}>
                   <Checkbox.Group
                     value={exportTypes}
                     onChange={v => { setExportTypes(v); setExportJson(''); }}
@@ -1101,7 +1178,7 @@ const GlobalSettings = () => {
           </Card>
 
           {/* 模型版本号表格 */}
-          <Card size="small" title={`模型列表（${visibleModels.length} 个）`}>
+          <Card size="small" title={t('export.modelList', { count: visibleModels.length })}>
             <Table
               dataSource={visibleModels}
               columns={columns}
@@ -1115,19 +1192,19 @@ const GlobalSettings = () => {
           {/* 操作按钮 */}
           <Space>
             <Button type="primary" icon={<ExportOutlined />} onClick={buildExportJson}>
-              生成预览
+              {t('export.generatePreview')}
             </Button>
             {exportJson && (
               <>
-                <Button icon={<CopyOutlined />} onClick={handleCopyExport}>复制</Button>
-                <Button icon={<DownloadOutlined />} onClick={handleDownloadExport}>下载 models.json</Button>
+                <Button icon={<CopyOutlined />} onClick={handleCopyExport}>{t('common.copy')}</Button>
+                <Button icon={<DownloadOutlined />} onClick={handleDownloadExport}>{t('export.downloadModelsJson')}</Button>
               </>
             )}
           </Space>
 
           {/* JSON 预览 */}
           {exportJson && (
-            <Card size="small" title="预览">
+            <Card size="small" title={t('export.preview')}>
               <textarea
                 readOnly
                 value={exportJson}
@@ -1155,14 +1232,14 @@ const GlobalSettings = () => {
   const renderUpdateContent = () => (
     <>
     <div className="gs-section-head">
-      <span className="gs-section-title">更新设置</span>
+      <span className="gs-section-title">{t('sections.update')}</span>
     </div>
     <div className="gs-section-body">
     <Card className="gs-section-card">
       <Form form={form} layout="vertical">
         <Form.Item>
           <Space>
-            <span>自动更新</span>
+            <span>{t('update.autoUpdate')}</span>
             <Switch
               checked={autoUpdate}
               onChange={async (val) => {
@@ -1178,7 +1255,7 @@ const GlobalSettings = () => {
 
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
           <Form.Item
-            label="更新通道"
+            label={t('update.channel')}
             name="channel"
             rules={[{ required: true }]}
             style={{ marginBottom: 0 }}
@@ -1193,12 +1270,12 @@ const GlobalSettings = () => {
                 handleCheckUpdate();
               }}
             >
-              <Option value="stable">稳定版</Option>
-              <Option value="beta">测试版</Option>
+              <Option value="stable">{t('update.stable')}</Option>
+              <Option value="beta">{t('update.beta')}</Option>
             </Select>
           </Form.Item>
           <Button onClick={handleCheckUpdate} loading={checking}>
-            检查更新
+            {t('update.check')}
           </Button>
         </div>
       </Form>
@@ -1209,7 +1286,7 @@ const GlobalSettings = () => {
             <Alert
               type="info"
               showIcon
-              message={`发现新版本 ${updateInfo.latestVersion}`}
+              message={t('update.newVersionFound', { version: updateInfo.latestVersion })}
               description={
                 <Space direction="vertical" style={{ width: '100%' }}>
                   {updateInfo.releaseNotes && <div>{updateInfo.releaseNotes}</div>}
@@ -1218,14 +1295,14 @@ const GlobalSettings = () => {
                   )}
                   {!downloading && (
                     <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownloadUpdate}>
-                      下载更新
+                      {t('update.downloadUpdate')}
                     </Button>
                   )}
                 </Space>
               }
             />
           ) : (
-            <Alert type="success" showIcon message={`当前已是最新版本 (${updateInfo.currentVersion})`} />
+            <Alert type="success" showIcon message={t('update.latestVersion', { version: updateInfo.currentVersion })} />
           )}
         </div>
       )}
@@ -1237,7 +1314,7 @@ const GlobalSettings = () => {
   const renderCacheContent = () => (
     <>
     <div className="gs-section-head">
-      <span className="gs-section-title">缓存管理</span>
+      <span className="gs-section-title">{t('sections.cache')}</span>
     </div>
     <div className="gs-section-body">
     <Card className="gs-section-card">
@@ -1248,16 +1325,16 @@ const GlobalSettings = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <HddOutlined style={{ fontSize: 20, color: '#888' }} />
             <span style={{ fontSize: 15 }}>
-              缓存占用：<Text strong>{formatBytes(cacheInfo.totalSize)}</Text>
+              {t('cache.usage')}<Text strong>{formatBytes(cacheInfo.totalSize)}</Text>
             </span>
             <Button icon={<ReloadOutlined />} onClick={loadCacheInfo} loading={cacheLoading} size="small">
-              刷新
+              {t('common.refresh')}
             </Button>
             <Popconfirm
-              title="确定要清除全部缓存吗？"
+              title={t('cache.clearAllConfirm')}
               onConfirm={() => handleClearCache(null)}
-              okText="确定"
-              cancelText="取消"
+              okText={t('common.confirm')}
+              cancelText={t('common.cancel')}
             >
               <Button
                 icon={<DeleteOutlined />}
@@ -1266,13 +1343,13 @@ const GlobalSettings = () => {
                 loading={cacheClearing === 'all'}
                 disabled={cacheLoading || cacheInfo.totalSize === 0}
               >
-                清除缓存
+                {t('cache.clear')}
               </Button>
             </Popconfirm>
           </div>
         </Space>
       ) : (
-        <Empty description="加载失败" />
+        <Empty description={t('cache.loadFailed')} />
       )}
     </Card>
     </div>
@@ -1288,21 +1365,21 @@ const GlobalSettings = () => {
     };
     const processColumns = [
       {
-        title: '名称', dataIndex: 'name', key: 'name',
+        title: t('runtime.processList'), dataIndex: 'name', key: 'name',
         ellipsis: true, width: 200,
         render: (name, record) => (
           <Space>
             <Text strong>{name}</Text>
             {record.category === 'router' && record.modelNames?.length > 0 && (
-              <Tooltip title={`已加载: ${record.modelNames.join(', ')}`}>
-                <Tag style={{ cursor: 'help' }}>{record.modelNames.length} 模型</Tag>
+              <Tooltip title={t('runtime.loadedModels', { models: record.modelNames.join(', ') })}>
+                <Tag style={{ cursor: 'help' }}>{t('runtime.modelCount', { count: record.modelNames.length })}</Tag>
               </Tooltip>
             )}
           </Space>
         )
       },
       {
-        title: '类型', dataIndex: 'type', key: 'type', width: 90,
+        title: t('runtime.type'), dataIndex: 'type', key: 'type', width: 90,
         render: (type) => <Tag color={typeColorMap[type] || 'default'}>{type.toUpperCase()}</Tag>
       },
       {
@@ -1310,11 +1387,11 @@ const GlobalSettings = () => {
         render: (pid) => <Text type="secondary">{pid || '-'}</Text>
       },
       {
-        title: '端口', dataIndex: 'port', key: 'port', width: 70,
+        title: t('runtime.port'), dataIndex: 'port', key: 'port', width: 70,
         render: (port) => <Tag color="cyan">:{port}</Tag>
       },
       {
-        title: '内存', dataIndex: 'memory', key: 'memory', width: 100,
+        title: t('runtime.memory'), dataIndex: 'memory', key: 'memory', width: 100,
         sorter: (a, b) => (a.memory || 0) - (b.memory || 0),
         render: (mem) => formatBytes(mem)
       },
@@ -1340,24 +1417,24 @@ const GlobalSettings = () => {
         }
       },
       {
-        title: '运行时长', dataIndex: 'startTime', key: 'startTime', width: 100,
+        title: t('runtime.duration'), dataIndex: 'startTime', key: 'startTime', width: 100,
         render: (t) => formatDuration(t)
       },
       {
-        title: '操作', key: 'action', width: 80, align: 'center',
+        title: t('runtime.action'), key: 'action', width: 80, align: 'center',
         render: (_, record) => (
           record.category === 'system' ? (
-            <Text type="secondary" style={{ fontSize: 12 }}>主服务</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('runtime.mainService')}</Text>
           ) : (
             <Popconfirm
-              title="确认停止"
-              description={`确定要停止 ${record.name} 吗？`}
+              title={t('runtime.stopConfirm')}
+              description={t('runtime.stopConfirmDesc', { name: record.name })}
               onConfirm={() => handleStopProcess(record)}
-              okText="停止" cancelText="取消"
+              okText={t('runtime.stop')} cancelText={t('common.cancel')}
               okButtonProps={{ danger: true }}
             >
               <Button size="small" danger icon={<CloseCircleOutlined />}
-                loading={stoppingId === record.id}>停止</Button>
+                loading={stoppingId === record.id}>{t('runtime.stop')}</Button>
             </Popconfirm>
           )
         )
@@ -1367,7 +1444,7 @@ const GlobalSettings = () => {
     return (
       <>
       <div className="gs-section-head">
-        <span className="gs-section-title">运行状态</span>
+        <span className="gs-section-title">{t('sections.runtime')}</span>
       </div>
       <div className="gs-section-body">
       <Card className="gs-section-card">
@@ -1417,6 +1494,11 @@ const GlobalSettings = () => {
                       return (
                         <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
                           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
+                          {gpu.amdSoftwareVersion ? (
+                            <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>
+                              AMD Software: {gpu.amdSoftwareVersion}
+                            </div>
+                          ) : null}
                           {gpu.used != null ? (
                             <>
                               {hasShared ? (
@@ -1455,15 +1537,15 @@ const GlobalSettings = () => {
             <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
                 <Space>
-                  <Text strong>进程列表</Text>
-                  <Tag color={processes.length > 0 ? 'green' : 'default'}>{processes.length} 个进程</Tag>
+                  <Text strong>{t('runtime.processList')}</Text>
+                  <Tag color={processes.length > 0 ? 'green' : 'default'}>{t('runtime.processCount', { count: processes.length })}</Tag>
                 </Space>
                 <Button type="text" size="small" icon={<ReloadOutlined spin={systemLoading} />}
-                  onClick={loadSystemInfo}>刷新</Button>
+                  onClick={loadSystemInfo}>{t('common.refresh')}</Button>
               </div>
               <Table columns={processColumns} dataSource={processes} rowKey="id"
                 size="small" pagination={false} scroll={{ y: 340 }}
-                locale={{ emptyText: <Empty description="暂无运行中的进程" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
+                locale={{ emptyText: <Empty description={t('runtime.noRunningProcess')} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} />
             </div>
           </>
         )}
@@ -1480,16 +1562,16 @@ const GlobalSettings = () => {
     return (
       <>
       <div className="gs-section-head">
-        <span className="gs-section-title">模型存储</span>
+        <span className="gs-section-title">{t('sections.storage')}</span>
       </div>
       <div className="gs-section-body">
       <Card className="gs-section-card">
         <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text type="secondary">管理各类模型的存储目录，支持迁移到其他磁盘</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>总占用: {formatBytes(totalSize)}</Text>
+          <Text type="secondary">{t('storage.description')}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('storage.totalUsage', { size: formatBytes(totalSize) })}</Text>
         </div>
         {storageItems.length === 0 ? (
-          <Empty description="加载中..." />
+          <Empty description={t('common.loading')} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {storageItems.map((item) => (
@@ -1501,7 +1583,7 @@ const GlobalSettings = () => {
                     {item.isJunction && (
                       <>
                         <Tooltip title={`Junction → ${item.junctionTarget}`}>
-                          <Tag color="blue" icon={<LinkOutlined />}>已迁移</Tag>
+                          <Tag color="blue" icon={<LinkOutlined />}>{t('storage.migrated')}</Tag>
                         </Tooltip>
                         <Tag
                           color="orange"
@@ -1512,7 +1594,7 @@ const GlobalSettings = () => {
                             step: 'confirm', junctionTarget: item.junctionTarget
                           })}
                         >
-                          还原
+                          {t('storage.restore')}
                         </Tag>
                       </>
                     )}
@@ -1523,9 +1605,9 @@ const GlobalSettings = () => {
                 </div>
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, marginLeft: 16 }}>
                   <Button size="small" icon={<FolderOpenOutlined />} disabled={!item.exists}
-                    onClick={() => handleOpenFolder(item.path)}>打开</Button>
+                    onClick={() => handleOpenFolder(item.path)}>{t('common.open')}</Button>
                   <Button size="small" icon={<SwapOutlined />} disabled={!item.exists}
-                    onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label, size: item.size, driveFreeSpace: item.driveFreeSpace, srcPath: item.path }); setMigratePath(''); setMigrateBackup(false); }}>迁移</Button>
+                    onClick={() => { setMigrateModal({ open: true, type: item.type, label: item.label, size: item.size, driveFreeSpace: item.driveFreeSpace, srcPath: item.path }); setMigratePath(''); setMigrateBackup(false); }}>{t('migrate.operationName')}</Button>
                 </div>
               </div>
             ))}
@@ -1540,33 +1622,31 @@ const GlobalSettings = () => {
   const renderLogViewer = (entries, containerRef, level, setLevel, autoScroll, setAutoScroll, autoScrollRef, onReload, onDownload, onClear, loading) => {
     const levelColors = { info: '#1890ff', warn: '#faad14', error: '#ff4d4f' };
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-        {/* 工具栏 */}
-        <div style={{ flexShrink: 0, paddingBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <Space>
-            <Select value={level} onChange={setLevel} size="small" style={{ width: 100 }}>
-              <Option value="all">全部</Option>
-              <Option value="info">INFO</Option>
-              <Option value="warn">WARN</Option>
-              <Option value="error">ERROR</Option>
-            </Select>
-            <Checkbox
-              checked={autoScroll}
-              onChange={e => { setAutoScroll(e.target.checked); autoScrollRef.current = e.target.checked; }}
-            >
-              自动滚动
-            </Checkbox>
-          </Space>
-          <Space>
-            <Button size="small" icon={<ReloadOutlined />} onClick={onReload} loading={loading}>刷新</Button>
-            <Button size="small" icon={<DownloadOutlined />} onClick={onDownload} disabled={entries.length === 0}>下载</Button>
-            <Popconfirm title="确认清空？" onConfirm={onClear} okText="清空" cancelText="取消">
-              <Button size="small" danger icon={<DeleteOutlined />}>清空</Button>
-            </Popconfirm>
-          </Space>
-        </div>
-
-        {/* 日志区域 */}
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">{t('sections.logs')}</span>
+        <Space>
+          <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
+            <Option value="all">{t('logs.all')}</Option>
+            <Option value="info">INFO</Option>
+            <Option value="warn">WARN</Option>
+            <Option value="error">ERROR</Option>
+          </Select>
+          <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
+            {t('logs.autoScroll')}
+          </Checkbox>
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={async () => {
+            try { await backendService.openLogsFolder(); } catch { message.error(t('common.failedToOpen')); }
+          }}>{t('logs.folder')}</Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs}>{t('common.refresh')}</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>{t('common.download')}</Button>
+          <Popconfirm title={t('logs.clearConfirm')} onConfirm={handleClearLogs} okText={t('logs.clear')} cancelText={t('common.cancel')}>
+            <Button size="small" danger icon={<DeleteOutlined />}>{t('logs.clear')}</Button>
+          </Popconfirm>
+        </Space>
+      </div>
+      <div className="gs-section-body">
+      <Card className="gs-section-card">
         <div
           ref={containerRef}
           style={{
@@ -1581,10 +1661,10 @@ const GlobalSettings = () => {
             lineHeight: 1.6
           }}
         >
-          {loading && entries.length === 0 ? (
+          {loading && logEntries.length === 0 ? (
             <div style={{ color: '#888', textAlign: 'center', paddingTop: 40 }}>加载中...</div>
-          ) : entries.length === 0 ? (
-            <div style={{ color: '#666', textAlign: 'center', paddingTop: 40 }}>暂无日志</div>
+          ) : logEntries.length === 0 ? (
+            <div style={{ color: '#666', textAlign: 'center', paddingTop: 40 }}>{t('logs.empty')}</div>
           ) : (
             entries.map((entry, i) => (
               <div key={i} style={{ color: levelColors[entry.level] || '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
@@ -1656,164 +1736,185 @@ const GlobalSettings = () => {
     }
   };
 
-  const renderVersionDrawer = () => (
-    <Drawer
-      title={`${selectedEngine?.name} - 版本管理`}
-      placement="right"
-      width={600}
-      open={versionDrawerVisible}
-      onClose={() => setVersionDrawerVisible(false)}
-    >
-      {selectedEngine && (
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          {/* 已安装版本列表 */}
-          <Card size="small" title="已安装版本">
-            <Alert
-              message="版本说明"
-              description="默认使用版本号最高的版本。如需使用特定版本，请在模型设置中配置。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-            <List
-              dataSource={getOrderedInstalledVersions(selectedEngine)}
-              locale={{ emptyText: '暂无已安装版本' }}
-              renderItem={(version) => {
-                const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
-                return (
-                <List.Item
-                  actions={[
-                    version.broken ? (
-                      <Tag color="error">安装不完整</Tag>
-                    ) : version.version === latestInstalledVersion ? (
-                      <Tag color="green">最新版本</Tag>
-                    ) : null,
-                    <Button
-                      size="small"
-                      icon={<SyncOutlined />}
-                      onClick={() => handleReinstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
-                    >
-                      重装
-                    </Button>,
-                    <Popconfirm
-                      title="确认卸载"
-                      description={`确定要卸载版本 ${version.version} 吗？`}
-                      onConfirm={() => handleUninstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
-                      okText="确定"
-                      cancelText="取消"
-                    >
-                      <Button danger size="small" icon={<DeleteOutlined />}>卸载</Button>
-                    </Popconfirm>
-                  ].filter(Boolean)}
-                >
-                  <List.Item.Meta
-                    title={<Text strong>{version.version}</Text>}
-                    description={
-                      <Space direction="vertical" size={0}>
-                        {version.installed_at && (
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            安装时间: {new Date(version.installed_at).toLocaleString('zh-CN')}
-                          </Text>
-                        )}
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          路径: {version.path}
-                        </Text>
-                      </Space>
-                    }
-                  />
-                </List.Item>
-                );
-              }}
-            />
-          </Card>
+  const renderVersionDrawer = () => {
+    const installedVersions = getOrderedInstalledVersions(selectedEngine);
+    const availableVersions = resolveEngineVersions(selectedEngine);
+    const installedVariantGroups = getVersionVariantGroups(selectedEngine, installedVersions);
+    const availableVariantGroups = getVersionVariantGroups(selectedEngine, availableVersions);
+    const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
+    const allDownloadStates = selectedEngine?.download_states || (selectedEngine?.download_state ? [selectedEngine.download_state] : []);
 
-          {/* 最新版本 */}
-          <Card size="small" title="最新版本">
-            {(() => {
-              const allVersions = resolveEngineVersions(selectedEngine);
-              const latestVersion = allVersions[0];
-              if (!latestVersion) {
-                return <Empty description="暂无可用的版本信息" />;
-              }
-              const isInstalled = selectedEngine.installed_versions?.some(
-                v => v.version === latestVersion.version
-              );
-              const allDs = selectedEngine.download_states || (selectedEngine.download_state ? [selectedEngine.download_state] : []);
-              const ds = allDs.find(s => s.targetQuantization === latestVersion.version);
-              const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
+    const renderInstalledVersionItem = (version) => (
+      <List.Item
+        actions={[
+          version.broken ? (
+            <Tag color="error">{t('engines.incompleteInstall')}</Tag>
+          ) : version.version === latestInstalledVersion ? (
+            <Tag color="green">{t('engines.latestTag')}</Tag>
+          ) : null,
+          <Button
+            size="small"
+            icon={<SyncOutlined />}
+            onClick={() => handleReinstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
+          >
+            {t('engines.reinstall')}
+          </Button>,
+          <Popconfirm
+            title={t('engines.uninstallConfirm')}
+            description={t('engines.uninstallConfirmDesc', { version: version.version })}
+            onConfirm={() => handleUninstall(selectedEngine.engine_api_id || selectedEngine.id, version.version)}
+            okText={t('common.confirm')}
+            cancelText={t('common.cancel')}
+          >
+            <Button danger size="small" icon={<DeleteOutlined />}>{t('engines.uninstall')}</Button>
+          </Popconfirm>
+        ].filter(Boolean)}
+      >
+        <List.Item.Meta
+          title={
+            <Space>
+              <Text strong>{version.version}</Text>
+              {version.variant_name && <Tag>{version.variant_name}</Tag>}
+            </Space>
+          }
+          description={
+            <Space direction="vertical" size={0}>
+              {version.installed_at && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('engines.installedAt', { time: new Date(version.installed_at).toLocaleString('zh-CN') })}
+                </Text>
+              )}
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('engines.path', { path: version.path })}
+              </Text>
+            </Space>
+          }
+        />
+      </List.Item>
+    );
 
-              const isTtsDrawer = (selectedEngine.id === 'tts' || selectedEngine.engine_api_id === 'tts');
-              const drawerVariantId = latestVersion.variant_id;
-              const drawerVariant = drawerVariantId && Array.isArray(selectedEngine.variants)
-                ? selectedEngine.variants.find(v => v.id === drawerVariantId)
-                : null;
-              const drawerRuntimes = drawerVariant?.runtimes || [];
-              const drawerRuntimeKey = `${selectedEngine.engine_api_id || selectedEngine.id}::${drawerVariantId || 'default'}`;
-              const drawerSelectedRuntime = engineRuntimeSelections[drawerRuntimeKey] || drawerRuntimes[0]?.id;
+    const renderAvailableVersionItem = (version) => {
+      const isInstalled = selectedEngine.installed_versions?.some(
+        v => v.version === version.version
+      );
+      const ds = allDownloadStates.find(s => s.targetQuantization === version.version);
+      const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
 
-              return (
-                <List.Item
-                  actions={[
-                    isThisDownloading ? (
-                      <Progress
-                        type="circle"
-                        percent={ds.progress || 0}
-                        width={36}
-                        status="active"
-                      />
-                    ) : (
-                      <Space>
-                        {isTtsDrawer && drawerRuntimes.length > 0 && (
-                          <Select
-                            size="small"
-                            value={drawerSelectedRuntime}
-                            onChange={val => setEngineRuntimeSelections(prev => ({ ...prev, [drawerRuntimeKey]: val }))}
-                            style={{ width: 180 }}
-                            placeholder="运行时环境"
-                          >
-                            {drawerRuntimes.map(rt => (
-                              <Option key={rt.id} value={rt.id}>{rt.name}</Option>
-                            ))}
-                          </Select>
-                        )}
-                        {isInstalled ? (
-                          <Tag color="success">已安装</Tag>
-                        ) : (
-                          <Button
-                            type="primary"
-                            size="small"
-                            icon={<DownloadOutlined />}
-                            onClick={() => {
-                              handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, latestVersion.version, drawerSelectedRuntime);
-                            }}
-                          >
-                            安装
-                          </Button>
-                        )}
-                      </Space>
-                    )
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={latestVersion.version}
-                    description={
-                      isThisDownloading ? (
-                        <div style={{ fontSize: 12, color: '#888' }}>
-                          {ds.status === 'downloading' && `下载中${ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : ''}`}
-                          {ds.status === 'unpacking' && '解压中...'}
-                          {ds.status === 'installing' && '安装中...'}
-                        </div>
-                      ) : `大小: ${formatBytes(latestVersion.size)}`
-                    }
-                  />
-                </List.Item>
-              );
-            })()}
-          </Card>
-        </Space>
-      )}
-    </Drawer>
-  );
+      return (
+        <List.Item
+          actions={[
+            isThisDownloading ? (
+              <Progress
+                type="circle"
+                percent={ds.progress || 0}
+                width={36}
+                status="active"
+              />
+            ) : isInstalled ? (
+              <Tag color="success">{t('engines.installed')}</Tag>
+            ) : (
+              <Button
+                type="primary"
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
+                }}
+              >
+                {t('engines.download')}
+              </Button>
+            )
+          ]}
+        >
+          <List.Item.Meta
+            title={
+              <Space>
+                <Text strong>{version.version}</Text>
+                {version.variant_name && <Tag>{version.variant_name}</Tag>}
+              </Space>
+            }
+            description={
+              isThisDownloading ? (
+                <div style={{ fontSize: 12, color: '#888' }}>
+                  {ds.status === 'downloading' && t('engines.downloadingWithSpeed', { speed: ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : '' })}
+                  {ds.status === 'unpacking' && t('engines.unpacking')}
+                  {ds.status === 'installing' && t('engines.installing')}
+                </div>
+              ) : t('engines.size', { size: formatBytes(version.size) })
+            }
+          />
+        </List.Item>
+      );
+    };
+
+    const renderGroupedVersionList = (groups, renderItem, emptyText) => {
+      if (!groups) {
+        return null;
+      }
+
+      return (
+        <Collapse
+          defaultActiveKey={[]}
+          items={groups.map(group => ({
+            key: group.key,
+            label: (
+              <Space>
+                <Text strong>{group.name}</Text>
+                <Tag>{group.versions.length}</Tag>
+              </Space>
+            ),
+            children: (
+              <List
+                dataSource={group.versions}
+                locale={{ emptyText }}
+                renderItem={renderItem}
+              />
+            )
+          }))}
+        />
+      );
+    };
+
+    return (
+      <Drawer
+        title={`${selectedEngine?.name} - ${t('engines.versionManagement')}`}
+        placement="right"
+        width={600}
+        open={versionDrawerVisible}
+        onClose={() => setVersionDrawerVisible(false)}
+      >
+        {selectedEngine && (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <Card size="small" title={t('engines.installedVersions')}>
+              <Alert
+                message={t('engines.versionNotes')}
+                description={t('engines.versionNotesDesc')}
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+              {installedVariantGroups ? renderGroupedVersionList(installedVariantGroups, renderInstalledVersionItem, t('engines.noInstalledVersions')) : (
+                <List
+                  dataSource={installedVersions}
+                  locale={{ emptyText: t('engines.noInstalledVersions') }}
+                  renderItem={renderInstalledVersionItem}
+                />
+              )}
+            </Card>
+
+            <Card size="small" title={t('engines.availableVersions')}>
+              {availableVariantGroups ? renderGroupedVersionList(availableVariantGroups, renderAvailableVersionItem, t('engines.noAvailableVersions')) : (
+                <List
+                  dataSource={availableVersions}
+                  renderItem={renderAvailableVersionItem}
+                />
+              )}
+            </Card>
+          </Space>
+        )}
+      </Drawer>
+    );
+  };
 
   return (
     <Layout className="gs-layout">
@@ -1827,14 +1928,14 @@ const GlobalSettings = () => {
           <Spin size="large" />
           <span style={{ color: '#fff', fontSize: 16 }}>
             {restartTimedOut
-              ? '重启超时，请手动重新启动应用'
+              ? t('update.restartTimedOut')
               : restarting
-                ? `更新完成，应用将在 ${restartCountdown} 秒后重启...`
-                : '正在解压安装，即将重启...'}
+                ? t('update.restartInSeconds', { seconds: restartCountdown })
+                : t('update.unpackingAndRestarting')}
           </span>
           {restartTimedOut && (
             <span style={{ color: '#aaa', fontSize: 13 }}>
-              请运行 start_novamax.py 或 NovaMax.bat 重新启动
+              {t('update.manualRestartHint')}
             </span>
           )}
         </div>
@@ -1846,9 +1947,9 @@ const GlobalSettings = () => {
           onClick={() => navigate('/')}
           style={{ marginRight: 16 }}
         >
-          返回
+          {t('back')}
         </Button>
-        <h2 style={{ margin: 0 }}>全局设置</h2>
+        <h2 style={{ margin: 0 }}>{t('title')}</h2>
       </Header>
 
       <Layout className="gs-body">
@@ -1859,13 +1960,13 @@ const GlobalSettings = () => {
             onClick={({ key }) => setSelectedMenu(key)}
             style={{ height: '100%', borderRight: 0 }}
             items={[
-              { key: 'runtime', icon: <DashboardOutlined />, label: '运行状态' },
-              { key: 'logs',    icon: <FileTextOutlined />,  label: '系统日志' },
-              { key: 'storage', icon: <DatabaseOutlined />, label: '模型存储' },
-              { key: 'engines', icon: <AppstoreOutlined />, label: '引擎管理' },
-              { key: 'cache',   icon: <HddOutlined />,      label: '缓存管理' },
-              { key: 'export',  icon: <ExportOutlined />,   label: '导出配置' },
-              { key: 'update',  icon: <SyncOutlined />,     label: '更新设置' }
+              { key: 'runtime', icon: <DashboardOutlined />, label: t('menu.runtime') },
+              { key: 'logs',    icon: <FileTextOutlined />,  label: t('menu.logs') },
+              { key: 'storage', icon: <DatabaseOutlined />, label: t('menu.storage') },
+              { key: 'engines', icon: <AppstoreOutlined />, label: t('menu.engines') },
+              { key: 'cache',   icon: <HddOutlined />,      label: t('menu.cache') },
+              { key: 'export',  icon: <ExportOutlined />,   label: t('menu.export') },
+              { key: 'update',  icon: <SyncOutlined />,     label: t('menu.update') }
             ]}
           />
         </Sider>
@@ -1879,12 +1980,12 @@ const GlobalSettings = () => {
 
       {/* 迁移确认弹窗 */}
       <Modal
-        title={`迁移 ${migrateModal.label}`}
+        title={t('migrate.title', { label: migrateModal.label })}
         open={migrateModal.open}
         onCancel={() => !migrating && setMigrateModal({ open: false, type: null, label: '' })}
         onOk={handleMigrate}
-        okText="开始迁移"
-        cancelText="取消"
+        okText={t('migrate.start')}
+        cancelText={t('common.cancel')}
         confirmLoading={migrating}
         okButtonProps={{
           danger: true,
@@ -1902,22 +2003,22 @@ const GlobalSettings = () => {
       >
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">
-            将模型文件移动到新位置，并在原路径创建目录联接（mklink /J），程序无需修改即可正常使用。
+            {t('migrate.intro')}
           </Text>
         </div>
         {migrating && (
           <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
             <Text style={{ color: '#d46b08', fontSize: 13 }}>
-              正在迁移中，请耐心等待，文件较大时可能需要数分钟甚至更长时间，请勿关闭程序...
+              {t('migrate.progressHint')}
             </Text>
           </div>
         )}
         <div style={{ marginBottom: 8 }}>
-          <Text strong>目标路径:</Text>
+          <Text strong>{t('migrate.targetPath')}</Text>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Input
-            placeholder="例如: D:\novastudio\llm"
+            placeholder={t('migrate.placeholder')}
             value={migratePath}
             onChange={(e) => setMigratePath(e.target.value)}
             onPressEnter={handleMigrate}
@@ -1935,24 +2036,24 @@ const GlobalSettings = () => {
                   setMigratePath(res.path);
                 }
               } catch (e) {
-                message.error('打开文件夹选择器失败');
+                message.error(t('migrate.pickFolderFailed'));
               } finally {
                 setPickingFolder(false);
               }
             }}>
-            浏览
+            {t('common.browse')}
           </Button>
         </div>
         {migratePath.trim() && !/^[a-zA-Z]:[\\\/]/.test(migratePath.trim()) && (
           <div style={{ marginTop: 4 }}>
             <Text style={{ fontSize: 12, color: '#ff4d4f' }}>
-              请输入合法的 Windows 绝对路径，例如 D:\novastudio\llm
+              {t('migrate.invalidPath')}
             </Text>
           </div>
         )}
         <div style={{ marginTop: 12 }}>
           <Text type="warning" style={{ fontSize: 12 }}>
-            注意: 迁移过程中请勿关闭程序，大文件可能需要较长时间。目标路径必须为空目录或不存在的路径。
+            {t('migrate.warning')}
           </Text>
         </div>
         <div style={{ marginTop: 12 }}>
@@ -1961,7 +2062,7 @@ const GlobalSettings = () => {
             onChange={e => setMigrateBackup(e.target.checked)}
             disabled={migrating}
           >
-            迁移前备份原数据
+            {t('migrate.backupBefore')}
           </Checkbox>
           {migrateBackup && (() => {
             const notEnough = migrateModal.driveFreeSpace != null && migrateModal.size > migrateModal.driveFreeSpace;
@@ -1969,11 +2070,14 @@ const GlobalSettings = () => {
               <div style={{ marginTop: 4 }}>
                 {notEnough ? (
                   <Text style={{ fontSize: 12, color: '#ff4d4f' }}>
-                    源磁盘空间不足：备份需要 {(migrateModal.size / 1024 ** 3).toFixed(2)} GB，当前剩余 {(migrateModal.driveFreeSpace / 1024 ** 3).toFixed(2)} GB
+                    {t('migrate.backupNoSpace', {
+                      required: (migrateModal.size / 1024 ** 3).toFixed(2),
+                      available: (migrateModal.driveFreeSpace / 1024 ** 3).toFixed(2)
+                    })}
                   </Text>
                 ) : (
                   <Text style={{ fontSize: 12, color: '#888' }}>
-                    备份将保存至：{migrateModal.srcPath}_bak_xxx（与源目录同级），迁移完成后可手动删除
+                    {t('migrate.backupPath', { path: migrateModal.srcPath })}
                   </Text>
                 )}
               </div>
@@ -1983,11 +2087,11 @@ const GlobalSettings = () => {
         {migrating && (
           <div style={{ marginTop: 16 }}>
             {migrateProgress?.sameDrive ? (
-              <div style={{ color: '#1677ff', fontSize: 13 }}>正在重命名目录（同盘迁移，无需复制数据）...</div>
+              <div style={{ color: '#1677ff', fontSize: 13 }}>{t('migrate.sameDrive')}</div>
             ) : (
               <>
                 <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-                  {migrateProgress?.phase === 'backup' ? '正在备份...' : '正在迁移...'}
+                  {migrateProgress?.phase === 'backup' ? t('migrate.backuping') : t('migrate.migrating')}
                 </div>
                 <Progress
                   percent={migrateProgress?.progress || 0}
@@ -1998,7 +2102,7 @@ const GlobalSettings = () => {
                   <Text style={{ fontSize: 12, color: '#888' }}>
                     {migrateProgress
                       ? `${(migrateProgress.copiedBytes / 1024 ** 3).toFixed(2)} GB / ${(migrateProgress.totalBytes / 1024 ** 3).toFixed(2)} GB`
-                      : '正在准备...'}
+                      : t('common.preparing')}
                   </Text>
                   {migrateProgress?.speed > 0 && (
                     <Text style={{ fontSize: 12, color: '#888' }}>
@@ -2016,27 +2120,27 @@ const GlobalSettings = () => {
 
       {/* 还原弹窗（确认 + 进度两步合一，无 Popconfirm 冲突） */}
       <Modal
-        title={restoreModal.step === 'confirm' ? `确认还原 ${restoreModal.label}` : `正在还原 ${restoreModal.label}`}
+        title={restoreModal.step === 'confirm' ? t('restore.confirmTitle', { label: restoreModal.label }) : t('restore.progressTitle', { label: restoreModal.label })}
         open={restoreModal.open}
         onCancel={restoreModal.step === 'confirm' ? () => setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' }) : undefined}
         closable={restoreModal.step === 'confirm'}
         maskClosable={restoreModal.step === 'confirm'}
         footer={restoreModal.step === 'confirm' ? [
-          <Button key="cancel" onClick={() => setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' })}>取消</Button>,
-          <Button key="ok" danger type="primary" onClick={handleRestore}>确认还原</Button>
+          <Button key="cancel" onClick={() => setRestoreModal({ open: false, type: null, label: '', step: 'confirm', junctionTarget: '' })}>{t('common.cancel')}</Button>,
+          <Button key="ok" danger type="primary" onClick={handleRestore}>{t('restore.confirmButton')}</Button>
         ] : null}
       >
         {restoreModal.step === 'confirm' ? (
           <div style={{ padding: '8px 0' }}>
-            <Text>确定要将 <Text strong>{restoreModal.label}</Text> 还原到原路径吗？</Text>
+            <Text>{t('restore.confirmDesc', { label: restoreModal.label.replace(/\s+/g, ' ').trim() })}</Text>
             <div style={{ marginTop: 8 }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>文件将从 {restoreModal.junctionTarget} 移回原位置。</Text>
+              <Text type="secondary" style={{ fontSize: 13 }}>{t('restore.pathHint', { path: restoreModal.junctionTarget })}</Text>
             </div>
           </div>
         ) : (
           <div style={{ padding: '8px 0 16px' }}>
             {restoreProgress?.sameDrive ? (
-              <div style={{ color: '#1677ff', fontSize: 13 }}>正在重命名目录（同盘还原，无需复制数据）...</div>
+              <div style={{ color: '#1677ff', fontSize: 13 }}>{t('restore.sameDrive')}</div>
             ) : (
               <>
                 <Progress
@@ -2048,7 +2152,7 @@ const GlobalSettings = () => {
                   <Text style={{ fontSize: 13, color: '#555' }}>
                     {restoreProgress
                       ? `${(restoreProgress.copiedBytes / 1024 ** 3).toFixed(2)} GB / ${(restoreProgress.totalBytes / 1024 ** 3).toFixed(2)} GB`
-                      : '正在准备...'}
+                      : t('common.preparing')}
                   </Text>
                   {restoreProgress?.speed > 0 && (
                     <Text style={{ fontSize: 13, color: '#555' }}>
@@ -2061,7 +2165,7 @@ const GlobalSettings = () => {
               </>
             )}
             <div style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
-              正在将文件移回原路径，请耐心等待，请勿关闭程序...
+              {t('restore.progressHint')}
             </div>
           </div>
         )}

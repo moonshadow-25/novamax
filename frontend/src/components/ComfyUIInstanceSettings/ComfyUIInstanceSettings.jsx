@@ -1,12 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { Drawer, Form, Input, InputNumber, Button, Space, Select, message, Divider } from 'antd';
-import { FolderOpenOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Drawer, Form, Input, InputNumber, Button, Space, Select, message, Divider, Tooltip } from 'antd';
+import { FolderOpenOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { comfyuiService, engineService } from '../../services/api';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
 
 function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [engines, setEngines] = useState([]);
+  const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
+  const [latestEngineVersion, setLatestEngineVersion] = useState(null);
+
+  const refreshEngineStatus = useCallback(async () => {
+    try {
+      const res = await engineService.getById('comfyui');
+      const installedVersions = res.installed_versions || [];
+      const availableVersions = res.versions || [];
+      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
+        availableVersions,
+        installedVersions
+      );
+      setEngines(orderedInstalledVersions);
+      setLatestEngineVersion(latestInstalledVersion);
+
+      // 仅在用户已显式选择并保存版本时才显示固定版本
+      const pinnedVersion = instance?.engine_version || null;
+      if (pinnedVersion && orderedInstalledVersions.some(v => v.version === pinnedVersion)) {
+        setSelectedEngineVersion(pinnedVersion);
+      } else {
+        setSelectedEngineVersion(null);
+      }
+    } catch {
+      setEngines([]);
+      setLatestEngineVersion(null);
+    }
+  }, [instance]);
 
   useEffect(() => {
     if (visible && instance) {
@@ -14,26 +42,35 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
         name: instance.name,
         host: instance.host,
         port: instance.port,
-        engine_version: instance.engine_version || undefined,
         custom_args: instance.custom_args || ''
       });
     }
   }, [visible, instance, form]);
 
   useEffect(() => {
-    // 加载已安装的 ComfyUI 引擎版本
-    engineService.getById('comfyui').then(res => {
-      if (res.installed_versions) {
-        setEngines(res.installed_versions);
-      }
-    }).catch(() => {});
-  }, []);
+    if (!visible) return;
+    refreshEngineStatus();
+  }, [visible, refreshEngineStatus]);
+
+  const handleEngineVersionChange = async (version) => {
+    try {
+      await comfyuiService.updateInstance(instance.id, { engine_version: version || null });
+      setSelectedEngineVersion(version || null);
+      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+      onSave();
+    } catch (error) {
+      message.error(error.response?.data?.error || '切换引擎版本失败');
+    }
+  };
 
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
       setLoading(true);
-      await comfyuiService.updateInstance(instance.id, values);
+      await comfyuiService.updateInstance(instance.id, {
+        ...values,
+        engine_version: selectedEngineVersion || null
+      });
       message.success('保存成功');
       onSave();
       onClose();
@@ -101,15 +138,27 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
         </Form.Item>
 
         <Form.Item
-          label="引擎版本"
-          name="engine_version"
-          tooltip="留空则使用最新版本"
+          label={
+            <span>
+              引擎版本
+              <Tooltip title="选择运行此实例使用的 ComfyUI 引擎版本；留空表示默认（最新版本）。">
+                <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
+              </Tooltip>
+            </span>
+          }
         >
           <Select
-            placeholder="选择 ComfyUI 版本"
+            value={selectedEngineVersion}
+            onChange={handleEngineVersionChange}
+            placeholder="默认（最新版本）"
             allowClear
-            options={engines.map(e => ({ label: e.version, value: e.version }))}
-          />
+          >
+            {engines.map((v) => (
+              <Select.Option key={v.version} value={v.version}>
+                {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
+              </Select.Option>
+            ))}
+          </Select>
         </Form.Item>
 
         <Form.Item

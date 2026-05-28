@@ -692,18 +692,40 @@ function ComfyUI() {
 
               {/* 实例选择器 */}
               <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                <Select
-                  value={customMode ? 'custom' : selectedInstance}
-                  onChange={handleInstanceChange}
-                  style={{ width: '100%' }}
-                  options={[
-                    ...instances.map(inst => ({
-                      label: `${inst.name} (${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}) ${inst.status === 'running' ? '●' : '○'}`,
-                      value: inst.id
-                    })),
-                    { label: '自定义地址...', value: 'custom' }
-                  ]}
-                />
+                <Space.Compact style={{ width: '100%' }}>
+                  <Select
+                    value={customMode ? 'custom' : selectedInstance}
+                    onChange={handleInstanceChange}
+                    style={{ flex: 1 }}
+                    placeholder="未找到实例"
+                    options={[
+                      ...instances.map(inst => ({
+                        label: `${inst.name} (${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}) ${inst.status === 'running' ? '●' : '○'}`,
+                        value: inst.id
+                      })),
+                      { label: '自定义地址...', value: 'custom' }
+                    ]}
+                  />
+                  <Tooltip title="新增实例">
+                    <Button
+                      icon={<PlusOutlined />}
+                      onClick={async () => {
+                        try {
+                          await comfyuiService.ensureInstance();
+                          await loadInstances();
+                          message.success('实例已创建');
+                        } catch (e) {
+                          message.error('创建实例失败');
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                </Space.Compact>
+                {instances.length === 0 && !customMode && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    暂无可用实例，请点击 <PlusOutlined /> 新增实例，或选择"自定义地址"
+                  </Text>
+                )}
                 {customMode && (
                   <Space.Compact style={{ width: '100%' }}>
                     <Input

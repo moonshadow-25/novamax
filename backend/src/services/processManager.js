@@ -1334,18 +1334,15 @@ class ProcessManager {
 
     // 2. 如果指定了引擎版本，查找对应的 ROCm 版本
     if (engineVersion) {
-      const engine = engineManager.getEngine('llamacpp');
-      if (engine) {
-        const versionInfo = engine.versions.find(v => v.version === engineVersion);
-        if (versionInfo && versionInfo.rocm_version) {
-          const rocmBasePath = path.join(PROJECT_ROOT, 'external', 'rocm', versionInfo.rocm_version);
-          const rocmBinPath = path.join(rocmBasePath, 'Lib', 'site-packages', 'torch', 'lib', 'rocm', 'bin');
-          if (fs.existsSync(rocmBinPath)) {
-            env.PATH = `${rocmBinPath};${env.PATH}`;
-            console.log(`Added ROCm ${versionInfo.rocm_version} to PATH: ${rocmBinPath}`);
-          } else {
-            console.warn(`ROCm bin not found at ${rocmBinPath}`);
-          }
+      const versionInfo = engineManager.getEngineVersionInfo('llamacpp', engineVersion);
+      if (versionInfo && versionInfo.rocm_version) {
+        const rocmBasePath = path.join(PROJECT_ROOT, 'external', 'rocm', versionInfo.rocm_version);
+        const rocmBinPath = path.join(rocmBasePath, 'Lib', 'site-packages', 'torch', 'lib', 'rocm', 'bin');
+        if (fs.existsSync(rocmBinPath)) {
+          env.PATH = `${rocmBinPath};${env.PATH}`;
+          console.log(`Added ROCm ${versionInfo.rocm_version} to PATH: ${rocmBinPath}`);
+        } else {
+          console.warn(`ROCm bin not found at ${rocmBinPath}`);
         }
       }
     }

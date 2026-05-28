@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { setLocale } from '../../i18n';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeEngineType } from '../../utils/engineType';
 import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService } from '../../services/api';
@@ -24,20 +26,20 @@ const MODEL_TYPES = [
   { key: 'whisper', label: 'Whisper' }
 ];
 
-const DEFAULT_FILTER_OPTIONS = (favorites, downloadedModels, customModels, cloudApiModels) => [
-  { label: '全部', value: 'all' },
-  { label: `收藏 ${favorites.length > 0 ? favorites.length : ''}`.trim(), value: 'favorited' },
-  { label: `已下载 ${downloadedModels.length > 0 ? downloadedModels.length : ''}`.trim(), value: 'downloaded' },
-  { label: `自定义 ${customModels.length > 0 ? customModels.length : ''}`.trim(), value: 'custom' },
-  { label: `云API ${cloudApiModels.length > 0 ? cloudApiModels.length : ''}`.trim(), value: 'cloudapi' },
+const DEFAULT_FILTER_OPTIONS = (t, favorites, downloadedModels, customModels, cloudApiModels) => [
+  { label: t('home:all'), value: 'all' },
+  { label: t('home:favorites', { count: favorites.length > 0 ? favorites.length : '' }).trim(), value: 'favorited' },
+  { label: t('home:downloaded', { count: downloadedModels.length > 0 ? downloadedModels.length : '' }).trim(), value: 'downloaded' },
+  { label: t('home:custom', { count: customModels.length > 0 ? customModels.length : '' }).trim(), value: 'custom' },
+  { label: t('home:cloudApi', { count: cloudApiModels.length > 0 ? cloudApiModels.length : '' }).trim(), value: 'cloudapi' },
 ];
 
-const COMFYUI_FILTER_OPTIONS = [
-  { value: 'all',        label: '全部' },
-  { value: 'text2img',   label: '文生图' },
-  { value: 'img2img',    label: '图生图' },
-  { value: 'text2video', label: '文生视频' },
-  { value: 'img2video',  label: '图生视频' },
+const COMFYUI_FILTER_OPTIONS = (t) => [
+  { value: 'all',        label: t('home:all') },
+  { value: 'text2img',   label: t('home:textToImage') },
+  { value: 'img2img',    label: t('home:imageToImage') },
+  { value: 'text2video', label: t('home:textToVideo') },
+  { value: 'img2video',  label: t('home:imageToVideo') },
 ];
 
 // 其他类型暂时使用空选项，后续可以根据需要调整
@@ -45,6 +47,7 @@ const TTS_FILTER_OPTIONS = () => [];
 const WHISPER_FILTER_OPTIONS = () => [];
 
 function Home() {
+  const { t, i18n } = useTranslation(['home', 'common']);
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -145,7 +148,9 @@ function Home() {
 
       if (dismissedEngineUpdates.has(id)) continue;
 
-      const latestVersion = engine.versions?.[0]?.version;
+      const latestVersion = Array.isArray(engine.variants) && engine.variants.length > 0
+        ? engine.variants.flatMap(variant => variant.versions || [])[0]?.version
+        : engine.versions?.[0]?.version;
       if (!latestVersion) continue;
 
       if (!engine.installed) {
@@ -205,16 +210,15 @@ function Home() {
   const handleCreateInstance = async () => {
     try {
       await comfyuiService.createInstance({
-        name: '新实例',
+        name: t('home:createInstanceName'),
         host: '0.0.0.0',
-        port: 8189,
         engine_version: null,
         custom_args: ''
       });
-      message.success('实例已创建');
+      message.success(t('home:instanceCreated'));
       loadComfyUIInstances();
     } catch (error) {
-      message.error(error.response?.data?.error || '创建失败');
+      message.error(error.response?.data?.error || t('home:createFailed'));
     }
   };
 
@@ -370,7 +374,7 @@ function Home() {
           </div>
           <div className="home-header-center">
             <Input
-              placeholder="搜索模型..."
+              placeholder={t('home:searchPlaceholder')}
               prefix={<SearchOutlined />}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -384,9 +388,9 @@ function Home() {
                   type="text"
                   icon={<WifiOutlined />}
                   onClick={handleOpenMultiConnectModal}
-                  title="多机互联"
+                  title={t('home:multiConnect')}
                 >
-                  多机互联
+                  {t('home:multiConnect')}
                 </Button>
               )}
               <Badge count={downloadingCount} size="small">
@@ -394,15 +398,22 @@ function Home() {
                   type="text"
                   icon={<DownloadOutlined />}
                   onClick={() => setDownloadCenterVisible(true)}
-                  title="下载中心"
+                  title={t('home:downloadCenter')}
                 />
               </Badge>
+              <Button
+                type="text"
+                onClick={() => setLocale(i18n.language === 'zh-CN' ? 'en-US' : 'zh-CN')}
+                title={t('common:language')}
+              >
+                {i18n.language === 'zh-CN' ? t('common:english') : t('common:chinese')}
+              </Button>
               {/* 主题切换暂时隐藏 */}
               <Button
                 type="text"
                 icon={<SettingOutlined />}
                 onClick={() => navigate('/global-settings')}
-                title="全局设置"
+                title={t('home:globalSettings')}
               />
             </Space>
           </div>
@@ -413,7 +424,10 @@ function Home() {
           <div className="update-banner-content">
             <GiftOutlined className="update-banner-icon" />
             <span className="update-banner-text">
-              新版本 <strong>{updateInfo.latestVersion}</strong> 已发布，当前版本 {updateInfo.currentVersion}
+              {t('home:newVersionReleased', {
+                latestVersion: updateInfo.latestVersion,
+                currentVersion: updateInfo.currentVersion,
+              })}
             </span>
             <Button
               type="primary"
@@ -421,7 +435,7 @@ function Home() {
               onClick={() => navigate('/global-settings?menu=update')}
               className="update-banner-btn"
             >
-              立即更新
+              {t('home:updateNow')}
             </Button>
           </div>
           <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
@@ -433,8 +447,8 @@ function Home() {
             <ToolOutlined className="update-banner-icon" />
             <span className="update-banner-text">
               {engine.installed
-                ? <><strong>{engine.name}</strong> 有新版本 <strong>{engine.latestVersion}</strong> 可用</>
-                : <><strong>{engine.name}</strong> 尚未安装</>}
+                ? t('home:engineUpdateAvailable', { name: engine.name, latestVersion: engine.latestVersion })
+                : t('home:engineNotInstalled', { name: engine.name })}
             </span>
             <Button
               type="primary"
@@ -445,14 +459,14 @@ function Home() {
                 setDismissedEngineUpdates(prev => new Set([...prev, engine.dismissKey, ...deps]));
                 try {
                   await engineService.download(engine.engineApiId || engine.id, engine.latestVersion);
-                  message.success(`${engine.name} 开始下载`);
+                  message.success(t('home:downloadStarted', { name: engine.name }));
                 } catch (e) {
-                  message.error(`下载失败: ${e.response?.data?.error || e.message}`);
+                  message.error(t('home:downloadFailed', { error: e.response?.data?.error || e.message }));
                 }
               }}
               className="update-banner-btn"
             >
-              {engine.installed ? '立即更新' : '立即安装'}
+              {engine.installed ? t('home:updateNow') : t('home:installNow')}
             </Button>
           </div>
           <CloseOutlined
@@ -477,10 +491,10 @@ function Home() {
                 value={filterTab}
                 onChange={setFilterTab}
                 options={
-                  activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS
+                  activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS(t)
                     : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
                     : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                    : DEFAULT_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                    : DEFAULT_FILTER_OPTIONS(t, favorites, downloadedModels, customModels, cloudApiModels)
                 }
               />
             </div>
@@ -497,34 +511,32 @@ function Home() {
             items={[
               {
                 key: 'instances',
-                label: 'ComfyUI 管理',
+                label: t('home:comfyuiManage'),
                 children: (
                   <div>
                     {comfyuiInstances.length === 0 ? (
                       <div style={{ padding: '16px 0', textAlign: 'center', color: '#999' }}>
-                        暂无实例，点击模型卡片的"运行"按钮将自动创建
+                        {t('home:noInstances')}
                       </div>
                     ) : (
-                      <>
-                        {comfyuiInstances.map(instance => (
-                          <ComfyUIInstanceCard
-                            key={instance.id}
-                            instance={instance}
-                            onUpdate={loadComfyUIInstances}
-                            onSettings={handleInstanceSettings}
-                          />
-                        ))}
-                        <Button
-                          type="dashed"
-                          icon={<PlusOutlined />}
-                          onClick={handleCreateInstance}
-                          block
-                          style={{ marginTop: 8 }}
-                        >
-                          新增实例
-                        </Button>
-                      </>
+                      comfyuiInstances.map(instance => (
+                        <ComfyUIInstanceCard
+                          key={instance.id}
+                          instance={instance}
+                          onUpdate={loadComfyUIInstances}
+                          onSettings={handleInstanceSettings}
+                        />
+                      ))
                     )}
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={handleCreateInstance}
+                      block
+                      style={{ marginTop: 8 }}
+                    >
+                      {t('home:addInstance')}
+                    </Button>
                   </div>
                 )
               }
@@ -552,7 +564,7 @@ function Home() {
               <div className="add-model-card" onClick={() => setAddModalVisible(true)}>
                 <div className="add-model-content">
                   <div className="add-icon">+</div>
-                  <div>添加新模型</div>
+                  <div>{t('home:addNewModel')}</div>
                 </div>
               </div>
             )}

@@ -42,15 +42,99 @@ function getCpuUsagePercent() {
  * 调用 gpuinfo.exe 获取 GPU 信息（名称、显存、逐进程占用）
  * 输出 JSON 数组，每个元素对应一块物理 GPU
  */
-async function getGpuInfo(options = {}) {
+async function getAmdSoftwareVersion() {
+  if (os.platform() !== 'win32') return null;
+  try {
+    const psLines = [
+      '$ErrorActionPreference="SilentlyContinue"',
+      '$roots=@("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall","HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall")',
+      '$cands=@()',
+      'foreach($r in $roots){',
+      '  $items=@(Get-ChildItem $r -EA SilentlyContinue|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+      '  foreach($it in $items){',
+      '    if(-not $it.DisplayName -or -not $it.DisplayVersion){continue}',
+      '    $n=[string]$it.DisplayName; $v=[string]$it.DisplayVersion',
+      '    if($n -like "AMD Software*"){$cands += [pscustomobject]@{p=1;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "Adrenalin"){$cands += [pscustomobject]@{p=2;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "Radeon Software"){$cands += [pscustomobject]@{p=3;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '    if($n -match "AMD Settings"){$cands += [pscustomobject]@{p=4;v=$v;n=$n;d=$it.InstallDate}; continue}',
+      '  }',
+      '}',
+      '$cnPaths=@("HKLM:\\SOFTWARE\\AMD\\CN","HKLM:\\SOFTWARE\\WOW6432Node\\AMD\\CN")',
+      'foreach($cp in $cnPaths){',
+      '  $p=Get-ItemProperty $cp -EA SilentlyContinue',
+      '  if(-not $p){continue}',
+      '  foreach($k in @("ReleaseVersion","RadeonSoftwareVersion","Version","DriverVersion")){',
+      '    $val=$p.$k',
+      '    if($val){$cands += [pscustomobject]@{p=9;v=[string]$val;n=("CN."+$k);d=""}; break}',
+      '  }',
+      '}',
+      '$norm=@($cands|Where-Object{$_.v -match "^\\d+\\.\\d+(\\.\\d+){0,3}$"})',
+      'if(-not $norm -or $norm.Count -eq 0){',
+      '  if($cands -and $cands.Count -gt 0){',
+      '    ($cands|Sort-Object p|Select-Object -First 1).v',
+      '  } else {',
+      '    ""',
+      '  }',
+      '} else {',
+      '  $pick=$norm|Sort-Object p | Select-Object -First 1',
+      '  $pick.v',
+      '}'
+    ];
+    const encoded = Buffer.from(psLines.join('\n'), 'utf16le').toString('base64');
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      { encoding: 'utf-8', timeout: 10000 }
+    );
+    const value = (stdout || '').trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getGpuInfo(options = {}) {
   const { namesOnly = false } = options;
 
-  try {
-    if (!fs.existsSync(GPUINFO_PATH)) {
-      console.warn('[gpuinfo] gpuinfo.exe 不存在:', GPUINFO_PATH);
-      return null;
+  // 1. NVIDIA nvidia-smi（仅在可用时调用，避免 AMD 机器重复失败回退）
+  if (_nvidiaSmiAvailable !== false) {
+    try {
+      const nvidiaQuery = namesOnly
+        ? 'nvidia-smi --query-gpu=name --format=csv,noheader'
+        : 'nvidia-smi --query-gpu=name,driver_version,memory.total,memory.used,memory.free --format=csv,noheader,nounits';
+      const { stdout } = await execAsync(nvidiaQuery, { encoding: 'utf-8', timeout: 3000 });
+      const lines = stdout.trim().split('\n').filter(l => l.trim());
+      if (lines.length > 0) {
+        _nvidiaSmiAvailable = true;
+        if (namesOnly) {
+          return lines.map(line => ({ name: line.trim() }));
+        }
+        return lines.map(line => {
+          const parts = line.split(',').map(s => s.trim());
+          const [name, driverVersion, totalMB, usedMB, freeMB] = parts;
+          const total = parseInt(totalMB) * 1024 * 1024;
+          const used = parseInt(usedMB) * 1024 * 1024;
+          const free = parseInt(freeMB) * 1024 * 1024;
+          return {
+            name,
+            preferredVersion: driverVersion || null,
+            driverVersion: driverVersion || null,
+            amdSoftwareVersion: null,
+            total,
+            used,
+            free,
+            usagePercent: total ? Math.round((used / total) * 100) : 0
+          };
+        });
+      }
+      _nvidiaSmiAvailable = false;
+    } catch (e) {
+      _nvidiaSmiAvailable = false;
     }
+  }
 
+  // 2. gpuinfo.exe
+  try {
     const { stdout } = await execAsync(`"${GPUINFO_PATH}"`, {
       encoding: 'utf-8',
       timeout: 10000
@@ -67,7 +151,6 @@ async function getGpuInfo(options = {}) {
       const total = g.memory_sizes?.dedicated_video_memory_bytes || 0;
       const dedUsed = g.memory_usage?.dedicated_usage_bytes || 0;
       const shrUsed = g.memory_usage?.shared_usage_bytes || 0;
-      // 共享显存总量：优先用 memory_sizes.shared_system_memory_bytes
       const shrTotal = g.memory_sizes?.shared_system_memory_bytes || 0;
       const totalUsed = dedUsed + shrUsed;
       const totalAvail = total + shrTotal;
@@ -83,7 +166,6 @@ async function getGpuInfo(options = {}) {
         shared_total: shrTotal,
         total_used: totalUsed,
         total_avail: totalAvail,
-        /** 逐进程 GPU 显存占用 */
         processes: (g.processes || []).map(p => ({
           pid: p.pid,
           name: p.name,
@@ -95,8 +177,143 @@ async function getGpuInfo(options = {}) {
     });
   } catch (e) {
     console.warn('[gpuinfo] 获取 GPU 信息失败:', e.message);
-    return null;
   }
+
+  // 3. Windows: 只取 PCI 真实 GPU
+  //   - 直接遍历注册表 0000-000F（避免 Get-ChildItem 在 Properties 子键上权限报错）
+  //   - 用 DriverDesc 匹配 WMI GPU 名称，读 qwMemorySize (64 位 QWORD)
+  //   - 性能计数器只保留 _phys_0 后缀（物理 GPU，过滤虚拟适配器 LUID）
+  if (os.platform() === 'win32') {
+    try {
+      const psLines = namesOnly ? [
+        '$ErrorActionPreference="SilentlyContinue"',
+        '$vc=@(Get-CimInstance Win32_VideoController|Where-Object{$_.PNPDeviceID -like "PCI\\*"})',
+        '$out=@($vc|Where-Object{',
+        '  $_.Name -and',
+        '  $_.Name -notmatch "Virtual|Remote|RDP|Miracast|DisplayLink|GameViewer|ToDesk|Oray|Idd"',
+        '}|ForEach-Object{ @{ n = $_.Name } })',
+        '@{g=$out}|ConvertTo-Json -Depth 3 -Compress'
+      ] : [
+        '$ErrorActionPreference="SilentlyContinue"',
+        '$base="HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}"',
+        // PCI 真实 GPU 列表
+        '$vc=@(Get-CimInstance Win32_VideoController|Where-Object{$_.PNPDeviceID -like "PCI\\*"})',
+        // 枚举所有数字子键（通用，不限数量），-EA SilentlyContinue 跳过受保护的子键
+        '$allReg=@(Get-ChildItem $base -EA SilentlyContinue|Where-Object{$_.PSChildName -match "^\\d{4}$"}|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+        // 优先使用 GPU Adapter Memory 性能计数器（与任务管理器来源更接近）
+        '$ded=@((Get-Counter "\\GPU Adapter Memory(*)\\Dedicated Usage" -EA SilentlyContinue).CounterSamples)',
+        '$shr=@((Get-Counter "\\GPU Adapter Memory(*)\\Shared Usage" -EA SilentlyContinue).CounterSamples)',
+        '$dedPhys=@($ded|Where-Object{$_.InstanceName -match "phys"})',
+        '$shrPhys=@($shr|Where-Object{$_.InstanceName -match "phys"})',
+        'if(-not $dedPhys -or $dedPhys.Count -eq 0){$dedPhys=$ded}',
+        'if(-not $shrPhys -or $shrPhys.Count -eq 0){$shrPhys=$shr}',
+        '$perf=@($dedPhys|Group-Object InstanceName|ForEach-Object{',
+        '  @{u=([long](($_.Group|Measure-Object -Property CookedValue -Sum).Sum))}',
+        '}|Sort-Object u -Descending)',
+        '$totalUsed=[long]((($dedPhys|Measure-Object -Property CookedValue -Sum).Sum)+(($shrPhys|Measure-Object -Property CookedValue -Sum).Sum))',
+        '$amdSw=$null',
+        '$uninstallRoots=@(',
+        '  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",',
+        '  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"',
+        ')',
+        'foreach($root in $uninstallRoots){',
+        '  if($amdSw){break}',
+        '  $items=@(Get-ChildItem $root -EA SilentlyContinue|ForEach-Object{Get-ItemProperty $_.PSPath -EA SilentlyContinue}|Where-Object{$_})',
+        '  $exact=$items|Where-Object{',
+        '    $_.DisplayName -and $_.DisplayVersion -and',
+        '    $_.DisplayName -like "AMD Software*"',
+        '  }|Select-Object -First 1',
+        '  if($exact){$amdSw=[string]$exact.DisplayVersion;break}',
+        '  $fallback=$items|Where-Object{',
+        '    $_.DisplayName -and $_.DisplayVersion -and',
+        '    ($_.DisplayName -match "Adrenalin" -or $_.DisplayName -match "AMD Settings")',
+        '  }|Select-Object -First 1',
+        '  if($fallback){$amdSw=[string]$fallback.DisplayVersion}',
+        '}',
+        'if(-not $amdSw){',
+        '  $cnPaths=@("HKLM:\SOFTWARE\AMD\CN","HKLM:\SOFTWARE\WOW6432Node\AMD\CN")',
+        '  foreach($cp in $cnPaths){',
+        '    if($amdSw){break}',
+        '    $p=Get-ItemProperty $cp -EA SilentlyContinue',
+        '    if($p){',
+        '      foreach($k in @("ReleaseVersion","RadeonSoftwareVersion","DriverVersion","Version")){',
+        '        if($p.$k){$amdSw=[string]$p.$k;break}',
+        '      }',
+        '    }',
+        '  }',
+        '}',
+        '$out=@($vc|ForEach-Object{',
+        '  $v=$_; $total=$null; $drv=$null; $pref=$null',
+        '  $reg=$allReg|Where-Object{$_.DriverDesc -eq $v.Name}|Select-Object -First 1',
+        '  if($reg){',
+        '    $q=[long]$reg."HardwareInformation.qwMemorySize";if($q -gt 0){$total=$q}',
+        '    if($reg.DriverVersion){$drv=[string]$reg.DriverVersion}',
+        '  }',
+        '  if(-not $drv -and $v.DriverVersion){$drv=[string]$v.DriverVersion}',
+        '  if(-not $total -and $v.AdapterRAM -gt 0){$total=[long]$v.AdapterRAM}',
+        '  if($v.Name -match "AMD|Radeon"){',
+        '    if($amdSw){$pref=$amdSw}else{$pref=$drv}',
+        '  } else {',
+        '    $pref=$drv',
+        '  }',
+        '  @{n=$v.Name;t=$total;d=$drv;pv=$pref;asv=$amdSw}',
+        '})',
+        '@{g=$out;p=$perf;tu=$totalUsed}|ConvertTo-Json -Depth 4 -Compress'
+      ];
+
+      const encoded = Buffer.from(psLines.join('\n'), 'utf16le').toString('base64');
+      const { stdout } = await execAsync(
+        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        { encoding: 'utf-8', timeout: 10000 }
+      );
+      const data = JSON.parse(stdout.trim());
+      const gpus = Array.isArray(data.g) ? data.g : (data.g ? [data.g] : []);
+      const visibleGpus = gpus.filter(g => g && g.n);
+
+      if (namesOnly) {
+        return visibleGpus.map(g => ({ name: g.n }));
+      }
+
+      const perfs = Array.isArray(data.p) ? data.p : (data.p ? [data.p] : []);
+      const totalUsed = Number(data.tu || 0);
+
+      // 单 GPU 场景（如 AMD 780M）优先使用 totalUsed，避免计数器实例与显卡列表错位
+      if (visibleGpus.length === 1) {
+        const g = visibleGpus[0];
+        const total = g.t ? Number(g.t) : null;
+        const usedFromPerf = Number(perfs[0]?.u || 0);
+        const used = usedFromPerf > 0 ? usedFromPerf : (totalUsed > 0 ? totalUsed : null);
+        return [{
+          name: g.n,
+          preferredVersion: g.pv || g.d || null,
+          driverVersion: g.d || null,
+          amdSoftwareVersion: g.asv || null,
+          total,
+          used,
+          free: (total != null && used != null) ? total - used : null,
+          usagePercent: (total && used) ? Math.round((used / total) * 100) : null
+        }];
+      }
+
+      return visibleGpus.map((g, i) => {
+        const total = g.t ? Number(g.t) : null;
+        const usedValue = Number(perfs[i]?.u || 0);
+        const used = usedValue > 0 ? usedValue : (i === 0 && totalUsed > 0 ? totalUsed : null);
+        return {
+          name: g.n,
+          preferredVersion: g.pv || g.d || null,
+          driverVersion: g.d || null,
+          amdSoftwareVersion: g.asv || null,
+          total,
+          used,
+          free: (total != null && used != null) ? total - used : null,
+          usagePercent: (total && used) ? Math.round((used / total) * 100) : null
+        };
+      });
+    } catch (e) { /* PowerShell failed */ }
+  }
+
+  return null;
 }
 
 /**
@@ -150,6 +367,17 @@ router.get('/system/info', async (req, res) => {
     const freeMem = os.freemem();
     const cpuUsage = getCpuUsagePercent();
     const gpus = await getGpuInfo();
+    const amdSoftwareVersion = await getAmdSoftwareVersion();
+    const normalizedGpus = Array.isArray(gpus) ? gpus.map(gpu => {
+      if (!gpu || !gpu.name) return gpu;
+      const isAmd = /AMD|Radeon/i.test(gpu.name);
+      if (!isAmd || !amdSoftwareVersion) return gpu;
+      return {
+        ...gpu,
+        amdSoftwareVersion,
+        preferredVersion: amdSoftwareVersion
+      };
+    }) : gpus;
 
     // 构建 GPU 进程 VRAM 查找表（PID → vram_bytes）
     const gpuProcessMap = new Map();
@@ -282,7 +510,7 @@ router.get('/system/info', async (req, res) => {
             ((totalMem - freeMem) / totalMem) * 100
           )
         },
-        gpus: gpus,
+        gpus: normalizedGpus,
         platform: os.platform(),
         arch: os.arch(),
         hostname: os.hostname(),

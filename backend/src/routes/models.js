@@ -841,4 +841,42 @@ router.post('/models/:id/set-active-file', async (req, res) => {
   }
 });
 
+// 异步生成 AI 总结描述
+router.post('/models/:id/generate-description', async (req, res) => {
+  const modelId = req.params.id;
+  const model = modelManager.getById(modelId);
+
+  if (!model) {
+    return res.status(404).json({ error: 'Model not found' });
+  }
+
+  const readmeContent = model.readme_content || '';
+  if (!readmeContent) {
+    return res.json({ success: false, message: '没有 README 内容可供总结' });
+  }
+
+  // 标记正在生成
+  await modelManager.update(modelId, { description_generating: true });
+
+  // 立即返回，后台异步执行总结
+  res.json({ success: true, message: '已开始生成描述' });
+
+  try {
+    const summary = await modelscopeParser.summarizeReadme(readmeContent);
+    if (summary) {
+      await modelManager.update(modelId, {
+        description: summary,
+        description_generating: false
+      });
+      eventBus.broadcast('model-updated', { modelId, field: 'description' });
+      console.log(`[generate-description] 模型 ${modelId} 描述已更新:`, summary);
+    } else {
+      await modelManager.update(modelId, { description_generating: false });
+    }
+  } catch (e) {
+    await modelManager.update(modelId, { description_generating: false });
+    console.warn(`[generate-description] 模型 ${modelId} 描述生成失败:`, e.message);
+  }
+});
+
 export default router;

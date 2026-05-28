@@ -160,11 +160,20 @@ class EngineManager {
 
   /**
    * 获取默认版本（最新安装的版本）
+   * 按 engines.json 中 versions 数组的顺序确定最新版本（第一个已安装的）
    */
   getDefaultVersion(engineId) {
-    const installed = this.getInstalledVersions(engineId);
-    if (installed.length === 0) return null;
-    return installed[0].version;
+    const engine = this.getEngine(engineId);
+    const availableVersions = this._getEngineVersions(engine);
+    const installedSet = new Set(
+      this.getInstalledVersions(engineId).map(v => v.version)
+    );
+    for (const v of availableVersions) {
+      if (installedSet.has(v.version)) {
+        return v.version;
+      }
+    }
+    return null;
   }
 
   /**

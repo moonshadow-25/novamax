@@ -33,6 +33,7 @@ import ttsRouter from './routes/tts.js';
 import ttsStudioRouter from './routes/tts-studio.js';
 import openaiTtsRouter from './routes/openai-tts.js';
 import multiconnectRouter from './routes/multiconnect.js';
+import chatRouter from './routes/chat.js';
 import eventBus from './services/eventBus.js';
 
 const app = express();
@@ -173,6 +174,7 @@ app.use('/api', ttsRouter);
 app.use('/api/tts-studio', ttsStudioRouter);
 app.use('/v1', openaiTtsRouter);
 app.use('/api', multiconnectRouter);
+app.use('/api', chatRouter);
 
 // SSE 实时事件推送
 app.get('/api/events', (req, res) => {
