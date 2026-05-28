@@ -1189,11 +1189,31 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                       const missing = files.filter(f => !f.downloaded);
                       if (missing.length > 0) {
                         message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                        // 逐个启动下载，每个文件等待真正完成后再下一个
                         for (const f of missing) {
-                          await ttsService.downloadFile(model.id, f.filename || f.name);
+                          const result = await ttsService.downloadFile(model.id, f.filename || f.name);
+                          const taskId = result?.taskId;
+                          if (taskId) {
+                            // 轮询等待该文件下载完成
+                            await new Promise((resolve) => {
+                              const check = setInterval(async () => {
+                                try {
+                                  const s = await ttsService.getDownloadStatus(taskId);
+                                  if (s?.task?.status === 'completed') {
+                                    clearInterval(check);
+                                    resolve();
+                                  } else if (s?.task?.status === 'failed') {
+                                    clearInterval(check);
+                                    resolve(); // 继续下一个，不中断
+                                  }
+                                } catch { clearInterval(check); resolve(); }
+                              }, 2000);
+                            });
+                          }
                         }
                         message.success({ content: '模型下载完成', key: 'tts-model-dl' });
                       }
+                      // 下载完成后刷新状态
                       setTtsModelMissing(false);
                       setTtsStatus('idle');
                       onUpdate();
