@@ -1622,31 +1622,27 @@ const GlobalSettings = () => {
   const renderLogViewer = (entries, containerRef, level, setLevel, autoScroll, setAutoScroll, autoScrollRef, onReload, onDownload, onClear, loading) => {
     const levelColors = { info: '#1890ff', warn: '#faad14', error: '#ff4d4f' };
     return (
-      <>
-      <div className="gs-section-head">
-        <span className="gs-section-title">{t('sections.logs')}</span>
-        <Space>
-          <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
-            <Option value="all">{t('logs.all')}</Option>
-            <Option value="info">INFO</Option>
-            <Option value="warn">WARN</Option>
-            <Option value="error">ERROR</Option>
-          </Select>
-          <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
-            {t('logs.autoScroll')}
-          </Checkbox>
-          <Button size="small" icon={<FolderOpenOutlined />} onClick={async () => {
-            try { await backendService.openLogsFolder(); } catch { message.error(t('common.failedToOpen')); }
-          }}>{t('logs.folder')}</Button>
-          <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs}>{t('common.refresh')}</Button>
-          <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>{t('common.download')}</Button>
-          <Popconfirm title={t('logs.clearConfirm')} onConfirm={handleClearLogs} okText={t('logs.clear')} cancelText={t('common.cancel')}>
-            <Button size="small" danger icon={<DeleteOutlined />}>{t('logs.clear')}</Button>
-          </Popconfirm>
-        </Space>
-      </div>
-      <div className="gs-section-body">
-      <Card className="gs-section-card">
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <div style={{ flexShrink: 0, paddingBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <Space>
+            <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
+              <Option value="all">{t('logs.all')}</Option>
+              <Option value="info">INFO</Option>
+              <Option value="warn">WARN</Option>
+              <Option value="error">ERROR</Option>
+            </Select>
+            <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
+              {t('logs.autoScroll')}
+            </Checkbox>
+          </Space>
+          <Space>
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs} loading={logLoading}>{t('common.refresh')}</Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>{t('common.download')}</Button>
+            <Popconfirm title={t('logs.clearConfirm')} onConfirm={handleClearLogs} okText={t('logs.clear')} cancelText={t('common.cancel')}>
+              <Button size="small" danger icon={<DeleteOutlined />}>{t('logs.clear')}</Button>
+            </Popconfirm>
+          </Space>
+        </div>
         <div
           ref={containerRef}
           style={{
