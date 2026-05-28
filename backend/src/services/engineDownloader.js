@@ -458,7 +458,7 @@ class EngineDownloader {
    * 运行引擎安装脚本（从 ci/ 目录读取，支持热更新）
    * 优先 .py，回退 .bat；找不到则报错
    */
-  _runInstallScript(engineId, version, installPath, runtimeId = null) {
+  async _runInstallScript(engineId, version, installPath, runtimeId = null) {
     const python313 = path.join(PROJECT_ROOT, 'external', 'python313', 'python.exe');
     const pyScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
     const batScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
