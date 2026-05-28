@@ -93,6 +93,8 @@ async function getAmdSoftwareVersion() {
   }
 }
 
+let _nvidiaSmiAvailable = true;
+
 export async function getGpuInfo(options = {}) {
   const { namesOnly = false } = options;
 
