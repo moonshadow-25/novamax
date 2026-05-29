@@ -73,6 +73,13 @@ function WorkbenchPage() {
   const [paramDefinitions, setParamDefinitions] = useState([]);
   const [paramValues, setParamValues] = useState({});
 
+  // 工作区 voice_mode 参数决定是否为 clone 模式（默认 clone）
+  const isCloneMode = useMemo(() => {
+    const mode = paramValues?.voice_mode;
+    // 未设置或明确为 clone → clone 模式；design/auto → 非 clone 模式
+    return !mode || mode === 'clone';
+  }, [paramValues]);
+
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
   const loadData = useCallback(async () => {
@@ -193,10 +200,10 @@ function WorkbenchPage() {
     try {
       updateTask(taskId, { status: 'running' });
       const voiceId = selectedVoiceId || workspace?.active_voice_id;
-      if (!voiceId) throw new Error('请先选择一个 Voice');
+      if (isCloneMode && !voiceId) throw new Error('请先选择一个 Voice');
       const apiKey = sourceType === 'file' ? 'novamax-file' : 'novamax-manual';
       await axios.post('/v1/audio/speech', {
-        model: workspace.model_id, input: text, voice: voiceId,
+        model: workspace.model_id, input: text, voice: isCloneMode ? voiceId : '',
         response_format: 'wav',
       }, {
         timeout: 0, responseType: 'blob',
@@ -218,7 +225,7 @@ function WorkbenchPage() {
 
   const handleGenerate = useCallback(async () => {
     if (!textInput.trim()) return message.warning('请输入文本');
-    if (!selectedVoiceId && !workspace?.active_voice_id) return message.warning('请先选择一个 Voice');
+    if (isCloneMode && !selectedVoiceId && !workspace?.active_voice_id) return message.warning('请先选择一个 Voice');
     setGeneratingFile('__text__');
     try { await doGenerateOpenAI(textInput, '', 'manual'); message.success('生成完成'); loadHistory(); }
     catch (e) {
@@ -425,6 +432,7 @@ function WorkbenchPage() {
               </Descriptions>
             </Card>
 
+            {isCloneMode && (
             <Card size="small" title={<Space><AudioOutlined /><span>参考音频管理</span></Space>}
               extra={<Upload beforeUpload={handleRefAudioUpload} showUploadList={false} accept="audio/*"><Button size="small" icon={<UploadOutlined />}>上传</Button></Upload>}
               style={{ marginBottom: 12 }}>
@@ -455,6 +463,7 @@ function WorkbenchPage() {
                   ]} />
               )}
             </Card>
+            )}
 
             {isLocal && (
             <Card size="small" title="📁 输出目录" style={{ marginBottom: 12 }}>
@@ -464,7 +473,7 @@ function WorkbenchPage() {
             <Card size="small" title={<Space><FileTextOutlined /><span>上传文本文件</span></Space>}
               extra={
                 <Space size="small">
-                  <Upload beforeUpload={handleUpload} showUploadList={false} accept=".txt,.text"><Button size="small" icon={<UploadOutlined />}>上传</Button></Upload>
+                  <Upload beforeUpload={handleUpload} showUploadList={false} accept=".txt,.text" multiple><Button size="small" icon={<UploadOutlined />}>上传</Button></Upload>
                   {files.filter(f => f.status !== 'completed').length > 0 && <Tooltip title={`批量生成 ${files.filter(f => f.status !== 'completed').length} 个待处理文件`}><Button size="small" type="primary" icon={<ThunderboltOutlined />} onClick={handleBatchGenerate} loading={batchGenerating}>批量生成</Button></Tooltip>}
                   {files.some(f => f.status === 'completed') && <Popconfirm title="确定清除所有已完成文件？" onConfirm={clearCompletedFiles} okText="清除" cancelText="取消"><Button size="small" danger icon={<ClearOutlined />}>清除已完成</Button></Popconfirm>}
                 </Space>}
@@ -481,8 +490,10 @@ function WorkbenchPage() {
           <Col xs={24} lg={10}>
             <Card size="small" title="✏ TTS 生成" extra={<Text type="secondary" style={{ fontSize: 12 }}>{textInput.length} 字符</Text>} style={{ marginBottom: 12 }}>
               <TextArea rows={5} value={textInput} onChange={e => setTextInput(e.target.value)} placeholder="输入要合成的文本..." style={{ marginBottom: 8 }} />
+              {isCloneMode && (
               <Select value={selectedVoiceId} onChange={setSelectedVoiceId} placeholder="选择 Voice" size="small" style={{ width: '100%', marginBottom: 8 }}
                 options={referenceAudios.map(a => ({ value: a.id, label: `${a.name} (${a.voice_id || a.id})` }))} allowClear />
+              )}
               <Button type="primary" icon={<SoundOutlined />} loading={generatingFile === '__text__'} onClick={handleGenerate} block disabled={!textInput.trim()}>生成语音</Button>
 
               {taskQueue.length > 0 && (
