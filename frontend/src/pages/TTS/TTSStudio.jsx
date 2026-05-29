@@ -97,11 +97,11 @@ function TTSStudio() {
           {workspacesLoading ? <Spin /> : (
             <Row gutter={[16, 16]}>
               {workspaces.map(ws => (
-                <Col xs={24} sm={12} md={8} lg={6} key={ws.id}>
+                <Col span={6} key={ws.id}>
                   <WorkspaceCard workspace={ws} onOpen={handleOpenWorkspace} onClone={openCloneModal} onDelete={handleDeleteWorkspace} />
                 </Col>
               ))}
-              <Col xs={24} sm={12} md={8} lg={6}>
+              <Col span={6}>
                 <div onClick={openCreateModal} style={{ border: '2px dashed #d9d9d9', borderRadius: 8, height: '100%', minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#999', transition: 'all 0.2s', padding: '20px 0' }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = '#1890ff'; e.currentTarget.style.color = '#1890ff'; }} onMouseLeave={e => { e.currentTarget.style.borderColor = '#d9d9d9'; e.currentTarget.style.color = '#999'; }}>
                   <PlusOutlined style={{ fontSize: 20, marginRight: 6 }} /><span>新建工作区</span>
@@ -117,7 +117,7 @@ function TTSStudio() {
           {modelsLoading ? <Spin /> : models.length === 0 ? <Empty description="暂无 TTS 模型" /> : (
             <Row gutter={[16, 16]}>
               {models.map(model => (
-                <Col xs={24} sm={12} md={8} lg={6} key={model.id}>
+                <Col span={6} key={model.id}>
                   <ModelCard model={model} onUpdate={loadModels} isFavorited={false} onToggleFavorite={() => {}} />
                 </Col>
               ))}
