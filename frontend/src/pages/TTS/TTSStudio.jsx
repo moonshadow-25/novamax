@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Space, Typography, message, Spin, Modal, Form, Input, Select, Empty, Row, Col, Collapse } from 'antd';
+import { Button, Space, Typography, message, Spin, Modal, Form, Input, Select, Empty, Collapse } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import WorkspaceCard from '../../components/WorkspaceCard/WorkspaceCard';
 import ModelCard from '../../components/ModelCard/ModelCard';
@@ -95,19 +95,17 @@ function TTSStudio() {
         {/* 工作区 */}
         <div style={{ marginBottom: 24 }}>
           {workspacesLoading ? <Spin /> : (
-            <Row gutter={[16, 16]}>
+            <div className="model-grid">
               {workspaces.map(ws => (
-                <Col span={6} key={ws.id}>
-                  <WorkspaceCard workspace={ws} onOpen={handleOpenWorkspace} onClone={openCloneModal} onDelete={handleDeleteWorkspace} />
-                </Col>
+                <WorkspaceCard key={ws.id} workspace={ws} onOpen={handleOpenWorkspace} onClone={openCloneModal} onDelete={handleDeleteWorkspace} />
               ))}
-              <Col span={6}>
-                <div onClick={openCreateModal} style={{ border: '2px dashed #d9d9d9', borderRadius: 8, height: '100%', minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#999', transition: 'all 0.2s', padding: '20px 0' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#1890ff'; e.currentTarget.style.color = '#1890ff'; }} onMouseLeave={e => { e.currentTarget.style.borderColor = '#d9d9d9'; e.currentTarget.style.color = '#999'; }}>
-                  <PlusOutlined style={{ fontSize: 20, marginRight: 6 }} /><span>新建工作区</span>
+              <div className="add-model-card" onClick={openCreateModal}>
+                <div className="add-model-content">
+                  <div className="add-icon">+</div>
+                  <div>新建工作区</div>
                 </div>
-              </Col>
-            </Row>
+              </div>
+            </div>
           )}
         </div>
 
@@ -115,13 +113,11 @@ function TTSStudio() {
         <div style={{ marginBottom: 24 }}>
           <Title level={5} style={{ margin: 0, marginBottom: 12 }}>引擎管理</Title>
           {modelsLoading ? <Spin /> : models.length === 0 ? <Empty description="暂无 TTS 模型" /> : (
-            <Row gutter={[16, 16]}>
+            <div className="model-grid">
               {models.map(model => (
-                <Col span={6} key={model.id}>
-                  <ModelCard model={model} onUpdate={loadModels} isFavorited={false} onToggleFavorite={() => {}} />
-                </Col>
+                <ModelCard key={model.id} model={model} onUpdate={loadModels} isFavorited={false} onToggleFavorite={() => {}} />
               ))}
-            </Row>
+            </div>
           )}
         </div>
       </div>

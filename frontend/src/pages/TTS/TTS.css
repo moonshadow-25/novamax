@@ -166,6 +166,32 @@
   color: var(--ant-color-text-quaternary, inherit);
 }
 
+/* ── 卡片网格（与 Home 页统一）── */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.add-model-card {
+  border: 2px dashed rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 40px 20px;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+.add-model-card:hover { border-color: #1890ff; color: #1890ff; }
+
+.add-model-content { text-align: center; }
+.add-icon {
+  font-size: 32px; color: rgba(0, 0, 0, 0.25);
+  margin-bottom: 12px;
+}
+
 /* Content area */
 .tts-content { flex: 1; min-height: 0; overflow: hidden; }
 
