@@ -39,12 +39,20 @@ class EngineDownloader {
       throw new Error('Version not found');
     }
 
+    // 父引擎（有 variants）→ 解析到实际 variant engineId
+    // 确保 install_${engineId}.py 能找到正确的安装脚本
+    let effectiveEngineId = engineId;
+    if (engine?.variants && !engine._parentKey && versionInfo.variant_id) {
+      effectiveEngineId = versionInfo.variant_id;
+    }
+
     // 检查依赖
     const depCheck = engineManager.checkDependencies(engineId, version);
-    const tasks = [];
 
-    // 下载缺失的依赖
-    for (const missing of depCheck.missing) {
+    // 下载缺失的依赖（跳过空字符串）
+    const tasks = [];
+    const validMissing = depCheck.missing.filter(d => d.id && d.id.trim());
+    for (const missing of validMissing) {
       const depEngine = engineManager.getEngine(missing.id);
       const depVersion = versionInfo.rocm_version || engineManager.getEngineVersions(missing.id)[0]?.version;
       const taskId = `${missing.id}::${depVersion}`;
@@ -56,15 +64,27 @@ class EngineDownloader {
       tasks.push({ taskId, engineId: missing.id, version: depVersion });
     }
 
-    // 下载主引擎
+    // 下载主引擎（task 用原始 engineId，effectiveEngineId 仅用于安装脚本查找）
     const taskId = `${engineId}::${version}`;
     downloadStateManager.createState(engineId, version, 'engine');
-    tasks.push({ taskId, engineId, version });
+    tasks.unshift({ taskId, engineId, version, _effectiveEngineId: effectiveEngineId !== engineId ? effectiveEngineId : null });
 
-    // 后台执行下载链
-    this._runDownloadChain(tasks, runtimeId);
+    // 下载运行时（若有，并行下载）
+    let runtimeTask = null;
+    if (runtimeId) {
+      const runtime = engineManager.getEngineRuntime(effectiveEngineId, runtimeId);
+      if (runtime?.modelscope_file) {
+        const rtTaskId = `${effectiveEngineId}_runtime_${runtimeId}`;
+        downloadStateManager.createState(rtTaskId, null, 'engine');
+        const effEng = engineManager.getEngine(effectiveEngineId);
+        runtimeTask = { taskId: rtTaskId, engineId: effectiveEngineId, version, isRuntime: true, runtimeFile: runtime.modelscope_file, runtimeRepo: effEng?.modelscope_repo || engine.modelscope_repo };
+      }
+    }
 
-    return { tasks };
+    // 后台执行下载
+    this._runDownloadChain(tasks, runtimeId, runtimeTask);
+
+    return { tasks: runtimeTask ? [...tasks, runtimeTask] : tasks };
   }
 
   /**
@@ -120,8 +140,22 @@ class EngineDownloader {
   /**
    * 执行下载链（依赖 -> 主引擎）
    */
-  async _runDownloadChain(tasks, runtimeId = null) {
+  async _runDownloadChain(tasks, runtimeId = null, runtimeTask = null) {
+    // 先下载运行时（解包合并到引擎目录，安装脚本后续可以看到）
+    if (runtimeTask) {
+      try {
+        await this._runSingleDownload(runtimeTask, null);
+      } catch (err) {
+        downloadStateManager.setState(runtimeTask.taskId, 'failed', err.message, null);
+      }
+    }
+    // 再下载引擎（不传 runtimeId 避免安装脚本重复下载）
     for (const taskInfo of tasks) {
+      await this._runSingleDownload(taskInfo, null);
+    }
+  }
+
+  async _runSingleDownload(taskInfo, runtimeId) {
       const lockKey = `${taskInfo.engineId}::${taskInfo.version}`;
 
       // 若另一条链正在下载同一引擎（如 rocm），等待其完成后跳过重复下载
@@ -131,12 +165,12 @@ class EngineDownloader {
           await this._activeEngineDownloads.get(lockKey);
         } catch (_) {
           // 已有下载失败，当前链也标记失败
-          downloadStateManager.setState(taskInfo.engineId, 'failed', '依赖下载失败', taskInfo.version);
-          eventBus.broadcast('download-progress', { engineId: taskInfo.engineId, status: 'failed', error: '依赖下载失败' });
+          const sid = taskInfo.isRuntime ? taskInfo.taskId : taskInfo.engineId;
+          const sver = taskInfo.isRuntime ? null : taskInfo.version;
+          downloadStateManager.setState(sid, 'failed', '依赖下载失败', sver);
+          eventBus.broadcast('download-progress', { engineId: sid, status: 'failed', error: '依赖下载失败' });
           return;
         }
-        // 已由其他链下载完成，继续下一个任务
-        continue;
       }
 
       let resolveLock, rejectLock;
@@ -144,24 +178,22 @@ class EngineDownloader {
       lockPromise.catch(() => {}); // 防止无等待者时 unhandled rejection 导致进程崩溃
       this._activeEngineDownloads.set(lockKey, lockPromise);
 
+      const stateId = taskInfo.isRuntime ? taskInfo.taskId : taskInfo.engineId;
+      const stateVer = taskInfo.isRuntime ? null : taskInfo.version;
+
       try {
-        downloadStateManager.setState(taskInfo.engineId, 'downloading', null, taskInfo.version);
-        eventBus.broadcast('download-progress', {
-          engineId: taskInfo.engineId,
-          status: 'downloading'
-        });
+        downloadStateManager.setState(stateId, 'downloading', null, stateVer);
+        eventBus.broadcast('download-progress', { engineId: stateId, status: 'downloading' });
 
-        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId);
+        const effId = taskInfo._effectiveEngineId || taskInfo.engineId;
+        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo, effId);
 
-        downloadStateManager.setState(taskInfo.engineId, 'completed', null, taskInfo.version);
-        downloadStateManager.updateProgress(taskInfo.engineId, 100, 0, taskInfo.version);
-        eventBus.broadcast('download-progress', {
-          engineId: taskInfo.engineId,
-          status: 'completed'
-        });
+        downloadStateManager.setState(stateId, 'completed', null, stateVer);
+        downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
+        eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
         resolveLock();
       } catch (error) {
-        downloadStateManager.setState(taskInfo.engineId, 'failed', error.message, taskInfo.version);
+        downloadStateManager.setState(stateId, 'failed', error.message, stateVer);
         eventBus.broadcast('download-progress', {
           engineId: taskInfo.engineId,
           status: 'failed',
@@ -172,7 +204,6 @@ class EngineDownloader {
       } finally {
         this._activeEngineDownloads.delete(lockKey);
       }
-    }
   }
 
   /**
@@ -181,7 +212,54 @@ class EngineDownloader {
    *   - download_url：直接 HTTP 下载（测试版）
    *   - modelscope_repo + modelscope_file：ModelScope 下载（正式版）
    */
-  async _downloadEngine(engineId, version, runtimeId = null) {
+  async _downloadEngine(engineId, version, runtimeId = null, taskInfo = {}, installEngineId = null) {
+    // engineId: 引擎管理（getEngine, getEngineVersionInfo）用的真实 ID
+    // installEngineId: 安装脚本查找用的 ID（可能为 variant ID）
+    const installId = installEngineId || engineId;
+    // 运行时下载
+    if (taskInfo.isRuntime) {
+      const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
+      await fsp.mkdir(downloadDir, { recursive: true });
+      const filename = path.basename(taskInfo.runtimeFile);
+      const filePath = path.join(downloadDir, filename);
+      await fsp.unlink(filePath).catch(() => {});
+
+      const repo = taskInfo.runtimeRepo;
+      await this._execDownload(taskInfo.taskId, '', repo, taskInfo.runtimeFile, downloadDir);
+
+      // 解压到临时目录，解包后合并到引擎目录
+      const realEngineId = engineId.split('::')[0];
+      const eng = engineManager.getEngine(realEngineId);
+      const enginePath = engineManager.getEnginePath(realEngineId);
+      const installPath = enginePath || (eng?._parentKey
+        ? path.join(PROJECT_ROOT, 'external', eng._parentKey, realEngineId, version)
+        : path.join(PROJECT_ROOT, 'external', realEngineId, version));
+      const tmpExtract = installPath + '___runtime_tmp';
+      await fsp.rm(tmpExtract, { recursive: true, force: true }).catch(() => {});
+      await fsp.mkdir(tmpExtract, { recursive: true });
+      await this._extract(filePath, tmpExtract);
+
+      // 解包单层子目录
+      let sourcePath = tmpExtract;
+      const entries = await fsp.readdir(tmpExtract).catch(() => []);
+      if (entries.length === 1) {
+        const singleDir = path.join(tmpExtract, entries[0]);
+        if ((await fsp.stat(singleDir).catch(() => null))?.isDirectory()) {
+          sourcePath = singleDir;
+        }
+      }
+
+      // 合并到引擎目录
+      await fsp.mkdir(installPath, { recursive: true });
+      for (const f of await fsp.readdir(sourcePath)) {
+        await fsp.rename(path.join(sourcePath, f), path.join(installPath, f)).catch(async () => {
+          await fsp.cp(path.join(sourcePath, f), path.join(installPath, f), { recursive: true });
+        });
+      }
+      await fsp.rm(tmpExtract, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
+
     const engine = engineManager.getEngine(engineId);
     const versionInfo = engineManager.getEngineVersionInfo(engineId, version);
 
@@ -218,8 +296,12 @@ class EngineDownloader {
       throw new Error(`下载失败：文件不存在或大小为0，请重试`);
     }
 
-    // 解压到临时目录
-    const tempExtractPath = path.join(PROJECT_ROOT, 'external', engineId, `_temp_${version}`);
+    // 解压到临时目录（与最终安装目录同层级，避免 rename 跨目录失败）
+    const vInfo2 = engineManager.getEngineVersionInfo(engineId, version);
+    let tempDir = engineId;
+    if (vInfo2?.variant_id) tempDir = path.join(engineId, vInfo2.variant_id);
+    else if (engine?._parentKey) tempDir = path.join(engine._parentKey, engineId);
+    const tempExtractPath = path.join(PROJECT_ROOT, 'external', tempDir, `_temp_${version}`);
     downloadStateManager.setState(engineId, 'unpacking', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'unpacking' });
     try {
@@ -231,19 +313,40 @@ class EngineDownloader {
       throw err;
     }
 
-    // 确定最终安装目录名：TTS 引擎使用 variant.id，其他引擎使用 version
-    let installDirName = version;
-    if (engineId === 'tts') {
-      const vInfo = engineManager.getEngineVersionInfo(engineId, version);
-      installDirName = vInfo?.variant_id || version;
+    // 确定最终安装目录
+    const _eng = engineManager.getEngine(engineId);
+    const vInfo = engineManager.getEngineVersionInfo(engineId, version);
+    let installDirName;
+    if (vInfo?.variant_id) {
+      // 父引擎的 variant 版本：external/{parentId}/{variantId}/{version}/
+      installDirName = path.join(engineId, vInfo.variant_id, version);
+    } else if (_eng?._parentKey) {
+      // variant 引擎自身：external/{parentKey}/{variantId}/{version}/
+      installDirName = path.join(_eng._parentKey, engineId, version);
+    } else {
+      // 独立引擎：external/{engineId}/{version}/
+      installDirName = path.join(engineId, version);
     }
-    const installPath = path.join(PROJECT_ROOT, 'external', engineId, installDirName);
+    const installPath = path.join(PROJECT_ROOT, 'external', installDirName);
 
     // 如果最终目录已存在（旧版本），先删除
     await fsp.rm(installPath, { recursive: true, force: true }).catch(() => {});
 
     // 重命名临时目录到最终目录
     await fsp.rename(tempExtractPath, installPath);
+
+    // 解包顶层单目录（tar 包常多一层，如 qwen3-asr/xxx）
+    const installedEntries = await fsp.readdir(installPath).catch(() => []);
+    if (installedEntries.length === 1) {
+      const singleDir = path.join(installPath, installedEntries[0]);
+      const stat = await fsp.stat(singleDir).catch(() => null);
+      if (stat?.isDirectory()) {
+        const tmpMove = installPath + '___unwrap_tmp';
+        await fsp.rename(singleDir, tmpMove);
+        await fsp.rm(installPath, { recursive: true, force: true });
+        await fsp.rename(tmpMove, installPath);
+      }
+    }
 
     // 安装步骤
     if (engine.category === 'app') {
@@ -269,17 +372,15 @@ class EngineDownloader {
     // 普通引擎：运行安装脚本（脚本负责写 .installed）
     await this._runInstallScript(engineId, version, installPath, runtimeId);
 
-    // 安装脚本可能覆盖 .installed，补充 version 字段
+    // 安装脚本可能未写 version，统一补充
     const markerPath = path.join(installPath, '.installed');
-    if (engineId === 'tts') {
-      try {
-        const m = JSON.parse(await fsp.readFile(markerPath, 'utf-8'));
-        if (!m.version) {
-          m.version = version;
-          await fsp.writeFile(markerPath, JSON.stringify(m));
-        }
-      } catch {}
-    }
+    try {
+      const m = JSON.parse(await fsp.readFile(markerPath, 'utf-8'));
+      if (!m.version) {
+        m.version = version;
+        await fsp.writeFile(markerPath, JSON.stringify(m));
+      }
+    } catch {}
 
     // 清理下载文件
     await fsp.unlink(filePath).catch(() => {});
@@ -341,17 +442,18 @@ class EngineDownloader {
 
       // 必须消费 stdout，防止管道缓冲区满导致子进程阻塞
       let stdout = '';
-      proc.stdout.on('data', (data) => { stdout += data.toString(); });
+      proc.stdout.on('data', (data) => { stdout += data.toString('utf-8'); });
 
       let stderr = '';
 
       proc.stderr.on('data', (data) => {
-        const line = data.toString();
+        const line = data.toString('utf-8');
         stderr += line;
-        console.log(' ', line.trim());
+        console.log('[engineDownloader] stderr:', line.trim());
 
         // 解析进度并更新到 downloadStateManager
         const info = this._parseTqdmLine(line);
+        console.log('[engineDownloader] parsed:', JSON.stringify(info));
         if (info.progress != null) {
           downloadStateManager.updateProgress(engineId, info.progress, info.speed || 0, version);
           if (info.downloadedBytes && info.totalBytes) {
@@ -459,9 +561,22 @@ class EngineDownloader {
    * 优先 .py，回退 .bat；找不到则报错
    */
   async _runInstallScript(engineId, version, installPath, runtimeId = null) {
+    // 尝试 variant 脚本，不存在则回退到父引擎脚本
+    const eng = engineManager.getEngine(engineId);
+    const parentId = eng?._parentKey;
+    const scriptIds = [engineId];
+    if (parentId) scriptIds.push(parentId);
+
+    let pyScript = null, batScript = null;
     const python313 = path.join(PROJECT_ROOT, 'external', 'python313', 'python.exe');
-    const pyScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
-    const batScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
+    for (const sid of scriptIds) {
+      const py = path.join(PROJECT_ROOT, 'ci', `install_${sid}.py`);
+      const bat = path.join(PROJECT_ROOT, 'ci', `install_${sid}.bat`);
+      if (fs.existsSync(py) && fs.existsSync(python313)) { pyScript = py; break; }
+      if (fs.existsSync(bat)) { batScript = bat; break; }
+    }
+    if (!pyScript && !batScript) pyScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
+    if (!pyScript && !batScript) batScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
 
     const hasPy = fs.existsSync(pyScript) && fs.existsSync(python313);
     const hasBat = fs.existsSync(batScript);
@@ -470,15 +585,16 @@ class EngineDownloader {
       // 无需安装脚本的引擎（如 ffmpeg）：zip 解压后直接可用
       const dirents = await fsp.readdir(installPath).catch(() => []);
       const hasBin = dirents.some(f => f.endsWith('.exe'));
-      if (hasBin) {
+      // 有 .exe 或有 contract.json+adapter.js 的引擎无需安装脚本
+      const hasContract = dirents.some(f => f === 'contract.json') && dirents.some(f => f === 'adapter.js');
+      if (hasBin || hasContract) {
         console.log(`No install script needed for ${engineId}, marking as installed`);
         const markerPath = path.join(installPath, '.installed');
-        // TTS 引擎记录 variant_id 和实际 version
         const markerData = { installed_at: new Date().toISOString(), engine: engineId };
         if (engineId === 'tts') {
           const vInfo = engineManager.getEngineVersionInfo(engineId, version);
           markerData.version = version;
-          markerData.variant_id = vInfo?.variant_id || installDirName;
+          markerData.variant_id = vInfo?.variant_id || path.basename(path.dirname(installPath));
         }
         await fsp.writeFile(markerPath, JSON.stringify(markerData));
         return;

@@ -6,7 +6,7 @@ import LLMChat from './pages/LLMChat/LLMChat';
 import ComfyUI from './pages/ComfyUI/ComfyUI';
 import TTS from './pages/TTS/TTS';
 import WorkbenchPage from './pages/TTS/Workbench';
-import Whisper from './pages/Whisper/Whisper';
+import ASRUse from './pages/ASR/ASRUse';
 import Settings from './pages/Settings/Settings';
 import GlobalSettings from './pages/GlobalSettings/GlobalSettings';
 
@@ -21,8 +21,10 @@ function App() {
           <Route path="/tts/workspace/:id" element={<WorkbenchPage />} />
           <Route path="/tts/:modelId" element={<Navigate to="/?tab=tts" replace />} />
           <Route path="/tts" element={<Navigate to="/?tab=tts" replace />} />
-          <Route path="/whisper/:modelId" element={<Whisper />} />
-          <Route path="/whisper" element={<Whisper />} />
+          <Route path="/asr/use" element={<ASRUse />} />
+          <Route path="/asr" element={<Navigate to="/?tab=asr" replace />} />
+          <Route path="/whisper/:modelId" element={<Navigate to="/?tab=asr" replace />} />
+          <Route path="/whisper" element={<Navigate to="/?tab=asr" replace />} />
           <Route path="/settings/:modelId" element={<Settings />} />
           <Route path="/global-settings" element={<GlobalSettings />} />
           <Route path="*" element={<Navigate to="/" replace />} />

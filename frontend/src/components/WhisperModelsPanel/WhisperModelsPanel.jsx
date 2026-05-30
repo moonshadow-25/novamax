@@ -4,7 +4,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined,
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined
 } from '@ant-design/icons';
-import { whisperService, downloadService } from '../../services/api';
+import { asrModelsService, downloadService } from '../../services/api';
 import './WhisperModelsPanel.css';
 
 const { Title, Text } = Typography;
@@ -52,7 +52,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       const list = data.downloads || [];
       const restored = {};
       for (const dl of list) {
-        if (dl.type !== 'whisper') continue;
+        if (dl.type !== 'asr') continue;
         if (dl.sourceModelId !== modelId) continue;
         restored[dl.targetQuantization] = {
           taskId: dl.comfyuiTaskId,
@@ -72,7 +72,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
   const loadStatus = async () => {
     if (!modelId) return;
     try {
-      const res = await whisperService.getFilesStatus(modelId);
+      const res = await asrModelsService.getFilesStatus(modelId);
       if (res.success) {
         setFiles(res.files || []);
         setSummary(res.summary || {});
@@ -91,7 +91,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       const done = [];
       await Promise.all(entries.map(async ([filename, info]) => {
         try {
-          const res = await whisperService.getDownloadStatus(info.taskId);
+          const res = await asrModelsService.getDownloadStatus(info.taskId);
           const t = res.task;
           if (!t || t.status === 'completed' || t.status === 'not_found') {
             done.push(filename);
@@ -123,7 +123,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
   const handleDownload = async (filename) => {
     setTasks(prev => ({ ...prev, [filename]: { taskId: null, progress: 0 } }));
     try {
-      const res = await whisperService.downloadFile(modelId, filename);
+      const res = await asrModelsService.downloadFile(modelId, filename);
       if (res.success) {
         setTasks(prev => ({ ...prev, [filename]: { taskId: res.taskId, progress: 0 } }));
       } else {
@@ -140,7 +140,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.pauseDownload(taskId);
+      await asrModelsService.pauseDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: true, speed: 0 } }));
     } catch (e) { message.error('暂停失败'); }
   };
@@ -149,7 +149,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.resumeDownload(taskId);
+      await asrModelsService.resumeDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: false } }));
     } catch (e) { message.error('恢复失败'); }
   };
@@ -158,7 +158,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     const taskId = tasks[filename]?.taskId;
     if (!taskId) return;
     try {
-      await whisperService.cancelDownload(taskId);
+      await asrModelsService.cancelDownload(taskId);
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
     } catch (e) { message.error('取消失败'); }
   };
@@ -257,7 +257,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       {missingCount > 0 && (
         <div style={{ marginBottom: 12 }}>
           <Text type="warning">
-            还有 {missingCount} 个文件未下载，请先下载后才能启动 Whisper。
+            还有 {missingCount} 个文件未下载，请先下载后才能启动 ASR。
           </Text>
         </div>
       )}

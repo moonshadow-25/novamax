@@ -45,7 +45,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   const latestVariant = latestVersion
     ? versionGroups.find(g => g.id === latestVersion.variant_id)
     : null;
-  const runtimes = latestVariant?.runtimes || [];
+  const runtimes = latestVariant?.runtimes || engineInfo?.runtimes || [];
 
   const isLatestInstalled = latestVersion
     ? engineInfo?.installed_versions?.some(v => v.version === latestVersion.version)
@@ -202,16 +202,16 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
               <Text>{latestVersion?.version}</Text>
             )}
           </div>
-          {latestVersion && (
+          {selectedVersion && (
             <div style={{ marginTop: 4 }}>
               <Text strong>大小：</Text>
-              <Text>{formatBytes(latestVersion.size)}</Text>
+              <Text>{formatBytes(flatVersions.find(v => v.version === selectedVersion)?.size || 0)}</Text>
             </div>
           )}
         </div>
 
-        {/* 运行时环境选择 (仅 TTS 引擎) */}
-        {!downloading && engineId === 'tts' && runtimes.length > 0 && (
+        {/* 运行时环境选择 */}
+        {!downloading && runtimes.length > 0 && (
           <div>
             <Text strong>选择运行时环境：</Text>
             <Select

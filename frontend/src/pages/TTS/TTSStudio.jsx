@@ -7,6 +7,7 @@ import DynamicParamPanel from '../../components/DynamicParamPanel';
 import { ttsStudioService, modelService, engineService } from '../../services/api';
 import { normalizeEngineType } from '../../utils/engineType';
 import FfmpegRequiredModal from '../../components/FfmpegRequiredModal/FfmpegRequiredModal';
+import EngineDownloadModal from '../../components/EngineDownloadModal/EngineDownloadModal';
 import './TTS.css';
 
 const { Title } = Typography;
@@ -87,7 +88,28 @@ function TTSStudio() {
   }, [cloneSource, cloneForm, loadWorkspaces]);
 
   const handleDeleteWorkspace = useCallback(async (ws) => { await ttsStudioService.deleteWorkspace(ws.id); message.success('已删除'); loadWorkspaces(); }, [loadWorkspaces]);
-  const handleOpenWorkspace = useCallback((ws) => { window.open('/tts/workspace/' + ws.id, '_blank'); }, []);
+
+  // 打开工作区前检查引擎是否安装
+  const [pendingOpenWs, setPendingOpenWs] = useState(null);
+  const [missingEngineId, setMissingEngineId] = useState('');
+  const [missingEngineInfo, setMissingEngineInfo] = useState(null);
+
+  const handleOpenWorkspace = useCallback(async (ws) => {
+    const norm = normalizeEngineType(ws.engine_type);
+    try {
+      const engineCheck = await engineService.checkInstalled(norm);
+      if (!engineCheck.installed) {
+        setMissingEngineId(norm);
+        setMissingEngineInfo(engineCheck.engineInfo);
+        setPendingOpenWs(ws);
+        message.warning(`${ws.engine_type} 引擎未安装，请先下载安装`);
+        return;
+      }
+      window.open('/tts/workspace/' + ws.id, '_blank');
+    } catch (e) {
+      message.error('检查引擎状态失败: ' + (e?.message || '未知错误'));
+    }
+  }, []);
 
   return (
     <div style={{ overflowY: 'auto', height: '100%' }}>
@@ -166,6 +188,28 @@ function TTSStudio() {
           } catch { message.error('下载失败'); }
           setFfmpegModalOpen(false);
         }}
+      />
+
+      <EngineDownloadModal
+        visible={!!missingEngineId}
+        engineId={missingEngineId}
+        engineInfo={missingEngineInfo}
+        onComplete={async () => {
+          const engId = missingEngineId;
+          setMissingEngineId('');
+          setMissingEngineInfo(null);
+          // 等待安装完成后再检查
+          try {
+            const check = await engineService.checkInstalled(engId);
+            if (check.installed && pendingOpenWs) {
+              window.open('/tts/workspace/' + pendingOpenWs.id, '_blank');
+              setPendingOpenWs(null);
+            } else {
+              message.info('引擎已安装，请再次点击打开工作区');
+            }
+          } catch { message.info('请再次点击打开工作区'); }
+        }}
+        onCancel={() => { setMissingEngineId(''); setMissingEngineInfo(null); setPendingOpenWs(null); }}
       />
     </div>
   );

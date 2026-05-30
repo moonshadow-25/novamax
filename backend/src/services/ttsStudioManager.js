@@ -144,6 +144,7 @@ class TtsStudioManager {
     fs.mkdirSync(refDir, { recursive: true });
     fs.mkdirSync(uploadsDir, { recursive: true });
     fs.mkdirSync(jobsDir, { recursive: true });
+    fs.mkdirSync(path.join(folderPath, 'outputs'), { recursive: true });
 
     // 复制参考音频
     if (voice_mode === 'clone' && reference_audio_id) {

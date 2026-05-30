@@ -261,8 +261,12 @@ if (fs.existsSync(dataSrc)) {
   const defaultFiles = ['models.json', 'config.json', 'presets.json', 'parameters.json', 'engines.json', 'update.json'];
   defaultFiles.forEach(file => {
     const srcFile = path.join(dataSrc, file);
+    const rootFile = path.join(PROJECT_ROOT, file);
     if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, path.join(dataDest, file));
+    } else if (fs.existsSync(rootFile)) {
+      // data/ 下没有，尝试项目根目录
+      fs.copyFileSync(rootFile, path.join(dataDest, file));
     } else {
       // 创建空的 JSON 文件
       fs.writeFileSync(path.join(dataDest, file), '[]');
@@ -279,6 +283,7 @@ const runtimeDirs = [
   'models_dir',
   'presets',
   'cache',
+  'asr_services',
 ];
 for (const sub of runtimeDirs) {
   fs.mkdirSync(path.join(dataDest, sub), { recursive: true });
@@ -298,10 +303,21 @@ if (fs.existsSync(ttsSrc)) {
     }
   }
 
-  // 复制工作区目录（排除用户上传和历史合成记录）
+  // 复制工作区目录
   const wsSrc = path.join(ttsSrc, 'workspaces');
   if (fs.existsSync(wsSrc)) {
     copyDirectory(wsSrc, path.join(ttsDest, 'workspaces'));
+    // 确保关键子目录存在（空目录在旧版 copyDirectory 中会丢失，保留此保障）
+    const wsDest = path.join(ttsDest, 'workspaces');
+    if (fs.existsSync(wsDest)) {
+      for (const wsDir of fs.readdirSync(wsDest, { withFileTypes: true })) {
+        if (wsDir.isDirectory()) {
+          for (const sub of ['outputs', 'uploads', 'jobs', 'reference']) {
+            fs.mkdirSync(path.join(wsDest, wsDir.name, sub), { recursive: true });
+          }
+        }
+      }
+    }
   }
 
   // 复制参考音频（内置音色）
@@ -439,10 +455,9 @@ if (fs.existsSync(sevenZipPath)) {
 
 function copyDirectory(src, dest, excludeDirs = []) {
   if (!fs.existsSync(src)) return;
-  
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
+
+  // 先创建目标目录（即使源目录为空也创建）
+  fs.mkdirSync(dest, { recursive: true });
 
   const entries = fs.readdirSync(src, { withFileTypes: true });
 

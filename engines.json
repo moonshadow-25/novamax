@@ -1,6 +1,6 @@
 {
-  "version": "1.0.2",
-  "last_updated": "2026-05-28T00:00:00.000000+00:00",
+  "version": "1.0.1",
+  "last_updated": "2026-05-21T12:56:33.889890+00:00",
   "engines": {
     "rocm": {
       "id": "rocm",
@@ -139,6 +139,11 @@
           "modelscope_repo": "shoujiekeji/Novastudio3.0",
           "versions": [
             {
+              "version": "202605281759-index-tts2",
+              "modelscope_file": "tts/index_tts2/index_tts2_202605281759.tar.gz",
+              "size": 35461549  
+            },
+            {
               "version": "202605131733-index-tts2",
               "modelscope_file": "tts/index_tts2/index_tts2_202605131733.tar.gz",
               "size": 68614808
@@ -161,18 +166,24 @@
           ],
           "runtimes": [
             {
-              "id": "rocm",
-              "name": "ROCm + PyTorch",
+              "id": "8060S",
+              "name": "AMD 395+ 8060S",
               "modelscope_file": "tts/engines/index_tts2_engine.zip",
-              "description": "AMD GPU 加速 (ROCm)"
+              "description": "AMD Radeon 8060S iGPU Pytorch运行环境"
             }
           ]
+
         },
         {
           "id": "indextts1.5",
           "name": "IndexTTS 1.5",
           "modelscope_repo": "shoujiekeji/Novastudio3.0",
           "versions": [
+            {
+              "version": "202605281738-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/index_tts1.5_202605281738.tar.gz",
+              "size": 22626227
+            },
             {
               "version": "202605131733-index-tts1.5",
               "modelscope_file": "tts/index_tts1.5/index_tts1.5_202605131733.tar.gz",
@@ -191,35 +202,93 @@
           ],
           "runtimes": [
             {
-              "id": "rocm",
-              "name": "ROCm + PyTorch",
+              "id": "8060S",
+              "name": "AMD 395+ 8060S",
               "modelscope_file": "tts/engines/index_tts1.5_engine.zip",
-              "description": "AMD GPU 加速 (ROCm)"
+              "description": "AMD Radeon 8060S iGPU Pytorch运行环境"
+            }
+          ]
+
+        },
+        {
+          "id": "omnivoice",
+          "name": "OmniVoice",
+          "modelscope_repo": "shoujiekeji/Novastudio3.0",
+          "versions": [
+            {
+              "version": "202605280000-omnivoice",
+              "modelscope_file": "tts/omnivoice/omnivoice_202605280000.tar.gz",
+              "size": 119919
+            }
+          ],
+          "runtimes": [
+            {
+              "id": "8060S",
+              "name": "AMD 395+ 8060S",
+              "modelscope_file": "tts/engines/omnivoice_engine.zip",
+              "description": "AMD Radeon 8060S iGPU Pytorch运行环境"
             }
           ]
         }
       ],
       "dependencies": []
     },
-    "whisper": {
-      "id": "whisper",
-      "name": "Whisper",
+    "asr": {
+      "id": "asr",
+      "name": "ASR",
       "category": "engine",
       "description": "语音识别引擎",
       "modelscope_repo": "shoujiekeji/Novastudio3.0",
-      "versions": [
+      "dependencies": [],
+      "variants": [
         {
-          "version": "202604302055",
-          "modelscope_file": "whisper/whisper_202604302055.tar.gz",
-          "size": 90732006
+          "id": "whisper",
+          "name": "Whisper.cpp",
+          "versions": [
+            {
+              "version": "202605292100",
+              "modelscope_file": "asr/whisper_202605292100_updated.zip",
+              "size": 90090616
+            },
+            {
+              "version": "202604302055",
+              "modelscope_file": "asr/whisper_202604302055.tar.gz",
+              "size": 92000000
+            },
+            {
+              "version": "3.0",
+              "modelscope_file": "asr/whisper_202604231858.tar.gz",
+              "size": 90732011
+            }
+          ]
         },
         {
-          "version": "3.0",
-          "modelscope_file": "whisper/whisper_202604231858.tar.gz",
-          "size": 90732011
+          "id": "qwen3-asr",
+          "name": "Qwen3-ASR",
+          "description": "阿里通义千问语音识别引擎 (PyTorch/transformers)",
+          "versions": [
+            {
+              "version": "20260529",
+              "modelscope_file": "asr/qwen3_asr_engine_20260529.zip",
+              "size": 4910300
+            },
+            {
+              "version": "20260515",
+              "modelscope_file": "asr/qwen3_asr_engine_20260515.tar.gz",
+              "size": 4793313
+            }
+          ],
+          "runtimes": [
+            {
+              "id": "rocm",
+              "name": "AMD ROCm + PyTorch",
+              "modelscope_file": "asr/qwen3_asr_rocm_runtime_20260529.zip",
+              "size": 1296134754,
+              "description": "AMD ROCm + PyTorch 运行环境"
+            }
+          ]
         }
-      ],
-      "dependencies": []
+      ]
     },
     "ffmpeg": {
       "id": "ffmpeg",
@@ -243,12 +312,12 @@
       "description": "NovaMax 主程序",
       "versions": [
         {
-          "version": "2.0.5",
-          "size": 96871997,
+          "version": "2.1.2",
+          "size": 81784008,
           "release_notes": "",
           "min_version": "1.0.0",
-          "release_date": "2026-05-21T12:56:33Z",
-          "download_url": "https://www.firstarpc.com/download/novamax/test/novamax-2.0.5-update.tar.gz"
+          "release_date": "2026-05-28T12:56:33Z",
+          "download_url": "https://www.firstarpc.com/download/novamax/test/novamax-2.1.2-update.tar.gz"
         }
       ],
       "dependencies": []

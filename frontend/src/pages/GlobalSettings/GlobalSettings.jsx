@@ -50,7 +50,7 @@ const GlobalSettings = () => {
   const [exportModels, setExportModels] = useState([]);
   const [exportFileVersion, setExportFileVersion] = useState('1.0');
   const [exportUpdatedAt, setExportUpdatedAt] = useState('');
-  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'whisper', 'tts']);
+  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'asr', 'tts']);
   const [exportVersionMap, setExportVersionMap] = useState({});
   const [exportJson, setExportJson] = useState('');
 
@@ -86,6 +86,11 @@ const GlobalSettings = () => {
   const [ttsLogLevel, setTtsLogLevel] = useState('all');
   const [ttsLogLoading, setTtsLogLoading] = useState(false);
   const [ttsLogAutoScroll, setTtsLogAutoScroll] = useState(true);
+  const [asrLogEntries, setAsrLogEntries] = useState([]);
+  const [asrLogLoading, setAsrLogLoading] = useState(false);
+  const [asrLogAutoScroll, setAsrLogAutoScroll] = useState(true);
+  const asrLogContainerRef = useRef(null);
+  const asrLogAutoScrollRef = useRef(true);
   const ttsLogAutoScrollRef = useRef(true);
   const ttsLogContainerRef = useRef(null);
 
@@ -166,11 +171,12 @@ const GlobalSettings = () => {
         await loadLogs();
       } else {
         await loadTtsLogs();
+        await loadAsrLogs();
       }
       if (!cancelled) logTimerRef.current = setTimeout(poll, 2000);
     };
 
-    if (logTab === 'system') loadLogs(); else loadTtsLogs();
+    if (logTab === 'system') loadLogs(); else if (logTab === 'tts') loadTtsLogs(); else loadAsrLogs();
     logTimerRef.current = setTimeout(poll, 2000);
 
     return () => { cancelled = true; clearTimeout(logTimerRef.current); };
@@ -298,7 +304,7 @@ const GlobalSettings = () => {
   const loadExportModels = async () => {
     try {
       const result = await modelService.getAll();
-      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'whisper', 'tts'].includes(m.type));
+      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'asr', 'tts'].includes(m.type));
       setExportModels(models);
       const now = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 19) + '+08:00';
       setExportUpdatedAt(now);
@@ -476,6 +482,10 @@ const GlobalSettings = () => {
     }
   };
 
+  const loadAsrLogs = async () => {
+    try { setAsrLogLoading(true); const data = await systemService.getAsrLogs(500); setAsrLogEntries(data.logs || []); if (asrLogAutoScrollRef.current && asrLogContainerRef.current) asrLogContainerRef.current.scrollTop = asrLogContainerRef.current.scrollHeight; } catch {} finally { setAsrLogLoading(false); }
+  };
+  const handleClearAsrLogs = async () => { try { await systemService.clearAsrLogs(); setAsrLogEntries([]); message.success('ASR 日志已清除'); } catch { message.error('清除失败'); } };
   const handleClearTtsLogs = async () => {
     try {
       await systemService.clearTtsLogs();
@@ -781,7 +791,7 @@ const GlobalSettings = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));
     const llm = filtered.filter(m => m.type === 'llm');
     const comfyui = filtered.filter(m => m.type === 'comfyui');
-    const whisper = filtered.filter(m => m.type === 'whisper');
+    const asrModels = filtered.filter(m => m.type === 'asr');
     const tts = filtered.filter(m => m.type === 'tts');
 
     const toExportModel = (m) => {
@@ -807,7 +817,7 @@ const GlobalSettings = () => {
     };
     if (exportTypes.includes('llm')) result.models.llm = llm.map(toExportModel);
     if (exportTypes.includes('comfyui')) result.models.comfyui = comfyui.map(toExportModel);
-    if (exportTypes.includes('whisper')) result.models.whisper = whisper.map(toExportModel);
+    if (exportTypes.includes('asr')) result.models.asr = asrModels.map(toExportModel);
     if (exportTypes.includes('tts')) result.models.tts = tts.map(toExportModel);
 
     const json = JSON.stringify(result, null, 2);
@@ -1168,7 +1178,7 @@ const GlobalSettings = () => {
                     options={[
                       { label: 'LLM', value: 'llm' },
                       { label: 'ComfyUI', value: 'comfyui' },
-                      { label: 'Whisper', value: 'whisper' },
+                      { label: 'ASR', value: 'asr' },
                       { label: 'TTS', value: 'tts' }
                     ]}
                   />
@@ -1361,7 +1371,7 @@ const GlobalSettings = () => {
     const processes = systemInfo?.processes || [];
     const typeColorMap = {
       llm: 'blue', comfyui: 'purple',
-      tts: 'green', whisper: 'orange', system: 'default'
+      tts: 'green', asr: 'orange', system: 'default'
     };
     const processColumns = [
       {
@@ -1709,6 +1719,15 @@ const GlobalSettings = () => {
                 children: (
                   <div className="log-tab-content">
                     {renderLogViewer(ttsLogEntries, ttsLogContainerRef, ttsLogLevel, setTtsLogLevel, ttsLogAutoScroll, setTtsLogAutoScroll, ttsLogAutoScrollRef, loadTtsLogs, handleDownloadTtsLogs, handleClearTtsLogs, ttsLogLoading)}
+                  </div>
+                ),
+              },
+              {
+                key: 'asr',
+                label: 'ASR 日志',
+                children: (
+                  <div className="log-tab-content">
+                    {renderLogViewer(asrLogEntries, asrLogContainerRef, 'all', () => {}, asrLogAutoScroll, setAsrLogAutoScroll, asrLogAutoScrollRef, loadAsrLogs, undefined, handleClearAsrLogs, asrLogLoading)}
                   </div>
                 ),
               },

@@ -28,7 +28,7 @@ import { useNavigate } from 'react-router-dom';
 import { normalizeEngineType } from '../../utils/engineType';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import { ENGINE_STATUS_MAP } from '../../utils/engineStatus';
-import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService, ttsStudioService } from '../../services/api';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, asrModelsService, ttsStudioService, asrStudioService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
@@ -358,20 +358,20 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         }
       }
 
-      // Whisper 模型启动前检查 whisper 引擎
-      if (model.type === 'whisper') {
-        const engineResult = await engineService.checkInstalled('whisper');
+      // ASR 模型启动前检查引擎
+      if (model.type === 'asr') {
+        const engineResult = await engineService.checkInstalled(model.engine_id || model.engine_type);
         if (!engineResult.installed) {
           setEngineInfo(engineResult.engineInfo);
-          setEngineTarget('whisper');
+          setEngineTarget(model.engine_id || model.engine_type || '');
           setShowEngineModal(true);
           setLoading(false);
           return;
         }
-        // Whisper 模型启动前检查模型文件是否已下载
-        const filesStatus = await whisperService.getFilesStatus(model.id);
+        // ASR 模型启动前检查模型文件是否已下载
+        const filesStatus = await asrModelsService.getFilesStatus(model.id);
         if (filesStatus.summary && filesStatus.summary.missing > 0) {
-          message.warning('请先下载 Whisper 模型文件');
+          message.warning('请先下载 ASR 模型文件');
           setWhisperModelsVisible(true);
           setLoading(false);
           return;
@@ -398,7 +398,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
-      await backendService.start(model.id, 'single');
+      if (model.type === 'asr') {
+        await asrStudioService.startEngine(model.id);
+      } else {
+        await backendService.start(model.id, 'single');
+      }
       message.info('模型正在启动，请稍候...');
       onUpdate();
     } catch (error) {
@@ -414,7 +418,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleStop = async () => {
     setLoading(true);
     try {
-      await backendService.stop(model.id);
+      if (model.type === 'asr') {
+        await asrStudioService.stopEngine(model.id);
+      } else {
+        await backendService.stop(model.id);
+      }
       message.success('模型已停止');
       onUpdate();
     } catch (error) {
@@ -735,7 +743,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       llm: `/llm/${model.id}`,
       comfyui: `/comfyui/${model.id}`,
       // tts: `/tts/${model.id}`,  // 已改为直接打开 WebUI，如需恢复 React 页面取消此注释并删除上方 tts 块
-      whisper: `/whisper/${model.id}`
+      asr: `/asr/use`
     };
     navigate(routes[model.type]);
   };
@@ -743,7 +751,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleSettings = () => {
     if (model.type === 'comfyui') {
       setComfyuiSettingsVisible(true);
-    } else if (model.type === 'whisper') {
+    } else if (model.type === 'asr') {
       setWhisperSettingsVisible(true);
     } else if (model.type === 'tts') {
       setTtsSettingsVisible(true);
@@ -836,7 +844,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 判断是否可以启动：
   // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'whisper' && !!model.path);
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'asr' && !!model.path);
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
@@ -939,6 +947,19 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 : <StarOutlined />}
               onClick={() => onToggleFavorite?.(model.id)}
               title={isFavorited ? '取消收藏' : '收藏'}
+            />
+          )}
+          {model.type === 'asr' && (
+            <Button
+              size="small"
+              icon={(model.asr_config?.is_default || model.whisper_config?.is_default) ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />}
+              onClick={async (e) => { e.stopPropagation();
+                const asrModels = (await modelService.getByType('asr'))?.models || [];
+                for (const m of asrModels) { if (m.id !== model.id && (m.asr_config?.is_default || m.whisper_config?.is_default)) await modelService.update(m.id, { asr_config: { ...(m.asr_config || m.whisper_config), is_default: false } }); }
+                const cfg = model.asr_config || model.whisper_config || {};
+                await modelService.update(model.id, { asr_config: { ...cfg, is_default: !cfg.is_default } });
+                message.success(cfg.is_default ? '已取消默认' : '已设为默认 ASR 模型'); onUpdate?.(); }}
+              title={model.whisper_config?.is_default ? '取消默认' : '设为默认'}
             />
           )}
           {!!model.modelscope_id && model.type !== 'tts' && (
@@ -1286,22 +1307,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* Whisper 专属按钮 */}
-      {(model.type === 'whisper' && model.source !== 'custom') && (
+      {/* ASR 专属按钮 */}
+      {(model.type === 'asr' && model.source !== 'custom') && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
               中断启动
             </Button>
           ) : isRunning ? (
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                停止
-              </Button>
-              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                使用
-              </Button>
-            </div>
+            <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} block color="red" variant="solid">
+              停止
+            </Button>
           ) : (
             <Button
               type="primary"
@@ -1320,7 +1336,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={() => setWhisperModelsVisible(true)}
             block
           >
-            管理工作流
+            管理模型文件
           </Button>
         </Space>
       )}
@@ -1461,7 +1477,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         />
       </Modal>
 
-      {/* Whisper 模型管理 Modal */}
+      {/* ASR 模型管理 Modal */}
       <Modal
         title={
           <Space>
@@ -1515,7 +1531,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
 
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote、非TTS） */}
-      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'whisper' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'asr' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger

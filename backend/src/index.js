@@ -15,6 +15,7 @@ import engineDownloader from './services/engineDownloader.js';
 import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
 import ttsWorkerManager from './tts/ttsWorkerManager.js';
+import asrWorkerManager from './asr/asrWorkerManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
 import novaAirouterRegistrar from './services/novaAirouterRegistrar.js';
 import { PROJECT_ROOT } from './config/constants.js';
@@ -33,6 +34,9 @@ import whisperRouter from './routes/whisper.js';
 import ttsRouter from './routes/tts.js';
 import ttsStudioRouter from './routes/tts-studio.js';
 import openaiTtsRouter from './routes/openai-tts.js';
+import openaiAsrRouter from './routes/openai-asr.js';
+import asrRouter from './routes/asr.js';
+import asrStudioRouter from './routes/asr-studio.js';
 import multiconnectRouter from './routes/multiconnect.js';
 import chatRouter from './routes/chat.js';
 import eventBus from './services/eventBus.js';
@@ -62,6 +66,7 @@ async function init() {
   }
 
   ttsWorkerManager.start();
+  asrWorkerManager.start();
   novaAirouterRegistrar.init();
   comfyuiInstanceManager.init();
 
@@ -171,10 +176,19 @@ app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
 app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
-app.use('/api', whisperRouter);
+app.use('/api', whisperRouter);  // /api/whisper/* (旧路径兼容)
+// 新 ASR 路径：/api/asr-models/* → 内部委托到 /api/whisper/*
+app.use('/api/asr-models', (req, res, next) => {
+  res.set('Deprecation', 'false');
+  req.url = '/whisper' + req.url;
+  next();
+}, whisperRouter);
+app.use('/api/asr', asrRouter);
+app.use('/api/asr-studio', asrStudioRouter);
 app.use('/api', ttsRouter);
 app.use('/api/tts-studio', ttsStudioRouter);
 app.use('/v1', openaiTtsRouter);
+app.use('/v1', openaiAsrRouter);
 app.use('/api', multiconnectRouter);
 app.use('/api', chatRouter);
 

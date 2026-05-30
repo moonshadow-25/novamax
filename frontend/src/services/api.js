@@ -30,7 +30,8 @@ export const modelService = {
   refreshRemote: (id) => api.post(`/models/${id}/refresh-remote`),
   deleteConfig: (id) => api.delete(`/models/${id}/config`),
   addCustomModel: (data) => api.post('/models/custom', data),
-  addWhisperModels: (data) => api.post('/models/whisper-custom', data),
+  addAsrModels: (data) => api.post('/models/asr-custom', data),
+  addWhisperModels: (data) => api.post('/models/whisper-custom', data),  // @deprecated 兼容旧调用
   addCloudApiModel: (data) => api.post('/models/cloudapi', data),
   testCloudApiModel: (data) => api.post('/models/cloudapi/test', data),
   generateDescription: (id) => api.post(`/models/${id}/generate-description`)
@@ -145,6 +146,7 @@ export const ttsService = {
   cancelDownload: (taskId) => api.post(`/tts/download-cancel/${taskId}`)
 };
 
+/** @deprecated 旧版 whisper 服务，使用 asrModelsService 替代 */
 export const whisperService = {
   transcribe: (file, language) => {
     const fd = new FormData();
@@ -165,6 +167,76 @@ export const whisperService = {
   pauseDownload: (taskId) => api.post(`/whisper/download-pause/${taskId}`),
   resumeDownload: (taskId) => api.post(`/whisper/download-resume/${taskId}`),
   cancelDownload: (taskId) => api.post(`/whisper/download-cancel/${taskId}`)
+};
+
+export const asrModelsService = {
+  getFilesStatus: (modelId) => api.get(`/asr-models/models/${modelId}/files-status`),
+  downloadFile: (modelId, filename) => api.post(`/asr-models/models/${modelId}/download`, { filename }),
+  getDownloadStatus: (taskId) => api.get(`/asr-models/download-status/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/asr-models/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/asr-models/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/asr-models/download-cancel/${taskId}`)
+};
+
+// ==================== ASR ====================
+
+export const asrService = {
+  getCapabilities: (modelId) => api.get(`/asr/models/${modelId}/capabilities`),
+  getEngineContracts: () => api.get('/asr/engine-contracts'),
+};
+
+export const asrStudioService = {
+  // Files (shared)
+  uploadFiles: (formData) => api.post('/asr-studio/files', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }),
+  getFiles: () => api.get('/asr-studio/files'),
+  deleteFiles: (filenames) => api.delete('/asr-studio/files', { data: { filenames } }),
+  updateFileStatus: (filename, status) => api.put('/asr-studio/files/status', { filename, status }),
+  deleteCompletedFiles: () => api.delete('/asr-studio/files/completed'),
+  getFilePlayUrl: (filename) => `/api/asr-studio/files/${encodeURIComponent(filename)}/play`,
+  // History (shared)
+  getHistory: (params) => api.get('/asr-studio/history', { params }),
+  deleteHistoryItem: (id) => api.delete(`/asr-studio/history/${id}`),
+  // Output dir (shared)
+  getOutputDir: () => api.get('/asr-studio/output-dir'),
+  setOutputDir: (dir) => api.put('/asr-studio/output-dir', { output_dir: dir }),
+  openOutputDir: (dir) => api.post('/asr-studio/output-dir/open', { output_dir: dir }),
+  // Engine
+  startEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/start`),
+  stopEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/stop`),
+  getEngineStatus: () => api.get('/asr-studio/engines/status'),
+  // Logs
+  getLogs: (limit) => api.get(`/asr-studio/logs?limit=${limit || 500}`),
+  clearLogs: () => api.delete('/asr-studio/logs'),
+};
+
+export const openaiAsrService = {
+  transcribe: (file, options = {}) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (options.model) fd.append('model', options.model);
+    if (options.language) fd.append('language', options.language);
+    if (options.response_format) fd.append('response_format', options.response_format);
+    if (options.temperature != null) fd.append('temperature', String(options.temperature));
+    if (options.prompt) fd.append('prompt', options.prompt);
+    if (options.stream) fd.append('stream', 'true');
+    if (options.vad_filter != null) fd.append('vad_filter', String(options.vad_filter));
+
+    if (options.stream) {
+      // 直接 fetch 获取 ReadableStream
+      return fetch('/v1/audio/transcriptions', {
+        method: 'POST',
+        body: fd,
+        headers: { 'Accept': 'text/event-stream' },
+        signal: AbortSignal.timeout?.(7200000),
+      });
+    }
+
+    return api.post('/v1/audio/transcriptions', fd, {
+      timeout: 7200000,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  listModels: () => api.get('/v1/audio/models'),
 };
 
 export const configService = {
@@ -205,6 +277,8 @@ export const systemService = {
   getTtsLogs: (limit = 500, level = 'all') => api.get(`/system/logs/tts?limit=${limit}&level=${level}`),
   clearLogs: () => api.delete('/system/logs'),
   clearTtsLogs: () => api.delete('/system/logs/tts'),
+  getAsrLogs: (limit = 500) => api.get(`/asr-studio/logs?limit=${limit}`),
+  clearAsrLogs: () => api.delete('/asr-studio/logs'),
   openFolder: (dirPath) => api.post('/system/storage/open', { dirPath }),
   migrateStorage: (type, targetPath, backup = false) => api.post('/system/storage/migrate', { type, targetPath, backup }),
   restoreStorage: (type) => api.post('/system/storage/restore', { type }),

@@ -12,7 +12,7 @@ class ModelManager {
       llm: [],
       comfyui: [],
       tts: [],
-      whisper: []
+      asr: []
     };
     this.db = null;
 
@@ -57,10 +57,20 @@ class ModelManager {
 
   _loadFromDB() {
     const rows = this.db.prepare('SELECT id, type, data FROM models ORDER BY rowid').all();
-    this.models = { llm: [], comfyui: [], tts: [], whisper: [] };
+    this.models = { llm: [], comfyui: [], tts: [], asr: [] };
     for (const row of rows) {
       try {
         const model = JSON.parse(row.data);
+        // 归一化：旧 type='whisper' → 'asr'
+        if (row.type === 'whisper') { row.type = 'asr'; model.type = 'asr'; this.db.prepare('UPDATE models SET type = ? WHERE id = ?').run('asr', row.id); }
+        // 归一化：旧 whisper_config → asr_config（同时清除端口字段）
+        if (model.whisper_config && !model.asr_config) {
+          model.asr_config = model.whisper_config;
+          delete model.whisper_config;
+          delete model.asr_config.whisper_port;
+          delete model.asr_config.flask_port;
+          this.db.prepare('UPDATE models SET data = ? WHERE id = ?').run(JSON.stringify(model), row.id);
+        }
         if (this.models[row.type]) {
           this.models[row.type].push(model);
         }
@@ -132,6 +142,8 @@ class ModelManager {
   }
 
   async create(type, modelData) {
+    // 归一化：旧 type='whisper' → 'asr'
+    if (type === 'whisper') type = 'asr';
     const normalizedModelData = { ...modelData };
 
     if (type === 'llm') {
@@ -341,9 +353,18 @@ class ModelManager {
         mergedFiles[0].is_active = true;
       }
 
-      await this.update(model.id, {
-        downloaded_files: mergedFiles
-      });
+      const updates = { downloaded_files: mergedFiles };
+
+      // ASR 模型：自动设置 path（指向已下载的 asr 角色文件）
+      if ((model.type === 'asr') && !model.path && model.models?.length) {
+        const asrFile = model.models.find(f => f.role === 'asr');
+        if (asrFile) {
+          const filePath = path.join(MODELS_RUN_DIR, 'asr', model.id, asrFile.filename);
+          if (fs.existsSync(filePath)) updates.path = filePath;
+        }
+      }
+
+      await this.update(model.id, updates);
     }
   }
 

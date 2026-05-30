@@ -258,7 +258,7 @@ router.delete('/engines/:id/versions/:version', async (req, res) => {
       llamacpp: ['llm'],
       comfyui:  ['comfyui'],
       tts:      ['tts'],
-      whisper:  ['whisper'],
+      asr:      ['whisper'],
       rocm:     ['llm', 'comfyui']   // rocm 是 llamacpp/comfyui 的依赖
     };
 

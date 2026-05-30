@@ -1,13 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
+import { Drawer, Form, InputNumber, Select, Button, Space, message, Alert, Popconfirm, Divider, Tooltip, Typography } from 'antd';
 import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { engineService, modelService, backendService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
-const { Text } = Typography;
-
-const WHISPER_LANGUAGES = [
+const ASR_LANGUAGES = [
   { value: 'auto', label: '自动检测' },
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
@@ -19,6 +17,8 @@ const WHISPER_LANGUAGES = [
   { value: 'ru', label: 'Русский' },
 ];
 
+const { Text } = Typography;
+
 function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -28,10 +28,13 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [showEngineModal, setShowEngineModal] = useState(false);
   const [selectedEngineVersion, setSelectedEngineVersion] = useState(null);
   const [latestEngineVersion, setLatestEngineVersion] = useState(null);
+  const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
+  const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
 
   const refreshEngineStatus = useCallback(async () => {
     try {
-      const res = await engineService.getById('whisper');
+      const engineId = model?.engine_id || model?.engine_type || 'asr';
+      const res = await engineService.getById(engineId);
       const installedVersions = res.installed_versions || [];
       const availableVersions = res.versions || [];
       const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
@@ -43,6 +46,14 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       setLatestEngineVersion(latestInstalledVersion);
       setEngineInstalled(installedVersions.length > 0);
       setSelectedEngineVersion(model?.engine_version || null);
+
+      // 检测更新（同 TTS）
+      if (availableVersions.length > 0 && installedVersions.length > 0) {
+        const sorted = [...availableVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+        const latest = sorted[0].version;
+        setLatestAvailableVersion(latest);
+        setEngineUpdateAvailable(latest !== latestInstalledVersion);
+      }
     } catch {
       setEngineInfo(null);
       setEngines([]);
@@ -53,13 +64,9 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   useEffect(() => {
     if (!visible || !model) return;
 
-    const cfg = model.whisper_config || {};
+    const cfg = model.asr_config || model.whisper_config || {};
     form.setFieldsValue({
-      threads: cfg.threads ?? 8,
-      language: cfg.language || 'auto',
-      enable_vad: cfg.enable_vad ?? false,
-      whisper_port: cfg.whisper_port ?? 18181,
-      flask_port: cfg.flask_port ?? 8281,
+      idle_timeout_min: cfg.idle_timeout_min ?? 5,
     });
   }, [visible, model, form]);
 
@@ -83,7 +90,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     if (!model?.id) return;
     try {
       await modelService.delete(model.id);
-      message.success('Whisper 卡片已删除');
+      message.success('ASR 卡片已删除');
       onClose();
       onDelete?.();
       onSave?.();
@@ -92,19 +99,16 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     }
   };
 
-  const handleSubmit = async ({ closeAfter = true, successText = 'Whisper 配置已保存' } = {}) => {
+  const handleSubmit = async ({ closeAfter = true, successText = 'ASR 配置已保存' } = {}) => {
     if (!model?.id) return;
     try {
       const values = await form.validateFields();
       setSaving(true);
 
+      // 仅保留需要用户配置的字段，其余由引擎自动管理
       const payload = {
-        whisper_config: {
-          threads: values.threads,
-          language: values.language,
-          enable_vad: values.enable_vad,
-          whisper_port: values.whisper_port,
-          flask_port: values.flask_port,
+        asr_config: {
+          idle_timeout_min: values.idle_timeout_min,
         },
       };
 
@@ -123,9 +127,9 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   return (
     <>
       <Drawer
-        title={`${model?.name || 'Whisper'} 配置`}
+        title={`${model?.name || 'ASR'} 配置`}
         placement="right"
-        width={520}
+        width={480}
         open={visible}
         onClose={onClose}
         extra={
@@ -135,14 +139,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               size="small"
               loading={saving}
               onClick={async () => {
-                const defaults = model?.default_parameters || {};
-                form.setFieldsValue({
-                  threads: defaults.threads ?? 8,
-                  language: defaults.language || 'auto',
-                  enable_vad: defaults.vad ?? false,
-                  whisper_port: defaults.port ?? 18181,
-                  flask_port: defaults.flask_port ?? 8281,
-                });
+                form.setFieldsValue({ threads: 8, language: 'auto' });
                 await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
               }}
             >
@@ -168,83 +165,47 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
         }
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {/* 引擎版本（只读，始终使用最新版） */}
           <div>
+            <Text strong>引擎版本</Text>
             {!engineInstalled ? (
-              <Alert
-                type="warning"
-                showIcon
-                message="未检测到已安装的 Whisper 引擎"
-                description={
-                  <Button type="primary" size="small" onClick={() => setShowEngineModal(true)}>
-                    安装 Whisper 引擎
-                  </Button>
-                }
-              />
+              <Alert type="warning" showIcon message="未检测到已安装的 ASR 引擎" style={{ marginTop: 8 }}
+                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>安装引擎</Button>} />
+            ) : engineUpdateAvailable ? (
+              <Alert type="info" showIcon message={`新版本可用: ${latestAvailableVersion}（当前: ${latestEngineVersion}）`} style={{ marginTop: 8 }}
+                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>更新引擎</Button>} />
             ) : (
-              <Form layout="vertical" style={{ marginTop: 8 }}>
-                <Form.Item
-                  label={
-                    <span>
-                      引擎版本
-                      <Tooltip title="选择运行此卡片使用的 Whisper 引擎版本；留空表示默认（最新版本）。">
-                        <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
-                      </Tooltip>
-                    </span>
-                  }
-                  style={{ marginBottom: 8 }}
-                >
-                  <Select
-                    value={selectedEngineVersion}
-                    onChange={handleEngineVersionChange}
-                    placeholder="默认（最新版本）"
-                    allowClear
-                  >
-                    {engines.map((v) => (
-                      <Select.Option key={v.version} value={v.version}>
-                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Form>
+              <div style={{ marginTop: 4 }}>
+                <Text>{latestEngineVersion || '—'}</Text>
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>（最新版本）</Text>
+              </div>
             )}
           </div>
 
           <Divider style={{ margin: '6px 0' }} />
 
           <Form form={form} layout="vertical">
-            <Form.Item label="线程数" name="threads" rules={[{ required: true, message: '请输入线程数' }]}>
-              <InputNumber min={1} max={8} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="默认语言" name="language" rules={[{ required: true, message: '请选择默认语言' }]}>
-              <Select options={WHISPER_LANGUAGES} />
-            </Form.Item>
-
-            <Form.Item label="Whisper 端口" name="whisper_port" rules={[{ required: true, message: '请输入 Whisper 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label="Flask 端口" name="flask_port" rules={[{ required: true, message: '请输入 Flask 端口' }]}>
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item style={{ marginBottom: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span>
-                  启用 VAD
-                  <Tooltip title="VAD（语音活动检测）可自动过滤音频中的静默片段，提升转写准确率并减少幻听。需要提前下载 VAD 模型文件（ggml-silero-v6.2.0.bin）才能生效。">
-                    <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
-                  </Tooltip>
-                </span>
-                <Form.Item name="enable_vad" valuePropName="checked" noStyle>
-                  <Switch />
+            <Form.Item label="闲置自动关闭" style={{ marginBottom: 4 }}>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>引擎收到请求时会自动启动，此设置不影响外部调用。</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>闲置</span>
+                <Form.Item name="idle_timeout_min" rules={[{ required: true }]} noStyle>
+                  <InputNumber min={3} max={30} step={1} style={{ width: 72 }} />
                 </Form.Item>
+                <span>分钟后自动关闭以节约资源</span>
               </div>
             </Form.Item>
           </Form>
 
           <Divider />
+
+          <Alert
+            type="info"
+            showIcon
+            message="引擎端口由系统动态分配，无需手动配置"
+            style={{ fontSize: 12 }}
+          />
+
           <Button
             icon={<FolderOpenOutlined />}
             onClick={async () => {
@@ -264,12 +225,12 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
       <EngineDownloadModal
         visible={showEngineModal}
-        engineId="whisper"
+        engineId={model?.engine_id || model?.engine_type || 'asr'}
         engineInfo={engineInfo}
         onComplete={async () => {
           setShowEngineModal(false);
           await refreshEngineStatus();
-          message.success('Whisper 引擎安装完成');
+          message.success('ASR 引擎安装完成');
         }}
         onCancel={() => setShowEngineModal(false)}
       />

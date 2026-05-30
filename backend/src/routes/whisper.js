@@ -11,10 +11,15 @@ import { DATA_DIR, MODELS_RUN_DIR } from '../config/constants.js';
 
 const router = express.Router();
 
-const uploadDir = path.join(DATA_DIR, 'cache', 'whisper-uploads');
+// 上传临时目录 — 转录完成后由 multer 清理
+const uploadDir = path.join(DATA_DIR, 'cache', 'asr-uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+
+// ASR 模型文件目录
+const ASR_MODELS_DIR = path.join(MODELS_RUN_DIR, 'asr');
+fs.mkdirSync(ASR_MODELS_DIR, { recursive: true });
 
 const upload = multer({
   dest: uploadDir,
@@ -22,7 +27,7 @@ const upload = multer({
 });
 
 function getWhisperBase() {
-  const runningPort = processManager.getRunningPortByType('whisper');
+  const runningPort = processManager.getRunningPortByType('asr');
   const port = runningPort || 8281;
   return `http://127.0.0.1:${port}`;
 }
@@ -200,7 +205,7 @@ router.post('/whisper/translate', upload.single('file'), async (req, res) => {
 router.get('/whisper/health', async (req, res) => {
   // 先查 processManager（进程由本后端启动的情况）
   for (const [, info] of processManager.processes) {
-    if (info.type === 'whisper' && info.ready) {
+    if (info.type === 'asr' && info.ready) {
       return res.json({ status: 'ok' });
     }
   }
@@ -226,11 +231,11 @@ router.get('/whisper/health', async (req, res) => {
 /* ── 模型文件状态 ── */
 router.get('/whisper/models/:modelId/files-status', (req, res) => {
   const model = modelManager.getById(req.params.modelId);
-  if (!model || model.type !== 'whisper') {
+  if (!model || model.type !== 'asr') {
     return res.status(404).json({ error: 'Model not found' });
   }
 
-  const modelDir = path.join(MODELS_RUN_DIR, 'whisper', model.id);
+  const modelDir = path.join(MODELS_RUN_DIR, 'asr', model.id);
   const files = (model.models || []).map(item => {
     const filePath = path.join(modelDir, item.filename);
     const downloaded = fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
@@ -250,7 +255,7 @@ router.get('/whisper/models/:modelId/files-status', (req, res) => {
 /* ── 下载单个模型文件 ── */
 router.post('/whisper/models/:modelId/download', async (req, res) => {
   const model = modelManager.getById(req.params.modelId);
-  if (!model || model.type !== 'whisper') {
+  if (!model || model.type !== 'asr') {
     return res.status(404).json({ error: 'Model not found' });
   }
 
@@ -265,19 +270,19 @@ router.post('/whisper/models/:modelId/download', async (req, res) => {
     return res.status(400).json({ error: '该文件没有配置下载源' });
   }
 
-  const modelDir = path.join(MODELS_RUN_DIR, 'whisper', model.id);
+  const modelDir = path.join(MODELS_RUN_DIR, 'asr', model.id);
   fs.mkdirSync(modelDir, { recursive: true });
 
   // 构造 modelInfo，dest 指定目标目录
   const modelInfo = {
     filename,
-    type: 'whisper',
+    type: 'asr',
     dest: modelDir,
     original_url: url,
     download_sources: { original: url },
     source_model_id: model.id,
     source_model_name: model.name,
-    source_model_type: 'whisper'
+    source_model_type: 'asr'
   };
 
   const taskId = commonDownloader.startDownload(modelInfo, async (result) => {

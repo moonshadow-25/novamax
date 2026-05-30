@@ -79,7 +79,18 @@ class EngineManager {
    * 获取单个引擎定义
    */
   getEngine(engineId) {
-    return this.engines?.engines?.[engineId] || null;
+    // 直接 key 匹配
+    const byKey = this.engines?.engines?.[engineId];
+    if (byKey) return byKey;
+
+    // variants 匹配（如 ASR/TTS）
+    for (const eng of Object.values(this.engines?.engines || {})) {
+      const variants = eng.variants || [];
+      for (const v of variants) {
+        if (v.id === engineId) return { ...v, _parentKey: eng.id, modelscope_repo: v.modelscope_repo || eng.modelscope_repo };
+      }
+    }
+    return null;
   }
 
   /**
@@ -91,34 +102,66 @@ class EngineManager {
     if (!engine) return [];
 
     const installed = [];
-    const basePath = path.join(PROJECT_ROOT, 'external', engineId);
 
-    if (!fs.existsSync(basePath)) return [];
-
-    const versionDirs = fs.readdirSync(basePath, { withFileTypes: true });
-    for (const dir of versionDirs) {
-      if (dir.isDirectory()) {
-        const versionPath = path.join(basePath, dir.name);
-        if (this._isValidEngineDir(engineId, versionPath)) {
-          const stats = fs.statSync(path.join(versionPath, '.installed'));
-          const marker = JSON.parse(fs.readFileSync(path.join(versionPath, '.installed'), 'utf-8'));
-          // 新格式：目录名 = variant_id（如 indextts2）
-          // 旧格式：目录名 = version 字符串（如 202605131733-index-tts2）
-          const isNewFormat = marker.variant_id && String(marker.variant_id).toLowerCase() === String(dir.name).toLowerCase();
-          installed.push({
-            version: marker.version || dir.name,
-            path: versionPath,
-            installed_at: marker.installed_at || stats.mtime.toISOString(),
-            variant_id: marker.variant_id || null,
-            legacy: !isNewFormat
-          });
+    // variants 引擎：扫描每个 variant 的子目录
+    if (engine.variants && !engine._parentKey) {
+      for (const variant of engine.variants) {
+        const varPath = path.join(PROJECT_ROOT, 'external', engineId, variant.id);
+        if (!fs.existsSync(varPath)) continue;
+        const verDirs = fs.readdirSync(varPath, { withFileTypes: true }).filter(d => d.isDirectory());
+        for (const vd of verDirs) {
+          const versionPath = path.join(varPath, vd.name);
+          if (this._isValidEngineDir(engineId, versionPath)) {
+            const marker = JSON.parse(fs.readFileSync(path.join(versionPath, '.installed'), 'utf-8'));
+            installed.push({
+              version: marker.version || vd.name,
+              path: versionPath,
+              installed_at: marker.installed_at || '',
+              variant_id: variant.id,
+              variant_name: variant.name
+            });
+          }
+        }
+      }
+      // 也扫描旧格式目录（无 variant 包裹的版本）
+      const legacyPath = path.join(PROJECT_ROOT, 'external', engineId);
+      if (fs.existsSync(legacyPath)) {
+        for (const d of fs.readdirSync(legacyPath, { withFileTypes: true }).filter(x => x.isDirectory())) {
+          const vp = path.join(legacyPath, d.name);
+          if (this._isValidEngineDir(engineId, vp)) {
+            const isVariantDir = engine.variants.some(v => v.id === d.name);
+            if (isVariantDir) continue; // 跳过 variant 目录本身
+            const marker = JSON.parse(fs.readFileSync(path.join(vp, '.installed'), 'utf-8'));
+            installed.push({
+              version: marker.version || d.name,
+              path: vp,
+              installed_at: marker.installed_at || '',
+              variant_id: null,
+              legacy: true
+            });
+          }
+        }
+      }
+    } else {
+      // 单个引擎或 variant 引擎
+      const dirName = engine._parentKey ? path.join(engine._parentKey, engineId) : engineId;
+      const basePath = path.join(PROJECT_ROOT, 'external', dirName);
+      if (fs.existsSync(basePath)) {
+        for (const d of fs.readdirSync(basePath, { withFileTypes: true }).filter(x => x.isDirectory())) {
+          const versionPath = path.join(basePath, d.name);
+          if (this._isValidEngineDir(engineId, versionPath)) {
+            const marker = JSON.parse(fs.readFileSync(path.join(versionPath, '.installed'), 'utf-8'));
+            installed.push({
+              version: marker.version || d.name,
+              path: versionPath,
+              installed_at: marker.installed_at || ''
+            });
+          }
         }
       }
     }
 
-    // 按版本号倒序排序（最高版本在前）
     installed.sort((a, b) => b.version.localeCompare(a.version));
-
     return installed;
   }
 
@@ -142,18 +185,31 @@ class EngineManager {
    * 获取损坏的版本列表（目录存在但 .installed 缺失）
    */
   getBrokenVersions(engineId) {
-    const basePath = path.join(PROJECT_ROOT, 'external', engineId);
-    if (!fs.existsSync(basePath)) return [];
+    const engine = this.getEngine(engineId);
+    if (!engine) return [];
 
     const broken = [];
-    const versionDirs = fs.readdirSync(basePath, { withFileTypes: true });
-    for (const dir of versionDirs) {
-      if (dir.isDirectory()) {
-        const versionPath = path.join(basePath, dir.name);
-        if (this._isBrokenEngineDir(engineId, versionPath)) {
-          broken.push({ version: dir.name, path: versionPath });
+
+    const checkDir = (basePath) => {
+      if (!fs.existsSync(basePath)) return;
+      for (const dir of fs.readdirSync(basePath, { withFileTypes: true })) {
+        if (dir.isDirectory() && this._isBrokenEngineDir(engineId, path.join(basePath, dir.name))) {
+          broken.push({ version: dir.name, path: path.join(basePath, dir.name) });
         }
       }
+    };
+
+    if (engine._parentKey) {
+      // variant 引擎：external/{parentKey}/{variantId}/
+      checkDir(path.join(PROJECT_ROOT, 'external', engine._parentKey, engineId));
+    } else if (engine.variants) {
+      // 父引擎有 variants：扫描每一 variant
+      for (const v of engine.variants) {
+        checkDir(path.join(PROJECT_ROOT, 'external', engineId, v.id));
+      }
+    } else {
+      // 独立引擎：external/{engineId}/
+      checkDir(path.join(PROJECT_ROOT, 'external', engineId));
     }
     return broken;
   }
@@ -203,7 +259,8 @@ class EngineManager {
 
     const missing = [];
 
-    for (const depId of engine.dependencies || []) {
+    const deps = (engine.dependencies || []).filter(d => d && d.trim());
+    for (const depId of deps) {
       const depVersions = this.getInstalledVersions(depId);
       if (depVersions.length === 0) {
         missing.push({ id: depId, reason: '未安装' });
@@ -301,6 +358,18 @@ class EngineManager {
   /**
    * 重新加载引擎定义（远程配置更新后调用）
    */
+  getEngineRuntime(engineId, runtimeId) {
+    const engine = this.getEngine(engineId);
+    if (!engine) return null;
+    const runtimes = engine.runtimes || [];
+    // 也检查 variants
+    const variants = engine.variants || [];
+    for (const v of variants) {
+      runtimes.push(...(v.runtimes || []));
+    }
+    return runtimes.find(r => r.id === runtimeId) || null;
+  }
+
   reload(data) {
     this.engines = data;
     console.log(`[engineManager] 已重新加载 ${Object.keys(data.engines || {}).length} 个引擎定义`);

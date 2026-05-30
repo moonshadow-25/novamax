@@ -10,5 +10,13 @@
   {
     "source": "src/tts/engineWorker.js",
     "target": "engineWorker.js"
+  },
+  {
+    "source": "src/asr/asrWorker.js",
+    "target": "asrWorker.js"
+  },
+  {
+    "source": "src/asr/asrEngineWorker.js",
+    "target": "asrEngineWorker.js"
   }
 ]

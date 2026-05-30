@@ -337,7 +337,7 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   return (
     <>
-      {type === 'whisper' ? (
+      {type === 'asr' ? (
         <AddWhisperModal
           visible={visible}
           onClose={handleClose}

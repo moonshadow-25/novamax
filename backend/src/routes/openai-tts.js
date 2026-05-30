@@ -30,7 +30,7 @@ function resolveModelDir(engineType) {
 router.get('/audio/models', async (req, res) => {
   try {
     const workspaces = await ttsWorkerManager.send('getWorkspaces');
-    const models = workspaces
+    const ttsModels = workspaces
       .filter(ws => ws.model_id)
       .map(ws => ({
         id: ws.model_id,
@@ -40,7 +40,15 @@ router.get('/audio/models', async (req, res) => {
         engine: ws.engine_type,
         voice_mode: ws.voice_mode,
       }));
-    res.json({ object: 'list', data: models });
+    const asrModels = (modelManager.getByType('asr') || []).map(m => ({
+      id: m.name,
+      object: 'model',
+      created: Math.floor(new Date(m.created_at).getTime() / 1000),
+      owned_by: 'novamax',
+      type: 'asr',
+      language: m.asr_config?.language || (m.whisper_config?.language) || 'auto',
+    }));
+    res.json({ object: 'list', data: [...ttsModels, ...asrModels] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -100,6 +108,11 @@ router.post('/audio/speech', async (req, res) => {
       sourceFile = req.headers['x-source-file'] || '';
     }
 
+    // 检查工作区 voice_mode 参数：非 clone 模式（design/auto）不要求 voice
+    const wsParams = ws.params || {};
+    const voiceMode = wsParams.voice_mode;
+    const isCloneMode = !voiceMode || voiceMode === 'clone';
+
     // 解析 voice：优先用请求中的 voice，无效则回退到激活的默认 voice
     const voices = await ttsWorkerManager.send('listVoices', { page: 1, page_size: 500 });
     const validVoiceIds = new Set((voices.items || []).map(v => v.id));
@@ -108,14 +121,14 @@ router.post('/audio/speech', async (req, res) => {
       : ws.voice_id && validVoiceIds.has(ws.voice_id) ? ws.voice_id
       : '';
 
-    if (!resolvedVoice) {
+    if (isCloneMode && !resolvedVoice) {
       return res.status(400).json({
         error: { message: 'voice is required — no valid voice configured. Upload a reference audio to create one.', type: 'invalid_request_error' }
       });
     }
 
-    // 构建 params：仅使用工作区预设 + speed 覆盖（不接收请求体中的额外字段）
-    const params = { ...(ws.params || {}) };
+    // 构建 params：工作区预设 + speed 覆盖
+    const params = { ...wsParams };
     if (speed != null) params.speed = speed;
 
     const result = await ttsWorkerManager.send('synthesize', {
@@ -125,6 +138,7 @@ router.post('/audio/speech', async (req, res) => {
       outputFormat: response_format || 'wav',
       outputDir: ws.output_dir || '',
       params,
+      skipVoiceResolve: !isCloneMode,
       workspaceId: ws.id,
       sourceFile,
       sourceType,

@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.0",
+  "engine": {
+    "type": "qwen3-asr",
+    "name": "Qwen3-ASR",
+    "version": "0.0.6",
+    "description": "阿里通义千问 Qwen3 语音识别模型",
+    "vendor": "Qwen"
+  },
+  "capabilities": {
+    "model_formats": ["transformers"],
+    "supported_languages": ["auto", "zh", "en", "ja", "ko", "fr", "de", "es", "ru", "pt", "it", "ar", "th", "vi", "tr", "hi", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk", "id", "ms"],
+    "output_formats": ["json", "text", "srt", "vtt", "verbose_json"],
+    "supports_streaming": false,
+    "supports_translation": false,
+    "supports_vad": false,
+    "supports_timestamps": false,
+    "max_audio_duration_seconds": 7200,
+    "max_file_size_mb": 500,
+    "max_concurrency": 1,
+    "sample_rate": 16000
+  },
+  "runtime_config": {
+    "language": { "default": "auto", "label": "默认语言" }
+  },
+  "memory_profile": {
+    "base_vram_mb": 4000,
+    "supports_clear_cache": false,
+    "supports_memory_info": false
+  }
+}

@@ -6,7 +6,7 @@ export const MODEL_TYPES = {
   LLM: 'llm',
   COMFYUI: 'comfyui',
   TTS: 'tts',
-  WHISPER: 'whisper'
+  ASR: 'asr'
 };
 
 export const MODEL_STATUS = {
@@ -29,7 +29,7 @@ export const DEFAULT_PORTS = {
   LLAMACPP_END: 8199,
   COMFYUI: 8188,
   TTS: 8200,
-  WHISPER: 8201
+  ASR: 0  // 0 = 引擎自行分配动态端口
 };
 
 // 使用绝对路径，从项目根目录开始（用于 external 工具等）

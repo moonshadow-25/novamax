@@ -880,7 +880,7 @@ const STORAGE_TYPES = {
   llm: { label: 'LLM 模型', dir: 'llm' },
   comfyui: { label: 'ComfyUI 模型', dir: 'comfyui' },
   tts: { label: 'TTS 模型', dir: 'tts' },
-  whisper: { label: 'Whisper 模型', dir: 'whisper' }
+  asr: { label: 'ASR 模型', dir: 'asr' }
 };
 
 /** 递归计算目录大小 */

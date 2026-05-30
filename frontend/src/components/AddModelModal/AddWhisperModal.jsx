@@ -93,7 +93,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
     setLoading(true);
     setError('');
     try {
-      const response = await modelService.addWhisperModels({
+      const response = await modelService.addAsrModels({
         engine_path: enginePath.trim(),
         models: models.map(m => ({ name: m.name.trim(), path: m.path.trim() })),
       });

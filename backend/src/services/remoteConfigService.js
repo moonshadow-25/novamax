@@ -19,7 +19,7 @@ const USER_FIELDS = [
   'selected_quantization', 'user_parameter_mapping',
   'downloaded_files', 'downloaded_quantizations',
   'local_path',
-  'engine_path', 'whisper_config', 'path'
+  'engine_path', 'asr_config', 'whisper_config', 'path'
 ];
 
 // 远程控制字段（版本升级时从远端覆盖）
@@ -27,7 +27,8 @@ const REMOTE_FIELDS = [
   'name', 'description', 'modelscope_id', 'quantizations',
   'required_models', 'workflow', 'parameter_mapping', 'default_parameters',
   'mmproj_options', 'capabilities',
-  'models', 'config', 'backend', 'model_type'
+  'models', 'config', 'backend', 'model_type',
+  'engine_id', 'engine_version'
 ];
 
 /**
@@ -90,7 +91,10 @@ async function syncModels() {
     remoteData = res.data;
   } catch (err) {
     console.warn(`[remoteConfig] 拉取远程模型配置失败: ${err.message}，尝试读取本地 models.json`);
-    const localModelsPath = path.join(DATA_DIR, 'models.json');
+    let localModelsPath = path.join(DATA_DIR, 'models.json');
+    if (!fs.existsSync(localModelsPath)) {
+      localModelsPath = path.join(PROJECT_ROOT, 'models.json');
+    }
     if (fs.existsSync(localModelsPath)) {
       try {
         remoteData = JSON.parse(fs.readFileSync(localModelsPath, 'utf-8'));
@@ -108,8 +112,8 @@ async function syncModels() {
   let added = 0;
   let updated = 0;
 
-  for (const type of ['llm', 'comfyui', 'tts', 'whisper']) {
-    const list = remoteModels[type] || [];
+  for (const type of ['llm', 'comfyui', 'tts', 'asr']) {
+    const list = remoteModels[type] || (type === 'asr' ? remoteModels['whisper'] : null) || [];
     for (const remoteModel of list) {
       const { id, version: remoteVersion, ...remoteFields } = remoteModel;
       if (!id) continue;
@@ -157,7 +161,7 @@ async function syncModels() {
           const localRefresh = mapRemoteToLocal(refresh);
           if (skipFileFields) delete localRefresh.files;
 
-          // 保留用户本地字段（包括 whisper 的本地配置）
+          // 保留用户本地字段（包括 ASR 的本地配置）
           USER_FIELDS.forEach(f => {
             if (existing[f] !== undefined) localRefresh[f] = existing[f];
           });

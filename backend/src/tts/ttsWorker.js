@@ -365,35 +365,39 @@ function getInstalledEngine(engineType) {
   const ttsDir = path.join(PROJECT_ROOT, 'external', 'tts');
   if (!fs.existsSync(ttsDir)) return null;
 
-  const dirs = fs.readdirSync(ttsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  const normalizedType = normalizeEngineType(engineType);
   const matches = [];
-  for (const d of dirs) {
-    // 跳过临时目录
-    if (d.name.startsWith('_temp_')) continue;
-    const dir = path.join(ttsDir, d.name);
-    const contractPath = path.join(dir, 'contract.json');
-    const adapterPath = path.join(dir, 'adapter.js');
-    const installed = path.join(dir, '.installed');
-    if (!fs.existsSync(contractPath) || !fs.existsSync(adapterPath) || !fs.existsSync(installed)) continue;
+  const variantDirs = fs.readdirSync(ttsDir, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('_temp_'));
 
-    let contract;
-    try { contract = JSON.parse(fs.readFileSync(contractPath, 'utf-8')); } catch { continue; }
-    if (normalizeEngineType(contract?.engine?.type) !== normalizeEngineType(engineType)) continue;
+  for (const variantEntry of variantDirs) {
+    const variantPath = path.join(ttsDir, variantEntry.name);
+    // 扫描两层：variant 目录本身 + variant/{version}/ 子目录
+    const candidateDirs = [variantPath];
+    const versionDirs = fs.readdirSync(variantPath, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('_temp_'));
+    for (const vd of versionDirs) candidateDirs.push(path.join(variantPath, vd.name));
 
-    // 读取 .installed 获取版本号
-    let installedVersion = '0.0.0';
-    try {
-      const m = JSON.parse(fs.readFileSync(installed, 'utf-8'));
-      installedVersion = m.version || contract.engine?.version || '0.0.0';
-    } catch {}
+    for (const dir of candidateDirs) {
+      const cp = path.join(dir, 'contract.json');
+      const ap = path.join(dir, 'adapter.js');
+      const im = path.join(dir, '.installed');
+      if (!fs.existsSync(cp) || !fs.existsSync(ap) || !fs.existsSync(im)) continue;
 
-    // 新格式：目录名 = variant.id（如 indextts2）→ priority 1
-    // 旧格式：目录名 = version（如 202605131733-index-tts2）→ priority 0
-    const priority = normalizeEngineType(d.name) === normalizeEngineType(engineType) ? 1 : 0;
-    matches.push({ contract, adapterPath, dir, version: installedVersion, priority });
+      let contract;
+      try { contract = JSON.parse(fs.readFileSync(cp, 'utf-8')); } catch { continue; }
+      if (normalizeEngineType(contract?.engine?.type) !== normalizedType) continue;
+
+      let installedVersion = '0.0.0';
+      try {
+        const m = JSON.parse(fs.readFileSync(im, 'utf-8'));
+        installedVersion = m.version || contract.engine?.version || '0.0.0';
+      } catch {}
+
+      // priority: variant 目录名匹配 > version 目录名匹配
+      const priority = normalizeEngineType(variantEntry.name) === normalizedType ? 1 : 0;
+      matches.push({ contract, adapterPath: ap, dir, version: installedVersion, priority });
+    }
   }
 
-  // 按 priority 降序，同 priority 按 version 降序
   matches.sort((a, b) => b.priority - a.priority || b.version.localeCompare(a.version, undefined, { numeric: true }));
   return matches[0] || null;
 }
@@ -434,9 +438,32 @@ function listVoices(page = 1, pageSize = 100, search) {
  * 工作区管理
  * ======================================================================== */
 
+function rebuildPath(dbPath) {
+  // DB 存绝对路径，不同机器 PROJECT_ROOT 不同。检测并替换旧根路径。
+  if (!dbPath) return dbPath;
+  const marker = path.join('data', 'tts_services');
+  const idx = dbPath.indexOf(marker);
+  if (idx === -1) return dbPath;
+  const relativePart = dbPath.slice(idx); // data/tts_services/workspaces/NDD4RA/...
+  const newPath = path.join(PROJECT_ROOT, relativePart);
+  return newPath;
+}
+
 function getWorkspace(id) {
   const r = db.prepare('SELECT * FROM tts_workspaces WHERE id = ?').get(id);
-  return r ? { ...r, params: JSON.parse(r.params || '{}') } : null;
+  if (!r) return null;
+  const folderPath = rebuildPath(r.folder_path);
+  const outputDir = rebuildPath(r.output_dir) || path.join(folderPath, 'outputs');
+  return { ...r, params: JSON.parse(r.params || '{}'), folder_path: folderPath, output_dir: outputDir };
+}
+
+function getWorkspaces() {
+  return db.prepare('SELECT * FROM tts_workspaces ORDER BY created_at DESC').all()
+    .map(r => {
+      const folderPath = rebuildPath(r.folder_path);
+      const outputDir = rebuildPath(r.output_dir) || path.join(folderPath, 'outputs');
+      return { ...r, params: JSON.parse(r.params || '{}'), folder_path: folderPath, output_dir: outputDir };
+    });
 }
 
 function getWorkspaceFiles(workspaceId) {
@@ -445,12 +472,6 @@ function getWorkspaceFiles(workspaceId) {
   const metaPath = path.join(ws.folder_path, 'uploads_meta.json');
   return fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf-8')) : [];
 }
-
-function getWorkspaces() {
-  return db.prepare('SELECT * FROM tts_workspaces ORDER BY created_at DESC').all()
-    .map(r => ({ ...r, params: JSON.parse(r.params || '{}') }));
-}
-
 /* ========================================================================
  * 历史
  * ======================================================================== */
@@ -476,12 +497,12 @@ function deleteHistoryItem(id) {
  * ======================================================================== */
 
 async function synthesize(opts) {
-  const { text, voiceId, engineType, outputFormat = 'wav', outputDir = '', params = {}, workspaceId, sourceFile, sourceType, modelDir = '' } = opts;
+  const { text, voiceId, engineType, outputFormat = 'wav', outputDir = '', params = {}, workspaceId, sourceFile, sourceType, modelDir = '', skipVoiceResolve = false } = opts;
   const engineEntry = getOrCreateEngine(engineType);
   engineEntry.lastActiveTime = Date.now();
   addLog('info', `Synthesis start: ${text.length} chars, voice=${voiceId}, engine=${engineType}, workspace=${workspaceId || '-'}${sourceFile ? ', file=' + sourceFile : ''}`);
 
-  const voiceRef = resolveVoice(voiceId);
+  const voiceRef = skipVoiceResolve ? { skip: true } : resolveVoice(voiceId);
 
   // 等待引擎就绪（初始化中则等待，未初始化则启动）
   await ensureInitialized(engineType, modelDir);
