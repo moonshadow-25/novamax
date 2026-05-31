@@ -145,8 +145,8 @@ router.post('/migrate-legacy', async (req, res) => {
 
       // 更新 modelManager 中所有 whisper 模型的 path
       for (const md of modelDirs) {
-        const whisperModels = modelManager.getByType('whisper') || [];
-        for (const m of whisperModels) {
+        const asrModels = modelManager.getByType('asr') || [];
+        for (const m of asrModels) {
           if (!m.path || m.path.includes(`models_dir\\whisper\\`) || m.path.includes(`models_dir/whisper/`)) {
             const newPath = m.path
               .replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/')

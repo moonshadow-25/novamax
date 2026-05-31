@@ -63,12 +63,21 @@ class ModelManager {
         const model = JSON.parse(row.data);
         // 归一化：旧 type='whisper' → 'asr'
         if (row.type === 'whisper') { row.type = 'asr'; model.type = 'asr'; this.db.prepare('UPDATE models SET type = ? WHERE id = ?').run('asr', row.id); }
+        let dataChanged = false;
         // 归一化：旧 whisper_config → asr_config（同时清除端口字段）
         if (model.whisper_config && !model.asr_config) {
           model.asr_config = model.whisper_config;
           delete model.whisper_config;
           delete model.asr_config.whisper_port;
           delete model.asr_config.flask_port;
+          dataChanged = true;
+        }
+        // 归一化：旧 model.path 中的 models_dir/whisper/ → models_dir/asr/
+        if (model.path && (/models_dir[\\/]whisper[\\/]/).test(model.path)) {
+          model.path = model.path.replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/');
+          dataChanged = true;
+        }
+        if (dataChanged) {
           this.db.prepare('UPDATE models SET data = ? WHERE id = ?').run(JSON.stringify(model), row.id);
         }
         if (this.models[row.type]) {
