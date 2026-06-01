@@ -407,6 +407,7 @@ async function dispatch(type, payload) {
         try { await e.worker.terminate(); } catch {}
         engines.delete(payload.modelId);
       }
+      parentPort.postMessage({ type: 'statusChange', payload: { modelId: payload.modelId, status: 'stopped' } });
       return { status: 'stopped' };
     }
     case 'engineStatus': {
@@ -464,5 +465,6 @@ setInterval(() => {
     try { entry.worker.postMessage({ id: genId('disp'), type: 'dispose', payload: {} }); } catch {}
     entry.worker.terminate();
     entry.worker = null; entry.status = 'idle'; entry.initPromise = null;
+    parentPort.postMessage({ type: 'statusChange', payload: { modelId, status: 'stopped' } });
   }
 }, 30000);
