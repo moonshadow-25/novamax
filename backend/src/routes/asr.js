@@ -147,10 +147,8 @@ router.post('/migrate-legacy', async (req, res) => {
       for (const md of modelDirs) {
         const asrModels = modelManager.getByType('asr') || [];
         for (const m of asrModels) {
-          if (!m.path || m.path.includes(`models_dir\\whisper\\`) || m.path.includes(`models_dir/whisper/`)) {
-            const newPath = m.path
-              .replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/')
-              .replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/');
+          if (m.path && (m.path.includes(`models_dir\\whisper\\`) || m.path.includes(`models_dir/whisper/`))) {
+            const newPath = m.path.replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/');
             if (fs.existsSync(newPath)) {
               try { modelManager.update(m.id, { path: newPath }); result.pathUpdated = result.pathUpdated || []; result.pathUpdated.push(m.id); } catch {}
             }
