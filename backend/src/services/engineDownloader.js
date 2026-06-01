@@ -370,7 +370,7 @@ class EngineDownloader {
     }
 
     // 普通引擎：运行安装脚本（脚本负责写 .installed）
-    await this._runInstallScript(engineId, version, installPath, runtimeId);
+    await this._runInstallScript(installId, version, installPath, runtimeId);
 
     // 安装脚本可能未写 version，统一补充
     const markerPath = path.join(installPath, '.installed');
