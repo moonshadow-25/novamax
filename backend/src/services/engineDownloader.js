@@ -65,10 +65,10 @@ class EngineDownloader {
       tasks.push({ taskId, engineId: missing.id, version: depVersion });
     }
 
-    // 下载主引擎（task 用原始 engineId，effectiveEngineId 仅用于安装脚本查找）
+    // 下载主引擎（install 脚本由 _runInstallScript 的 parent→variant fallback 自动发现）
     const taskId = `${engineId}::${version}`;
     downloadStateManager.createState(engineId, version, 'engine');
-    tasks.unshift({ taskId, engineId, version, _effectiveEngineId: effectiveEngineId !== engineId ? effectiveEngineId : null });
+    tasks.unshift({ taskId, engineId, version });
 
     // 下载运行时（若有，并行下载）
     let runtimeTask = null;
@@ -200,8 +200,7 @@ class EngineDownloader {
         downloadStateManager.setState(stateId, 'downloading', null, stateVer);
         eventBus.broadcast('download-progress', { engineId: stateId, status: 'downloading' });
 
-        const effId = taskInfo._effectiveEngineId || taskInfo.engineId;
-        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo, effId);
+        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo);
 
         downloadStateManager.setState(stateId, 'completed', null, stateVer);
         downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
@@ -227,10 +226,7 @@ class EngineDownloader {
    *   - download_url：直接 HTTP 下载（测试版）
    *   - modelscope_repo + modelscope_file：ModelScope 下载（正式版）
    */
-  async _downloadEngine(engineId, version, runtimeId = null, taskInfo = {}, installEngineId = null) {
-    // engineId: 引擎管理（getEngine, getEngineVersionInfo）用的真实 ID
-    // installEngineId: 安装脚本查找用的 ID（可能为 variant ID）
-    const installId = installEngineId || engineId;
+  async _downloadEngine(engineId, version, runtimeId = null, taskInfo = {}) {
     // 运行时下载
     if (taskInfo.isRuntime) {
       const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
@@ -382,7 +378,7 @@ class EngineDownloader {
     }
 
     // 普通引擎：运行安装脚本（脚本负责写 .installed）
-    await this._runInstallScript(installId, version, installPath, runtimeId);
+    await this._runInstallScript(engineId, version, installPath, runtimeId);
 
     // 安装脚本可能未写 version，统一补充
     const markerPath = path.join(installPath, '.installed');
@@ -568,11 +564,14 @@ class EngineDownloader {
    * 优先 .py，回退 .bat；找不到则报错
    */
   async _runInstallScript(engineId, version, installPath, runtimeId = null) {
-    // 尝试 variant 脚本，不存在则回退到父引擎脚本
     const eng = engineManager.getEngine(engineId);
     const parentId = eng?._parentKey;
     const scriptIds = [engineId];
     if (parentId) scriptIds.push(parentId);
+    // 父引擎：同时尝试各 variant 的安装脚本
+    if (eng?.variants && !parentId) {
+      for (const v of eng.variants) scriptIds.push(v.id);
+    }
 
     let pyScript = null, batScript = null;
     const python313 = path.join(PROJECT_ROOT, 'external', 'python313', 'python.exe');
