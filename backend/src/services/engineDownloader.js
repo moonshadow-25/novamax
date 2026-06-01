@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import * as tar from 'tar';
+import AdmZip from 'adm-zip';
 import axios from 'axios';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
@@ -542,32 +543,12 @@ class EngineDownloader {
       await tar.extract({ file: filePath, cwd: targetPath });
     } else if (name.endsWith('.zip')) {
       console.log(`Extracting zip: ${filePath} -> ${targetPath}`);
-      await this._extractZip(filePath, targetPath);
+      new AdmZip(filePath).extractAllTo(targetPath, true);
     } else {
       throw new Error(`不支持的压缩格式: ${path.basename(filePath)}`);
     }
 
     console.log('Extraction complete');
-  }
-
-  /**
-   * 使用 PowerShell 异步解压 zip，避免同步 AdmZip 阻塞事件循环
-   */
-  _extractZip(zipPath, targetPath) {
-    return new Promise((resolve, reject) => {
-      const ps = spawn('powershell', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        `Expand-Archive -Path '${zipPath}' -DestinationPath '${targetPath}' -Force`
-      ], { windowsHide: true });
-
-      let stderr = '';
-      ps.stderr.on('data', (d) => { stderr += d.toString(); });
-      ps.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Zip extraction failed with code ${code}: ${stderr}`));
-      });
-      ps.on('error', reject);
-    });
   }
 
   /**
