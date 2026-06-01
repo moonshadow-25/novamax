@@ -171,7 +171,7 @@ function getOrCreateEngine(modelId, engineType) {
     entry.pending.clear();
   });
 
-  worker.on('exit', () => { engines.delete(modelId); });
+  worker.on('exit', () => { if (!entry._intentionalStop) engines.delete(modelId); });
   return entry;
 }
 
@@ -403,6 +403,7 @@ async function dispatch(type, payload) {
     case 'stopEngine': {
       const e = engines.get(payload.modelId);
       if (e?.worker) {
+        e._intentionalStop = true;
         try { await sendToEngine(payload.modelId, payload.engineType, 'dispose', {}); } catch {}
         try { await e.worker.terminate(); } catch {}
         engines.delete(payload.modelId);
@@ -462,6 +463,7 @@ setInterval(() => {
     if (entry.status !== 'running' || entry.activeTasks > 0 || entry.busy) continue;
     if (now - entry.lastActiveTime < 5 * 60 * 1000) continue;
     addLog('info', `Engine ${modelId} idle timeout, disposing`);
+    entry._intentionalStop = true;
     try { entry.worker.postMessage({ id: genId('disp'), type: 'dispose', payload: {} }); } catch {}
     entry.worker.terminate();
     entry.worker = null; entry.status = 'idle'; entry.initPromise = null;

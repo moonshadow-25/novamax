@@ -224,7 +224,7 @@ function getOrCreateEngine(engineType) {
   });
 
   worker.on('exit', () => {
-    engines.delete(engineType);
+    if (!entry._intentionalStop) engines.delete(engineType);
   });
 
   return entry;
@@ -800,6 +800,7 @@ async function dispatch(type, payload) {
     case 'stopEngine': {
       const e = engines.get(payload.engine_type);
       if (e?.worker) {
+        e._intentionalStop = true;
         try { await sendToEngine(payload.engine_type, 'dispose', {}); } catch {}
         try { await e.worker.terminate(); } catch {}
       }
@@ -1056,6 +1057,7 @@ setInterval(() => {
     if (now - entry.lastActiveTime < timeoutMs) continue;
 
     addLog('info', `Engine ${engineType} idle timeout (${timeoutMs / 60000}min), auto-disposing`);
+    entry._intentionalStop = true;
     try { entry.worker.postMessage({ id: genId('disp'), type: 'dispose', payload: {} }); } catch {}
     entry.worker.terminate();
     entry.worker = null;

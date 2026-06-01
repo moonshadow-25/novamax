@@ -241,7 +241,7 @@ class EngineDownloader {
       // 解压到临时目录，解包后合并到引擎目录
       const realEngineId = engineId.split('::')[0];
       const eng = engineManager.getEngine(realEngineId);
-      const enginePath = engineManager.getEnginePath(realEngineId);
+      const enginePath = engineManager.getEnginePath(realEngineId, version);
       const installPath = enginePath || (eng?._parentKey
         ? path.join(PROJECT_ROOT, 'external', eng._parentKey, realEngineId, version)
         : path.join(PROJECT_ROOT, 'external', realEngineId, version));
@@ -568,9 +568,13 @@ class EngineDownloader {
     const parentId = eng?._parentKey;
     const scriptIds = [engineId];
     if (parentId) scriptIds.push(parentId);
-    // 父引擎：同时尝试各 variant 的安装脚本
+    // 父引擎：优先匹配版本实际对应的 variant，再尝试其他 variant
     if (eng?.variants && !parentId) {
-      for (const v of eng.variants) scriptIds.push(v.id);
+      const vInfo = engineManager.getEngineVersionInfo(engineId, version);
+      if (vInfo?.variant_id) scriptIds.push(vInfo.variant_id);
+      for (const v of eng.variants) {
+        if (v.id !== vInfo?.variant_id) scriptIds.push(v.id);
+      }
     }
 
     let pyScript = null, batScript = null;
