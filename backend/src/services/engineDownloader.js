@@ -141,17 +141,17 @@ class EngineDownloader {
    * 执行下载链（依赖 -> 主引擎）
    */
   async _runDownloadChain(tasks, runtimeId = null, runtimeTask = null) {
-    // 先下载运行时（解包合并到引擎目录，安装脚本后续可以看到）
+    // 先下载引擎（不传 runtimeId 避免安装脚本重复下载）
+    for (const taskInfo of tasks) {
+      await this._runSingleDownload(taskInfo, null);
+    }
+    // 再下载运行时（引擎已安装完毕，合并不会丢）
     if (runtimeTask) {
       try {
         await this._runSingleDownload(runtimeTask, null);
       } catch (err) {
         downloadStateManager.setState(runtimeTask.taskId, 'failed', err.message, null);
       }
-    }
-    // 再下载引擎（不传 runtimeId 避免安装脚本重复下载）
-    for (const taskInfo of tasks) {
-      await this._runSingleDownload(taskInfo, null);
     }
   }
 
