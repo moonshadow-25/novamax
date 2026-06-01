@@ -97,7 +97,9 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   };
 
   const pollProgress = (taskList) => {
+    let finished = false;
     const interval = setInterval(async () => {
+      if (finished) return;
       try {
         const updatedTasks = await Promise.all(
           taskList.map(async (task) => {
@@ -108,19 +110,14 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
 
         setTasks(updatedTasks);
 
-        console.log('[EngineDownloadModal] poll statuses:', updatedTasks.map(t => `${t.taskId}:${t.status}`).join(', '));
-
         const allCompleted = updatedTasks.every(t => t.status === 'completed');
         const anyFailed = updatedTasks.some(t => t.status === 'failed');
 
-        if (allCompleted) {
-          clearInterval(interval);
-          console.log('[EngineDownloadModal] 所有任务完成，触发 onComplete');
-          setDownloading(false);
-          onComplete?.();
-        } else if (anyFailed) {
+        if (allCompleted || anyFailed) {
+          finished = true;
           clearInterval(interval);
           setDownloading(false);
+          if (allCompleted) onComplete?.();
         }
       } catch (error) {
         console.error('Failed to poll progress:', error);
@@ -201,13 +198,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
             ) : (
               <Text>{latestVersion?.version}</Text>
             )}
+            {latestVersion?.size > 0 && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>{formatBytes(latestVersion.size)}</Text>
+            )}
           </div>
-          {selectedVersion && (
-            <div style={{ marginTop: 4 }}>
-              <Text strong>大小：</Text>
-              <Text>{formatBytes(flatVersions.find(v => v.version === selectedVersion)?.size || 0)}</Text>
-            </div>
-          )}
         </div>
 
         {/* 运行时环境选择 */}
@@ -221,7 +215,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
             >
               {runtimes.map(rt => (
                 <Option key={rt.id} value={rt.id}>
-                  {rt.name}{rt.description ? ` — ${rt.description}` : ''}
+                  {rt.name}{rt.size > 0 ? ` (${formatBytes(rt.size)})` : ''}{rt.description ? ` — ${rt.description}` : ''}
                 </Option>
               ))}
             </Select>

@@ -202,10 +202,14 @@ function Home() {
     const loadEngines = () => engineService.getAll().then(engines => setAllEngines(engines)).catch(() => {});
     loadEngines();
 
-    // SSE 监听引擎下载状态变化，实时更新 banner
+    // SSE 监听引擎下载状态变化，实时更新 banner（500ms 去抖，避免事件风暴）
+    let engineDebounce;
     const es = new EventSource('/api/events');
-    es.addEventListener('download-progress', () => loadEngines());
-    return () => es.close();
+    es.addEventListener('download-progress', () => {
+      clearTimeout(engineDebounce);
+      engineDebounce = setTimeout(loadEngines, 500);
+    });
+    return () => { clearTimeout(engineDebounce); es.close(); };
   }, []);
 
   // 加载 ComfyUI 实例列表
