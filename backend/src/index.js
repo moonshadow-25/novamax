@@ -271,6 +271,12 @@ init().then(() => {
   // 设为 0 表示不限制，由各路由自己的 AbortSignal 控制超时
   server.requestTimeout = 0;
   server.timeout = 0;
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 70000;
+
+  server.on("error", (err) => {
+    console.error("[server] Server error:", err.message);
+  });
 }).catch(error => {
   console.error('Failed to initialize:', error);
   process.exit(1);

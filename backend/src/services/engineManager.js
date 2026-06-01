@@ -291,7 +291,7 @@ class EngineManager {
   /**
    * 卸载指定版本目录（Windows 上对瞬时占用做短暂重试）
    */
-  _removeVersionDirWithRetry(dirPath, maxRetries = 6) {
+  async _removeVersionDirWithRetry(dirPath, maxRetries = 6) {
     let lastError = null;
     for (let i = 0; i <= maxRetries; i++) {
       try {
@@ -304,7 +304,7 @@ class EngineManager {
           throw err;
         }
         const waitMs = 120 * (i + 1);
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+        await new Promise(r => setTimeout(r, waitMs));
       }
     }
     if (lastError) throw lastError;
@@ -331,7 +331,7 @@ class EngineManager {
     }
 
     try {
-      this._removeVersionDirWithRetry(versionInfo.path);
+      await this._removeVersionDirWithRetry(versionInfo.path);
       console.log(`Uninstalled ${engineId} version ${version}`);
     } catch (err) {
       if (err.code === 'EPERM' || err.code === 'EBUSY') {

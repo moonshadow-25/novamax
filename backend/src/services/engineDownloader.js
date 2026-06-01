@@ -92,7 +92,18 @@ class EngineDownloader {
    * 重新安装（不重新下载，只重跑安装脚本）
    */
   async reinstall(engineId, version) {
-    const installPath = path.join(PROJECT_ROOT, 'external', engineId, version);
+    // 解析 variant 路径：external/{parentId}/{variantId}/{version}/
+    const vInfo = engineManager.getEngineVersionInfo(engineId, version);
+    const eng = engineManager.getEngine(engineId);
+    let installDir;
+    if (vInfo?.variant_id) {
+      installDir = path.join(engineId, vInfo.variant_id, version);
+    } else if (eng?._parentKey) {
+      installDir = path.join(eng._parentKey, engineId, version);
+    } else {
+      installDir = path.join(engineId, version);
+    }
+    const installPath = path.join(PROJECT_ROOT, 'external', installDir);
     try {
       await fsp.access(installPath);
     } catch {
@@ -104,6 +115,9 @@ class EngineDownloader {
     downloadStateManager.setState(engineId, 'installing', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'installing' });
 
+    // variant 引擎：解析安装脚本 ID
+    const installId = vInfo?.variant_id || engineId;
+
     // 后台执行，不阻塞响应
     (async () => {
       try {
@@ -111,14 +125,14 @@ class EngineDownloader {
         const marker = path.join(installPath, '.installed');
         await fsp.unlink(marker).catch(() => {});
 
-        const ciPy = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
-        const ciBat = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
+        const ciPy = path.join(PROJECT_ROOT, 'ci', `install_${installId}.py`);
+        const ciBat = path.join(PROJECT_ROOT, 'ci', `install_${installId}.bat`);
         let hasCiScript = true;
         try { await fsp.access(ciPy); } catch {
           try { await fsp.access(ciBat); } catch { hasCiScript = false; }
         }
 
-        await this._runInstallScript(engineId, version, installPath);
+        await this._runInstallScript(installId, version, installPath);
 
         if (!hasCiScript) {
           await fsp.writeFile(marker, JSON.stringify({ installed_at: new Date().toISOString(), engine: engineId }));
@@ -457,7 +471,6 @@ class EngineDownloader {
           if (info.downloadedBytes && info.totalBytes) {
             downloadStateManager.updateBytes(engineId, info.downloadedBytes, info.totalBytes, version);
           }
-          eventBus.broadcast('download-progress', { engineId });
         }
       });
 
@@ -505,7 +518,6 @@ class EngineDownloader {
           const progress = Math.floor((downloadedBytes / totalBytes) * 100);
           downloadStateManager.updateProgress(engineId, progress, 0, version);
           downloadStateManager.updateBytes(engineId, downloadedBytes, totalBytes, version);
-          eventBus.broadcast('download-progress', { engineId });
         }
       });
       response.data.pipe(writer);

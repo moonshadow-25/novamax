@@ -14,7 +14,7 @@ import { DOWNLOAD_STATE_FILE } from '../config/constants.js';
 class DownloadStateManager {
   constructor() {
     this.states = new Map(); // key: "modelId" or "modelId::quantName" -> state
-    this._lastBroadcast = 0;
+    this._lastBroadcasts = new Map();
     this._load(); // 启动时从磁盘恢复中断的下载
   }
 
@@ -174,10 +174,11 @@ class DownloadStateManager {
     if (state) {
       state.progress = progress;
       state.speed = speed;
-      // 限流：最多每 2 秒广播一次进度
+      // 限流：每个模型最多每 2 秒广播一次进度
       const now = Date.now();
-      if (now - this._lastBroadcast >= 2000) {
-        this._lastBroadcast = now;
+      const last = this._lastBroadcasts.get(modelId) || 0;
+      if (now - last >= 2000) {
+        this._lastBroadcasts.set(modelId, now);
         eventBus.broadcast('download-progress', { modelId });
       }
     }
