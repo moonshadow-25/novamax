@@ -329,24 +329,21 @@ class EngineDownloader {
     }
     const installPath = path.join(PROJECT_ROOT, 'external', installDirName);
 
-    // 如果最终目录已存在（旧版本），先删除
-    await fsp.rm(installPath, { recursive: true, force: true }).catch(() => {});
-
-    // 重命名临时目录到最终目录
-    await fsp.rename(tempExtractPath, installPath);
-
-    // 解包顶层单目录（tar 包常多一层，如 qwen3-asr/xxx）
-    const installedEntries = await fsp.readdir(installPath).catch(() => []);
-    if (installedEntries.length === 1) {
-      const singleDir = path.join(installPath, installedEntries[0]);
+    // 解包顶层单目录（在 temp 中完成，不受 installPath 已有文件影响）
+    let sourcePath = tempExtractPath;
+    const tempEntries = await fsp.readdir(tempExtractPath).catch(() => []);
+    if (tempEntries.length === 1) {
+      const singleDir = path.join(tempExtractPath, tempEntries[0]);
       const stat = await fsp.stat(singleDir).catch(() => null);
       if (stat?.isDirectory()) {
-        const tmpMove = installPath + '___unwrap_tmp';
-        await fsp.rename(singleDir, tmpMove);
-        await fsp.rm(installPath, { recursive: true, force: true });
-        await fsp.rename(tmpMove, installPath);
+        sourcePath = singleDir;
       }
     }
+
+    // 合并到安装目录（覆盖同名文件，保留已有文件如运行时）
+    await fsp.mkdir(installPath, { recursive: true });
+    await this._mergeDir(sourcePath, installPath);
+    await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
 
     // 安装步骤
     if (engine.category === 'app') {
@@ -514,6 +511,23 @@ class EngineDownloader {
       writer.on('finish', resolve);
       writer.on('error', reject);
     });
+  }
+
+  /**
+   * 递归合并 src 目录内容到 dest，覆盖同名文件但保留 dest 中不冲突的文件
+   */
+  async _mergeDir(src, dest) {
+    const entries = await fsp.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await fsp.mkdir(destPath, { recursive: true });
+        await this._mergeDir(srcPath, destPath);
+      } else {
+        await fsp.copyFile(srcPath, destPath);
+      }
+    }
   }
 
   /**
