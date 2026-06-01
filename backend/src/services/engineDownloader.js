@@ -329,23 +329,26 @@ class EngineDownloader {
     }
     const installPath = path.join(PROJECT_ROOT, 'external', installDirName);
 
-    // 如果最终目录已存在（旧版本），先删除
-    await fsp.rm(installPath, { recursive: true, force: true }).catch(() => {});
-
-    // 重命名临时目录到最终目录
-    await fsp.rename(tempExtractPath, installPath);
-
-    // 解包顶层单目录（tar 包常多一层，如 qwen3-asr/xxx）
-    const installedEntries = await fsp.readdir(installPath).catch(() => []);
-    if (installedEntries.length === 1) {
-      const singleDir = path.join(installPath, installedEntries[0]);
+    // 解包顶层单目录（在 temp 中进行，避免受 installPath 已有文件影响）
+    const tempEntries = await fsp.readdir(tempExtractPath).catch(() => []);
+    if (tempEntries.length === 1) {
+      const singleDir = path.join(tempExtractPath, tempEntries[0]);
       const stat = await fsp.stat(singleDir).catch(() => null);
       if (stat?.isDirectory()) {
-        const tmpMove = installPath + '___unwrap_tmp';
+        const tmpMove = tempExtractPath + '___unwrap_tmp';
         await fsp.rename(singleDir, tmpMove);
-        await fsp.rm(installPath, { recursive: true, force: true });
-        await fsp.rename(tmpMove, installPath);
+        await fsp.rm(tempExtractPath, { recursive: true, force: true });
+        await fsp.rename(tmpMove, tempExtractPath);
       }
+    }
+
+    // 将解压内容移到最终安装目录：已存在则合并，不存在则重命名
+    await fsp.mkdir(path.dirname(installPath), { recursive: true });
+    if (await fsp.stat(installPath).catch(() => null)) {
+      await this._mergeDir(tempExtractPath, installPath);
+      await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
+    } else {
+      await fsp.rename(tempExtractPath, installPath);
     }
 
     // 安装步骤
@@ -514,6 +517,23 @@ class EngineDownloader {
       writer.on('finish', resolve);
       writer.on('error', reject);
     });
+  }
+
+  /**
+   * 将 src 目录内容合并到 dest（覆盖同名文件，保留 dest 原有文件）
+   */
+  async _mergeDir(src, dest) {
+    const entries = await fsp.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await fsp.mkdir(destPath, { recursive: true });
+        await this._mergeDir(srcPath, destPath);
+      } else {
+        await fsp.copyFile(srcPath, destPath);
+      }
+    }
   }
 
   /**
