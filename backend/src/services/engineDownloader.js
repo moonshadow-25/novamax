@@ -588,8 +588,8 @@ class EngineDownloader {
     if (!pyScript && !batScript) pyScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.py`);
     if (!pyScript && !batScript) batScript = path.join(PROJECT_ROOT, 'ci', `install_${engineId}.bat`);
 
-    const hasPy = fs.existsSync(pyScript) && fs.existsSync(python313);
-    const hasBat = fs.existsSync(batScript);
+    const hasPy = pyScript && fs.existsSync(pyScript) && fs.existsSync(python313);
+    const hasBat = batScript && fs.existsSync(batScript);
 
     if (!hasPy && !hasBat) {
       // 无需安装脚本的引擎（如 ffmpeg）：zip 解压后直接可用
