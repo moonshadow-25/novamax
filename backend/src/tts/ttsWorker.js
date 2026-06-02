@@ -409,6 +409,7 @@ function getInstalledEngine(engineType) {
 function getVoice(id) {
   const row = db.prepare('SELECT * FROM tts_voices WHERE id = ?').get(id);
   if (!row) return null;
+  if (row.reference_audio_path) row.reference_audio_path = rebuildPath(row.reference_audio_path);
   return { ...row, emotion_preset: JSON.parse(row.emotion_preset || '{}'), engine_meta: JSON.parse(row.engine_meta || '{}'), tags: JSON.parse(row.tags || '[]') };
 }
 
