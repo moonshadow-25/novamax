@@ -72,11 +72,18 @@ export default class WhisperCppAdapter {
       args.push('--vad', '--vad-model', vadFilePath);
     }
 
+    // 确保 FFmpeg 在 PATH 中（whisper.py 需要用来预处理音频）
+    const ffmpegDir = path.join(engineDir, '..', '..', '..', 'ffmpeg');
+    const ffmpegVersions = fs.readdirSync(ffmpegDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    const ffmpegBin = ffmpegVersions.length > 0 ? path.join(ffmpegDir, ffmpegVersions[0].name) : '';
+    const env = { ...process.env };
+    if (ffmpegBin) env.PATH = `${ffmpegBin};${env.PATH || ''}`;
+
     this._process = spawn(pythonExe, args, {
       cwd: engineDir,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env,
     });
 
     this._process.stdout.on('data', (d) => {
