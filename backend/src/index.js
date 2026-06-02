@@ -234,6 +234,11 @@ async function gracefulShutdown(signal) {
     console.warn('[shutdown] Error during airouter deregistration:', err.message);
   }
   try {
+    await asrWorkerManager.stop();
+  } catch (err) {
+    console.warn('[shutdown] Error during ASR worker stop:', err.message);
+  }
+  try {
     await processManager.shutdown();
   } catch (err) {
     console.warn('[shutdown] Error during deregistration:', err.message);

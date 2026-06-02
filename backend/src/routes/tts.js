@@ -13,21 +13,12 @@ import path from 'path';
 import ttsWorkerManager from '../tts/ttsWorkerManager.js';
 import modelManager from '../services/modelManager.js';
 import commonDownloader from '../services/commonDownloader.js';
-import { DATA_DIR, MODELS_RUN_DIR } from '../config/constants.js';
+import { DATA_DIR, MODELS_RUN_DIR, TTS_VOICES_DIR, TTS_DEFAULTS } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
+import { resolveModelDir, findLlmPort } from './ttsRouteHelpers.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
-function resolveModelDir(engineType) {
-  const models = modelManager.getByType('tts');
-  const norm = String(engineType || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const m = models.find(m => {
-    if (m.engine_version && String(m.engine_version).toLowerCase().replace(/[^a-z0-9]/g, '') === norm) return true;
-    return String(m.id || '').toLowerCase().replace(/[^a-z0-9]/g, '') === norm;
-  });
-  return m?.local_path || '';
-}
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: TTS_DEFAULTS.MAX_UPLOAD_SIZE_BYTES } });
 
 /* ────────────────────────────────────────────────────────────────────────
  * 语音合成（通过 TTS Worker）
@@ -48,7 +39,8 @@ router.post('/tts/speech', async (req, res) => {
       workspaceId: workspace_id,
       outputDir: '',
       sourceFile: source_file || '',
-      modelDir: resolveModelDir(engine_type || '')
+      modelDir: resolveModelDir(engine_type || ''),
+      llmPort: findLlmPort()
     });
 
     res.set('Content-Type', `audio/${output_format || 'wav'}`);
@@ -98,23 +90,22 @@ router.post('/tts/voices', upload.single('file'), async (req, res) => {
 
 // 音频文件服务（主线程直接读文件）
 router.get('/tts/voices/:voiceId/audio', (req, res) => {
-  const voicesDir = path.join(DATA_DIR, 'tts_services', 'voices');
-  const dir = fs.readdirSync(voicesDir);
-  const file = dir.find(f => f.startsWith(req.params.voiceId));
-  if (!file || !fs.existsSync(path.join(voicesDir, file))) {
-    return res.status(404).json({ error: '音频不存在' });
-  }
-  const ext = path.extname(file).slice(1);
+  const voicesDir = TTS_VOICES_DIR;
+  if (!fs.existsSync(voicesDir)) return res.status(404).json({ error: '音频不存在' });
+  const prefix = `${req.params.voiceId}_`;
+  const file = fs.readdirSync(voicesDir).find(f => f.startsWith(prefix));
+  if (!file) return res.status(404).json({ error: '音频不存在' });
+  const ext = path.extname(file).slice(1) || 'wav';
   res.set('Content-Type', `audio/${ext}`);
   res.send(fs.readFileSync(path.join(voicesDir, file)));
 });
 
 router.delete('/tts/voices/:voiceId', async (req, res) => {
   try {
-    const voicesDir = path.join(DATA_DIR, 'tts_services', 'voices');
-    const dir = fs.readdirSync(voicesDir);
-    const file = dir.find(f => f.startsWith(req.params.voiceId));
-    if (file) fs.unlinkSync(path.join(voicesDir, file));
+    if (!fs.existsSync(TTS_VOICES_DIR)) return res.json({ success: true });
+    const prefix = `${req.params.voiceId}_`;
+    const file = fs.readdirSync(TTS_VOICES_DIR).find(f => f.startsWith(prefix));
+    if (file) fs.unlinkSync(path.join(TTS_VOICES_DIR, file));
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -265,7 +256,7 @@ async function createVoiceLocally(req) {
   const now = new Date().toISOString();
   let refPath = null;
   const mode = req.body.voice_mode || 'clone';
-  const voicesDir = path.join(DATA_DIR, 'tts_services', 'voices');
+  const voicesDir = TTS_VOICES_DIR;
 
   if (mode === 'clone') {
     if (req.file) {

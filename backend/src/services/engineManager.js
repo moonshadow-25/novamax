@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DATA_DIR, PROJECT_ROOT } from '../config/constants.js';
+import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 import configManager from './configManager.js';
 
 /**
@@ -90,6 +91,14 @@ class EngineManager {
         if (v.id === engineId) return { ...v, _parentKey: eng.id, modelscope_repo: v.modelscope_repo || eng.modelscope_repo };
       }
     }
+
+    // 归一化匹配（处理 indextts15 ↔ indextts1.5 等变体）
+    for (const eng of Object.values(this.engines?.engines || {})) {
+      const variants = eng.variants || [];
+      for (const v of variants) {
+        if (normalizeEngineType(v.id) === normalizeEngineType(engineId)) return { ...v, _parentKey: eng.id, modelscope_repo: v.modelscope_repo || eng.modelscope_repo };
+      }
+    }
     return null;
   }
 
@@ -105,8 +114,9 @@ class EngineManager {
 
     // variants 引擎：扫描每个 variant 的子目录
     if (engine.variants && !engine._parentKey) {
+      const parentId = engine._parentKey || engineId;
       for (const variant of engine.variants) {
-        const varPath = path.join(PROJECT_ROOT, 'external', engineId, variant.id);
+        const varPath = path.join(PROJECT_ROOT, 'external', parentId, variant.id);
         if (!fs.existsSync(varPath)) continue;
         const verDirs = fs.readdirSync(varPath, { withFileTypes: true }).filter(d => d.isDirectory());
         for (const vd of verDirs) {
@@ -144,7 +154,8 @@ class EngineManager {
       }
     } else {
       // 单个引擎或 variant 引擎
-      const dirName = engine._parentKey ? path.join(engine._parentKey, engineId) : engineId;
+      const resolvedId = engine.id || engineId;
+      const dirName = engine._parentKey ? path.join(engine._parentKey, resolvedId) : resolvedId;
       const basePath = path.join(PROJECT_ROOT, 'external', dirName);
       if (fs.existsSync(basePath)) {
         for (const d of fs.readdirSync(basePath, { withFileTypes: true }).filter(x => x.isDirectory())) {

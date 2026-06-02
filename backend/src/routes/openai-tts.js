@@ -10,18 +10,9 @@
 import express from 'express';
 import ttsWorkerManager from '../tts/ttsWorkerManager.js';
 import modelManager from '../services/modelManager.js';
+import { resolveModelDir, findLlmPort } from './ttsRouteHelpers.js';
 
 const router = express.Router();
-
-function resolveModelDir(engineType) {
-  const models = modelManager.getByType('tts');
-  const norm = String(engineType || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const m = models.find(m => {
-    if (m.engine_version && String(m.engine_version).toLowerCase().replace(/[^a-z0-9]/g, '') === norm) return true;
-    return String(m.id || '').toLowerCase().replace(/[^a-z0-9]/g, '') === norm;
-  });
-  return m?.local_path || '';
-}
 
 /* ========================================================================
  * GET /v1/audio/models  —  列出可用模型（工作区）
@@ -110,7 +101,7 @@ router.post('/audio/speech', async (req, res) => {
 
     // 检查工作区 voice_mode 参数：非 clone 模式（design/auto）不要求 voice
     const wsParams = ws.params || {};
-    const voiceMode = wsParams.voice_mode;
+    const voiceMode = wsParams.voice_mode || ws.voice_mode;
     const isCloneMode = !voiceMode || voiceMode === 'clone';
 
     // 解析 voice：优先用请求中的 voice，无效则回退到激活的默认 voice
@@ -142,7 +133,8 @@ router.post('/audio/speech', async (req, res) => {
       workspaceId: ws.id,
       sourceFile,
       sourceType,
-      modelDir: resolveModelDir(ws.engine_type)
+      modelDir: resolveModelDir(ws.engine_type),
+      llmPort: findLlmPort()
     });
 
     const audioBuffer = Buffer.from(result.audio?.data || result.audio || []);
@@ -153,7 +145,6 @@ router.post('/audio/speech', async (req, res) => {
 
     res.set('Content-Type', mime);
     res.set('X-Audio-Duration', String(result.duration || 0));
-    res.set('X-Ffmpeg-Missing', result.ffmpeg_missing ? '1' : '0');
     res.send(audioBuffer);
   } catch (e) {
     res.status(500).json({

@@ -52,10 +52,10 @@ export function reloadExternalConfig() {
  * - 便携版: release 目录
  */
 export function getProjectRoot() {
-  // 生产环境 (bundle): backend/dist/index.js -> backend -> 项目根
-  // 开发环境: backend/src/utils/pathHelper.js -> utils -> src -> backend -> 项目根
+  // 自动检测：如果 __dirname 包含 /dist 则是 bundle 模式
+  const bundled = __dirname.replace(/\\/g, '/').includes('/dist');
   let backendDir;
-  if (isProduction) {
+  if (isProduction || bundled) {
     backendDir = path.resolve(__dirname, '..');
   } else {
     backendDir = path.resolve(__dirname, '../..');

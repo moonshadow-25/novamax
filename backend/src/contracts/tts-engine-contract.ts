@@ -1,5 +1,5 @@
 /**
- * NovaMax TTS Engine Contract v3.0
+ * NovaMax TTS Engine Contract v5.0
  *
  * 架构原则：
  *   NovaMax 拥有一切业务逻辑——Voice ID 体系、工作区、任务队列、
@@ -15,65 +15,49 @@
  */
 
 // ============================================================================
-// 1. 引擎适配器接口
+// 1. contract.json 顶层结构
 // ============================================================================
 
-export interface ITtsEngine {
-  readonly meta: EngineMeta;
+export interface EngineContract {
+  contract_version: '5.0';
 
-  // ---- 生命周期 ----
-
-  /**
-   * 初始化引擎（加载模型等）。dispose() 后可以再次调用。
-   * config 来自 NovaMax 运行时注入 + 引擎 contract.json 的 config_schema。
-   */
-  initialize(config: EngineInstanceConfig): Promise<void>;
-
-  /**
-   * 销毁引擎。必须在 30 秒内返回。正在进行的合成会被丢弃。
-   */
-  dispose(): Promise<void>;
-
-  /** 当前健康状态 */
-  health(): Promise<HealthReport>;
-
-  // ---- 合成 ----
-
-  /**
-   * 核心方法。引擎接收文本和 Voice 引用，返回音频。
-   * 失败时抛出 TtsEngineError，NovaMax 根据 retryable 决定重试。
-   */
-  synthesize(request: SynthesizeRequest): Promise<SynthesizeResult>;
-
-  /**
-   * 流式合成（可选）。
-   * 引擎在 meta.supports_streaming 为 true 时必须实现。
-   */
-  synthesizeStream?(request: SynthesizeRequest): AsyncIterable<SynthesizeChunk>;
+  engine: EngineInfo;
+  capabilities: EngineCapabilities;
+  api_endpoints?: EngineApiEndpoints;
+  runtime_config?: Record<string, RuntimeConfigField>;
+  memory_profile?: MemoryProfile;
+  parameters?: { flat?: ParamDef[] } | ParamDef[];
+  config_schema?: ConfigSchema;
 }
 
 // ============================================================================
-// 2. 引擎元数据 — contract.json
+// 2. 引擎基本信息
 // ============================================================================
 
-export interface EngineMeta {
-  contract_version: '3.0';
-
-  /** 引擎唯一标识 */
+export interface EngineInfo {
   type: string;
-
-  /** 显示名称 */
   name: string;
-
-  /** 语义版本 */
   version: string;
-
   description?: string;
   vendor?: string;
+  entry_point?: string;
+  env?: Record<string, string>;
+}
 
-  // ---- 能力声明 ----
+export interface EngineApiEndpoints {
+  health?: string;
+  speech?: string;
+  clear_cache?: string;
+  memory?: string;
+  config?: string;
+}
 
-  /** 支持的 voice 模式，引擎自定义字符串，如 "clone" / "design" / "preset" */
+// ============================================================================
+// 3. 能力声明
+// ============================================================================
+
+export interface EngineCapabilities {
+  /** 支持的 voice 模式 */
   voice_modes: string[];
 
   /** 单次合成最大字符数 */
@@ -85,88 +69,110 @@ export interface EngineMeta {
   /** 输出采样率（Hz） */
   sample_rate: number;
 
-  /** 是否有流式 */
+  /** 位深度 */
+  bit_depth?: number;
+
+  /** 声道数 */
+  channels?: number;
+
+  /** 单次合成最大输出时长（秒） */
+  max_output_duration_seconds?: number;
+
+  /** 是否支持流式 */
   supports_streaming: boolean;
+
+  /** 是否支持取消 */
+  supports_cancel?: boolean;
+
+  /** 是否支持运行时参数变更 */
+  supports_runtime_params?: boolean;
+
+  /** 是否支持情感控制 */
+  supports_emotion?: boolean;
 
   /** 建议最大并发 */
   max_concurrency: number;
-
-  /**
-   * 参数定义列表。NovaMax 据此渲染 UI，不做语义理解。
-   * 实际值通过 SynthesizeRequest.params 原样透传。
-   */
-  parameters?: ParamDef[];
-
-  /**
-   * 引擎配置 Schema。NovaMax 据此渲染引擎设置表单。
-   * 实际值通过 EngineInstanceConfig.custom 原样透传。
-   */
-  config_schema?: ConfigSchema;
-}
-
-export interface ConfigSchema {
-  type: 'object';
-  required?: string[];
-  properties: Record<string, ConfigProperty>;
-}
-
-export interface ConfigProperty {
-  type: 'string' | 'number' | 'boolean' | 'integer';
-  title: string;
-  default: unknown;
-  minimum?: number;
-  maximum?: number;
-  description?: string;
-  enum?: Array<string | number | boolean>;
 }
 
 // ============================================================================
-// 3. 运行时配置 — NovaMax 注入
+// 4. 运行时配置
+// ============================================================================
+
+export interface RuntimeConfigField {
+  default: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  label?: string;
+  description?: string;
+}
+
+// ============================================================================
+// 5. 显存特征
+// ============================================================================
+
+export interface MemoryProfile {
+  base_vram_mb: number;
+  supports_clear_cache: boolean;
+  supports_memory_info: boolean;
+}
+
+// ============================================================================
+// 6. 引擎适配器接口 (ITtsEngine)
+// ============================================================================
+
+export interface ITtsEngine {
+  readonly meta: EngineContract;
+
+  // ---- 生命周期 ----
+
+  initialize(config: EngineInstanceConfig): Promise<void>;
+  dispose(): Promise<void>;
+  health(): Promise<HealthReport>;
+
+  // ---- 合成 ----
+
+  synthesize(request: SynthesizeRequest): Promise<SynthesizeResult>;
+  synthesizeStream?(request: SynthesizeRequest): AsyncIterable<SynthesizeChunk>;
+
+  // ---- 可选方法 ----
+
+  clearCache?(): Promise<void>;
+  getMemoryInfo?(): Promise<MemoryInfo>;
+  getPid?(): Promise<number | null>;
+  getPort?(): Promise<number | null>;
+  setRuntimeConfig?(key: string, value: unknown): Promise<void>;
+}
+
+// ============================================================================
+// 7. 运行时配置 — NovaMax 注入
 // ============================================================================
 
 export interface EngineInstanceConfig {
-  /** 模型文件目录（绝对路径） */
   modelDir: string;
-
-  /** GPU 设备 ID，-1 表示 CPU */
   deviceId?: number;
-
-  /** 引擎 config_schema 对应的值，原样透传 */
   custom?: Record<string, unknown>;
 }
 
 // ============================================================================
-// 4. 合成
+// 8. 合成
 // ============================================================================
 
 export interface SynthesizeRequest {
-  /** 待合成文本（单条，NovaMax 已做好分割） */
   text: string;
-
-  /**
-   * Voice 引用。内容由 NovaMax 的工作区/Voice 体系决定。
-   * 引擎根据自身 voice_modes 解析，NovaMax 不做语义理解。
-   */
   voice: Record<string, unknown>;
-
-  /** 输出格式，NovaMax 从 meta.output_formats 中选择 */
   output_format: string;
-
-  /**
-   * 引擎参数。key-value 来自参数面板，NovaMax 不做语义理解，原样透传。
-   */
+  output_dir?: string;
+  workspace_id?: string;
+  request_id?: string;
   params: Record<string, unknown>;
 }
 
 export interface SynthesizeResult {
-  /** 音频二进制 */
   audio: Buffer;
-
-  /** 音频时长（秒） */
   duration_seconds: number;
-
-  /** RTF（实时因子） */
   rtf: number;
+  output_path?: string;
 }
 
 export interface SynthesizeChunk {
@@ -176,7 +182,7 @@ export interface SynthesizeChunk {
 }
 
 // ============================================================================
-// 5. 参数定义 — 引擎声明，NovaMax 渲染
+// 9. 参数定义 — 引擎声明，NovaMax 渲染
 // ============================================================================
 
 export type ParamWidget = 'slider' | 'toggle' | 'select' | 'text';
@@ -185,6 +191,7 @@ export interface ParamDef {
   key: string;
   label: string;
   widget: ParamWidget;
+  type?: 'float' | 'int' | 'bool' | 'select';
   default: unknown;
   description?: string;
 
@@ -204,7 +211,27 @@ export interface ParamDef {
 }
 
 // ============================================================================
-// 6. 健康检查
+// 10. 引擎配置 Schema
+// ============================================================================
+
+export interface ConfigSchema {
+  type: 'object';
+  required?: string[];
+  properties: Record<string, ConfigProperty>;
+}
+
+export interface ConfigProperty {
+  type: 'string' | 'number' | 'boolean' | 'integer';
+  title: string;
+  default: unknown;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
+  enum?: Array<string | number | boolean>;
+}
+
+// ============================================================================
+// 11. 健康检查
 // ============================================================================
 
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
@@ -212,14 +239,28 @@ export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 export interface HealthReport {
   status: HealthStatus;
   model_loaded: boolean;
-  gpu_memory_free_mb: number;
+  gpu_memory_free_mb?: number;
+  gpu_memory_total_mb?: number;
   active_requests: number;
-  last_error?: string;
   startup_time_ms: number;
+  last_error?: string;
 }
 
 // ============================================================================
-// 7. 错误
+// 12. 显存信息
+// ============================================================================
+
+export interface MemoryInfo {
+  vram_used_mb: number;
+  vram_total_mb: number;
+  shared_used_mb: number;
+  shared_total_mb: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+}
+
+// ============================================================================
+// 13. 错误
 // ============================================================================
 
 export type EngineErrorCode =

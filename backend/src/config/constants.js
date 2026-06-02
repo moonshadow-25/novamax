@@ -53,6 +53,58 @@ export const CACHE_DIR = path.join(DATA_DIR, 'cache');
 export const DOWNLOAD_STATE_FILE = path.join(DATA_DIR, 'download_state.json');
 export const GPUINFO_PATH = path.join(PROJECT_ROOT, 'scripts', 'gpuinfo.exe');
 
+// ===== TTS 模块常量 =====
+export const TTS_DATA_DIR = path.join(DATA_DIR, 'tts_services');
+export const TTS_DB_PATH = path.join(TTS_DATA_DIR, 'tts.db');
+export const TTS_CONFIG_PATH = path.join(TTS_DATA_DIR, 'config.json');
+export const TTS_ENGINES_DIR = path.join(PROJECT_ROOT, 'external', 'tts');
+export const TTS_VOICES_DIR = path.join(TTS_DATA_DIR, 'voices');
+export const TTS_WORKSPACES_DIR = path.join(TTS_DATA_DIR, 'workspaces');
+export const TTS_REF_AUDIO_DIR = path.join(TTS_DATA_DIR, 'reference_audio');
+export const TTS_HISTORY_DIR = path.join(TTS_DATA_DIR, 'history');
+export const TTS_LOGS_DIR = path.join(DATA_DIR, 'logs');
+export const FFMPEG_DIR = path.join(PROJECT_ROOT, 'external', 'ffmpeg');
+export const TTS_PID_DIR = TTS_DATA_DIR;
+
+// TTS 默认配置
+export const TTS_DEFAULTS = {
+  LOG_MAX_ENTRIES: 2000,
+  LOG_RETENTION_DAYS: 7,
+  IDLE_TIMEOUT_MINUTES: 5,
+  IDLE_CHECK_INTERVAL_MS: 30000,
+  IDLE_MIN_MINUTES: 3,
+  IDLE_MAX_MINUTES: 30,
+  VOICE_ID_LENGTH: 6,
+  RECONNECT_DELAY_MS: 3000,
+  MAX_UPLOAD_SIZE_BYTES: 100 * 1024 * 1024,
+  MAX_BATCH_FILES: 20,
+  MAX_TEXT_LENGTH_FALLBACK: 4000,
+};
+
+// ===== ASR 模块常量 =====
+export const ASR_ENGINE_DIR = path.join(PROJECT_ROOT, 'external', 'asr');
+export const ASR_DATA_DIR = path.join(DATA_DIR, 'asr_services');
+export const ASR_MODELS_DIR = path.join(MODELS_RUN_DIR, 'asr');
+export const ASR_HISTORY_DB = path.join(ASR_DATA_DIR, 'transcription_history.db');
+export const ASR_SHARED_MODEL_ID = '__shared__';
+export const ASR_PID_DIR = ASR_DATA_DIR;
+
+// ASR 默认配置
+export const ASR_DEFAULTS = {
+  LOG_MAX_ENTRIES: 2000,
+  IDLE_TIMEOUT_MS: 5 * 60 * 1000,
+  IDLE_CHECK_INTERVAL_MS: 30000,
+  HISTORY_PAGE_SIZE: 20,
+  LOG_FETCH_LIMIT: 500,
+  MAX_FILE_SIZE_MB: 500,
+  HEALTH_POLL_MAX_MS: 90000,
+  HEALTH_POLL_INTERVAL_MS: 1000,
+  TRANSCRIBE_TIMEOUT_MS: 7200000,
+  RECONNECT_DELAY_MS: 3000,
+  DEFAULT_LANGUAGE: 'auto',
+  DEFAULT_THREADS: 4,
+};
+
 /**
  * 参数映射：LLM 模型的默认参数（与 llama-server 路由模式兼容）
  * 注意：远端配置使用 default_parameters，本地配置使用 parameters 字段

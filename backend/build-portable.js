@@ -116,6 +116,29 @@ try {
   process.exit(1);
 }
 
+// 复制 TTS Worker 源文件（动态 Worker 线程需要从磁盘加载）
+console.log('📋 复制 TTS 源文件...');
+const srcBase = path.join(PROJECT_ROOT, 'backend/src');
+const destBase = path.join(backendDest, 'src');
+fs.mkdirSync(destBase, { recursive: true });
+// tts/ 完整目录树
+copyDirectory(path.join(srcBase, 'tts'), path.join(destBase, 'tts'));
+// contracts/
+const destContractsDir = path.join(destBase, 'contracts');
+fs.mkdirSync(destContractsDir, { recursive: true });
+fs.copyFileSync(path.join(srcBase, 'contracts', 'tts-engine-contract.ts'), path.join(destContractsDir, 'tts-engine-contract.ts'));
+// utils/
+const destUtilsDir = path.join(destBase, 'utils');
+fs.mkdirSync(destUtilsDir, { recursive: true });
+for (const f of fs.readdirSync(path.join(srcBase, 'utils')).filter(f => f.endsWith('.js'))) {
+  fs.copyFileSync(path.join(srcBase, 'utils', f), path.join(destUtilsDir, f));
+}
+// config/constants.js
+const destConfigDir = path.join(destBase, 'config');
+fs.mkdirSync(destConfigDir, { recursive: true });
+fs.copyFileSync(path.join(srcBase, 'config', 'constants.js'), path.join(destConfigDir, 'constants.js'));
+console.log('✅ TTS 源文件已复制');
+
 // 复制 Python 脚本到 dist/scripts/
 console.log('📋 复制 Python 脚本...');
 const scriptsDest = path.join(distDest, 'scripts');
@@ -228,6 +251,19 @@ for (const tool of ['node', 'python313']) {
 }
 console.log('✅ 外部工具已复制 (node, python313)');
 
+// 5a2. 复制 ASR 引擎共享基类（引擎 adapter 运行时依赖，按需下载的引擎通过相对路径导入）
+{
+  const asrSharedDir = path.join(externalDest, 'asr');
+  fs.mkdirSync(asrSharedDir, { recursive: true });
+  const baseAdapterSrc = path.join(PROJECT_ROOT, 'backend/src/asr/baseAsrAdapter.js');
+  if (fs.existsSync(baseAdapterSrc)) {
+    fs.copyFileSync(baseAdapterSrc, path.join(asrSharedDir, 'baseAsrAdapter.js'));
+    console.log('   ✓ baseAsrAdapter.js → external/asr/');
+  } else {
+    console.warn('⚠️  baseAsrAdapter.js 不存在，引擎 adapter 将无法导入');
+  }
+}
+
 // 5b. 复制 ci/ 安装脚本（引擎安装时需要）
 console.log('📋 复制 ci/ 安装脚本...');
 const ciSrc = path.join(PROJECT_ROOT, 'ci');
@@ -301,6 +337,13 @@ if (fs.existsSync(ttsSrc)) {
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(ttsDest, dbFile));
     }
+  }
+
+  // 复制默认工作区配置
+  const defaultsFile = path.join(ttsSrc, 'default-workspaces.json');
+  if (fs.existsSync(defaultsFile)) {
+    fs.copyFileSync(defaultsFile, path.join(ttsDest, 'default-workspaces.json'));
+    console.log('   ✓ 默认工作区配置');
   }
 
   // 复制工作区目录

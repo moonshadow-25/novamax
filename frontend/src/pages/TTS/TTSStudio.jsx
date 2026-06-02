@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Space, Typography, message, Spin, Modal, Form, Input, Select, Empty, Collapse } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import WorkspaceCard from '../../components/WorkspaceCard/WorkspaceCard';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import DynamicParamPanel from '../../components/DynamicParamPanel';
@@ -24,6 +24,7 @@ function TTSStudio() {
   const [cloneForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [ffmpegModalOpen, setFfmpegModalOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [contracts, setContracts] = useState([]);
   const [createEngineParams, setCreateEngineParams] = useState([]);
   const [createParamValues, setCreateParamValues] = useState({});
@@ -89,6 +90,27 @@ function TTSStudio() {
 
   const handleDeleteWorkspace = useCallback(async (ws) => { await ttsStudioService.deleteWorkspace(ws.id); message.success('已删除'); loadWorkspaces(); }, [loadWorkspaces]);
 
+  const handleResetWorkspaces = useCallback(() => {
+    Modal.confirm({
+      title: '确认重置工作区',
+      content: '将删除当前所有工作区并恢复为默认配置，此操作不可撤销。',
+      okText: '确认重置',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setResetting(true);
+        try {
+          await ttsStudioService.resetWorkspaceDefaults();
+          message.success('工作区已恢复为默认配置');
+          loadWorkspaces();
+        } catch (e) {
+          message.error('重置失败: ' + (e.message || '未知错误'));
+        }
+        finally { setResetting(false); }
+      },
+    });
+  }, [loadWorkspaces]);
+
   // 打开工作区前检查引擎是否安装
   const [pendingOpenWs, setPendingOpenWs] = useState(null);
   const [missingEngineId, setMissingEngineId] = useState('');
@@ -114,6 +136,10 @@ function TTSStudio() {
   return (
     <div style={{ overflowY: 'auto', height: '100%' }}>
       <div style={{ padding: '16px 24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Title level={4} style={{ margin: 0 }}>TTS 工作区</Title>
+          <Button icon={<ReloadOutlined />} onClick={handleResetWorkspaces} loading={resetting}>重置工作区</Button>
+        </div>
         {/* 工作区 */}
         <div style={{ marginBottom: 24 }}>
           {workspacesLoading ? <Spin /> : (

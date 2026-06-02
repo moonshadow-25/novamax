@@ -11,17 +11,14 @@
 import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { TTS_PID_DIR } from '../config/constants.js';
 
 const { engineType, adapterPath, contract } = workerData;
 let adapter = null;
 let initPromise = null;
 let runtimeConfig = {};
 
-const PID_FILE = path.join(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..'),
-  'data', 'tts_services', `.engine-pid-${engineType}`
-);
+const PID_FILE = path.join(TTS_PID_DIR, `.engine-pid-${engineType}`);
 
 function log(level, message) {
   parentPort.postMessage({
@@ -74,14 +71,28 @@ async function dispatch(type, payload) {
       for (const [k, v] of Object.entries(rc)) {
         if (runtimeConfig[k] == null) runtimeConfig[k] = v.default;
       }
-      await a.initialize({ modelDir: payload.modelDir || '', deviceId: payload.deviceId ?? -1, custom: payload.custom || {} });
+      try {
+        await a.initialize({ modelDir: payload.modelDir || '', deviceId: payload.deviceId ?? -1, custom: payload.custom || {} });
+      } catch (e) {
+        try { await a.dispose(); } catch {}
+        throw e;
+      }
 
       let health, pid, memory, port;
-      try { health = await a.health(); } catch { health = { status: 'healthy', model_loaded: true }; }
+      try { health = await a.health(); } catch { health = { status: 'unknown', model_loaded: false }; }
       try { pid = await a.getPid(); } catch { pid = null; }
       try { memory = await a.getMemoryInfo(); } catch { memory = null; }
       try { port = await a.getPort(); } catch { port = null; }
       if (pid) { try { fs.writeFileSync(PID_FILE, String(pid)); } catch {} }
+
+      // 监听 Python 进程退出
+      if (a._process) {
+        a._process.on('exit', (code) => {
+          log('error', `Python process exited (code=${code})`);
+          pushReport({ event: 'crashed', health: { status: 'unhealthy', model_loaded: false, last_error: `Python process exited code=${code}` } });
+        });
+      }
+
       pushReport({ event: 'ready', health, pid, memory, runtimeConfig, port });
 
       log('info', `Engine ready, PID=${pid}`);

@@ -7,10 +7,7 @@
 import { Worker } from 'worker_threads';
 import path from 'path';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { PROJECT_ROOT } from '../config/constants.js';
 
 const genId = () => crypto.randomUUID().slice(0, 12);
 const RECONNECT_DELAY = 3000;
@@ -72,8 +69,11 @@ class TtsWorkerManager {
    * ======================================================================== */
 
   _spawn() {
-    const workerPath = path.join(__dirname, 'ttsWorker.js');
-    this._worker = new Worker(workerPath);
+    const workerPath = path.join(PROJECT_ROOT, 'backend', 'src', 'tts', 'ttsWorker.js');
+    this._worker = new Worker(workerPath, {
+      workerData: { PROJECT_ROOT },
+      stdout: true, stderr: true
+    });
 
     this._worker.on('message', (msg) => {
       const cb = this._pending.get(msg.id);

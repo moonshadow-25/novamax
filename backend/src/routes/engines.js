@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import engineManager from '../services/engineManager.js';
 import engineDownloader from '../services/engineDownloader.js';
+import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import processManager from '../services/processManager.js';
 import { getGpuInfo } from './system.js';
@@ -186,7 +187,12 @@ router.get('/engines/:id', async (req, res) => {
 router.get('/engines/:id/check', async (req, res) => {
   try {
     const { id } = req.params;
-    const engine = engineManager.getEngine(id);
+    let engine = engineManager.getEngine(id);
+
+    if (!engine) {
+      const engines = engineManager.getEngines();
+      engine = (engines.tts?.variants || []).find(e => normalizeEngineType(e.id) === normalizeEngineType(id));
+    }
 
     if (!engine) {
       return res.status(404).json({ error: 'Engine not found' });

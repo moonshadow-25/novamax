@@ -15,7 +15,7 @@ export function getLatestInstalledVersion(availableVersions = [], installedVersi
   const installedSet = new Set((installedVersions || []).map(v => v?.version));
   // 按版本号降序排列，确保返回最新的匹配版本
   const sorted = [...(availableVersions || [])].sort((a, b) =>
-    String(b?.version || '').localeCompare(String(a?.version || ''), undefined, { numeric: true })
+    String(b?.version || '').localeCompare(String(a?.version || ''))
   );
   return sorted.find(v => installedSet.has(v?.version))?.version || null;
 }

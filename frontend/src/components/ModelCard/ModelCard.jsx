@@ -123,10 +123,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           .filter(v => normalizeEngineType(v.id) === variantNorm)
           .flatMap(v => v.versions || []);
         if (variantVersions.length > 0 && variantInstalled.length > 0) {
-          const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
-          const latest = sorted[0].version;
           const { orderedInstalledVersions } = resolveVersionOrder(variantVersions, variantInstalled);
-          setTtsEngineUpdate(latest !== orderedInstalledVersions[0]?.version);
+          setTtsEngineUpdate(variantVersions[0]?.version !== orderedInstalledVersions[0]?.version);
         }
 
         // 检测模型文件是否已下载

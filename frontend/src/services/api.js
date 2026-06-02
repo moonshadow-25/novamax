@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 120000
+  timeout: 0
 });
 
 api.interceptors.response.use(
@@ -343,6 +343,7 @@ export const ttsStudioService = {
   setTtsConfig: (config) => api.put('/tts-studio/config', config),
   startEngine: (engineType) => api.post(`/tts-studio/engines/${encodeURIComponent(engineType)}/start`),
   stopEngine: (engineType) => api.post(`/tts-studio/engines/${encodeURIComponent(engineType)}/stop`),
+  resetWorkspaceDefaults: () => api.post('/tts-studio/workspace-defaults/reset'),
 };
 
 export default api;

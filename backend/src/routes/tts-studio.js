@@ -11,25 +11,17 @@ import crypto from 'crypto';
 import { exec, spawn } from 'child_process';
 import multer from 'multer';
 import ttsWorkerManager from '../tts/ttsWorkerManager.js';
-import { PROJECT_ROOT } from '../config/constants.js';
+import { PROJECT_ROOT, TTS_DATA_DIR, TTS_REF_AUDIO_DIR, TTS_WORKSPACES_DIR, FFMPEG_DIR, TTS_CONFIG_PATH, TTS_DEFAULTS } from '../config/constants.js';
 import { normalizeEngineType } from '../utils/engineTypeHelper.js';
+import { getFfmpegExe } from '../tts/audio/ffmpeg.js';
+import { resolveModelDir } from './ttsRouteHelpers.js';
+import { idFromMd5Bytes, generateVoiceId } from '../utils/voiceIdHelper.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
-const REF_AUDIO_DIR = path.join(PROJECT_ROOT, 'data', 'tts_services', 'reference_audio');
-const WORKSPACES_DIR = path.join(PROJECT_ROOT, 'data', 'tts_services', 'workspaces');
-const FFMPEG_DIR = path.join(PROJECT_ROOT, 'external', 'ffmpeg');
-
-function getFfmpegExe() {
-  if (!fs.existsSync(FFMPEG_DIR)) return null;
-  const dirs = fs.readdirSync(FFMPEG_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
-  for (const d of dirs) {
-    const exe = path.join(FFMPEG_DIR, d.name, 'ffmpeg.exe');
-    if (fs.existsSync(path.join(FFMPEG_DIR, d.name, '.installed')) && fs.existsSync(exe)) return exe;
-  }
-  return null;
-}
+const REF_AUDIO_DIR = TTS_REF_AUDIO_DIR;
+const WORKSPACES_DIR = TTS_WORKSPACES_DIR;
 
 /** 参考音频支持的输入格式（其他格式会被转码为 wav） */
 const REF_AUDIO_FORMATS = ['wav', 'mp3'];
@@ -54,33 +46,6 @@ function buildIndicator(engineStatus) {
 function normalizeFilename(name = '') {
   const base = path.basename(String(name || ''));
   try { return Buffer.from(base, 'latin1').toString('utf8'); } catch { return base; }
-}
-
-/**
- * 无歧义字符集。排除所有易混淆字符（两侧均删除）：
- *   0/O → 均排除    1/I/L → 均排除    2/Z → 均排除
- *   5/S → 均排除    8/B → 均排除
- * 共 25 字符。
- */
-const ID_ALPHABET = '34679ACDEFGHJKMNPQRTUVWXY';
-
-/** MD5 前 4 字节 → base30 → 6 位 */
-function hashToId(md5Bytes) {
-  const num = md5Bytes.readUInt32BE(0);
-  const base = ID_ALPHABET.length;
-  let id = '';
-  let n = num;
-  for (let i = 0; i < 6; i++) {
-    id = ID_ALPHABET[n % base] + id;
-    n = Math.floor(n / base);
-  }
-  return id;
-}
-
-/** 从字符串生成 model_id（MD5 → base25 → 6位） */
-function genModelId(input) {
-  const md5 = crypto.createHash('md5').update(input).digest();
-  return hashToId(md5);
 }
 
 // 兼容 v3/v4 contract 参数格式
@@ -132,7 +97,7 @@ router.post('/reference-audios', upload.single('file'), async (req, res) => {
       fs.writeFileSync(tmpIn, fileBuffer);
       await new Promise((resolve, reject) => {
         const proc = spawn(getFfmpegExe(), ['-i', tmpIn, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', tmpOut, '-y'],
-          { timeout: 30000 });
+          );
         proc.on('close', (code) => {
           if (code !== 0 || !fs.existsSync(tmpOut)) return reject(new Error(`音频转换失败：不支持的格式 ".${ext}"`));
           resolve();
@@ -151,7 +116,7 @@ router.post('/reference-audios', upload.single('file'), async (req, res) => {
 
   // 基于文件 MD5 生成确定性 Voice ID
   const md5 = crypto.createHash('md5').update(fileBuffer).digest();
-  const voiceId = hashToId(md5);
+  const voiceId = idFromMd5Bytes(md5);
 
   // 同名 Voice 已存在（按前缀匹配）
   const existing = fs.readdirSync(REF_AUDIO_DIR).find(f => f.startsWith(voiceId) && /\.(wav|mp3|flac)$/i.test(f));
@@ -246,8 +211,7 @@ router.post('/workspaces', upload.single('reference_file'), async (req, res) => 
       return res.status(400).json({ error: `工作区名称 "${body.name}" 已存在` });
     }
 
-    const id = genId('ws');
-    const modelId = genModelId(id);
+    const modelId = generateVoiceId(body.name.trim() + Date.now().toString());
     const folderPath = path.join(WORKSPACES_DIR, modelId);
     const uploadsDir = path.join(folderPath, 'uploads');
     const jobsDir = path.join(folderPath, 'jobs');
@@ -255,17 +219,16 @@ router.post('/workspaces', upload.single('reference_file'), async (req, res) => 
     fs.mkdirSync(jobsDir, { recursive: true });
 
     const outputDir = body.output_dir || path.join(folderPath, 'outputs');
-    const config = { name: body.name, engine_type: body.engine_type, created_at: new Date().toISOString() };
+    const config = { name: body.name, engine_type: body.engine_type, voice_mode: body.voice_mode || 'clone', params: body.params ? (typeof body.params === 'string' ? JSON.parse(body.params) : body.params) : {}, created_at: new Date().toISOString() };
     fs.writeFileSync(path.join(folderPath, 'config.json'), JSON.stringify(config, null, 2));
     fs.writeFileSync(path.join(folderPath, 'uploads_meta.json'), '[]');
 
     const ws = await ttsWorkerManager.send('createWorkspace', {
-      id, name: body.name.trim(), engine_type: body.engine_type,
+      id: modelId, name: body.name.trim(), engine_type: body.engine_type,
       voice_mode: body.voice_mode || 'clone',
       voice_id: body.voice_id || null,
       params: body.params ? (typeof body.params === 'string' ? JSON.parse(body.params) : body.params) : {},
-      folder_path: folderPath, output_dir: outputDir,
-      model_id: modelId
+      folder_path: folderPath, output_dir: outputDir
     });
     res.json(ws);
   } catch (e) {
@@ -316,25 +279,23 @@ router.post('/workspaces/:id/clone', async (req, res) => {
     const source = await ttsWorkerManager.send('getWorkspace', { id: req.params.id });
     if (!source) return res.status(404).json({ error: '源工作区不存在' });
 
-    const newId = genId('ws');
-    const modelId = genModelId(newId);
+    const cloneName = body.name || `${source.name}(副本)`;
+    const modelId = generateVoiceId(cloneName + Date.now().toString());
     const folderPath = path.join(WORKSPACES_DIR, modelId);
     const body = req.body;
 
     ['uploads', 'jobs'].forEach(d => fs.mkdirSync(path.join(folderPath, d), { recursive: true }));
 
     const outputDir = body.output_dir || source.output_dir;
-    const cloneName = body.name || `${source.name}(副本)`;
     const config = { name: cloneName, engine_type: body.engine_type || source.engine_type, params: { ...source.params, ...(body.params || {}) }, created_at: new Date().toISOString() };
     fs.writeFileSync(path.join(folderPath, 'config.json'), JSON.stringify(config, null, 2));
     fs.writeFileSync(path.join(folderPath, 'uploads_meta.json'), '[]');
 
     const ws = await ttsWorkerManager.send('createWorkspace', {
-      id: newId, name: config.name, engine_type: config.engine_type,
-      voice_mode: '', voice_instruction: null,
+      id: modelId, name: config.name, engine_type: config.engine_type,
+      voice_mode: source.voice_mode || 'clone', voice_instruction: null,
       voice_id: null, reference_audio_id: null,
-      params: config.params, folder_path: folderPath, output_dir: outputDir,
-      model_id: modelId
+      params: config.params, folder_path: folderPath, output_dir: outputDir
     });
     res.json(ws);
   } catch (e) {
@@ -497,12 +458,15 @@ router.get('/workspaces/:id/files/:filename/content', async (req, res) => {
 });
 
 router.post('/workspaces/:id/open-output-dir', async (req, res) => {
-  const ws = await ttsWorkerManager.send('getWorkspace', { id: req.params.id });
-  if (!ws) return res.status(404).json({ error: '工作区不存在' });
-  const dir = req.body.output_dir || ws.output_dir;
-  if (!dir || !fs.existsSync(dir)) return res.status(400).json({ error: '目录不存在' });
-  exec(process.platform === 'win32' ? `start "" "${dir}"` : `open "${dir}"`);
-  res.json({ success: true });
+  try {
+    const ws = await ttsWorkerManager.send('getWorkspace', { id: req.params.id });
+    if (!ws) return res.status(404).json({ error: '工作区不存在' });
+    const dir = req.body.output_dir || ws.output_dir;
+    if (!dir) return res.status(400).json({ error: '输出目录未设置' });
+    if (!fs.existsSync(dir)) return res.status(400).json({ error: `输出目录不存在: ${dir}` });
+    exec(`explorer "${dir}"`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/open-file', (req, res) => {
@@ -584,8 +548,8 @@ router.get('/engine-memory', async (req, res) => {
 
 /* ======================== TTS 全局配置 ======================== */
 
-const TTS_CONFIG_PATH = path.join(PROJECT_ROOT, 'data', 'tts_services', 'config.json');
-const DEFAULT_TTS_CONFIG = { idle_timeout_minutes: 5 };
+const { IDLE_TIMEOUT_MINUTES } = TTS_DEFAULTS;
+const DEFAULT_TTS_CONFIG = { idle_timeout_minutes: IDLE_TIMEOUT_MINUTES };
 
 function getTtsConfig() {
   try {
@@ -595,6 +559,52 @@ function getTtsConfig() {
   } catch {}
   return { ...DEFAULT_TTS_CONFIG };
 }
+
+// 默认工作区配置文件
+const DEFAULTS_PATH = path.join(TTS_DATA_DIR, 'default-workspaces.json');
+
+router.get('/workspace-defaults', (req, res) => {
+  try {
+    if (!fs.existsSync(DEFAULTS_PATH)) return res.json([]);
+    res.json(JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf-8')));
+  } catch (e) { res.json([]); }
+});
+
+router.post('/workspace-defaults/save', (req, res) => {
+  try {
+    fs.mkdirSync(path.dirname(DEFAULTS_PATH), { recursive: true });
+    fs.writeFileSync(DEFAULTS_PATH, JSON.stringify(req.body, null, 2));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/workspace-defaults/reset', async (req, res) => {
+  try {
+    if (!fs.existsSync(DEFAULTS_PATH)) return res.status(400).json({ error: '默认配置不存在' });
+    const defaults = JSON.parse(fs.readFileSync(DEFAULTS_PATH, 'utf-8'));
+    // 删除所有现存工作区（DB + 磁盘）
+    const existing = await ttsWorkerManager.send('getWorkspaces');
+    for (const ws of existing) {
+      if (ws.folder_path && fs.existsSync(ws.folder_path)) {
+        fs.rmSync(ws.folder_path, { recursive: true, force: true });
+      }
+      await ttsWorkerManager.send('deleteWorkspace', { id: ws.id });
+    }
+    // 从默认配置重建
+    for (const d of defaults) {
+      const wsId = d.model_id || d.id;
+      const folderPath = path.join(TTS_WORKSPACES_DIR, wsId);
+      fs.mkdirSync(folderPath, { recursive: true });
+      await ttsWorkerManager.send('createWorkspace', {
+        id: wsId, name: d.name, engine_type: d.engine_type,
+        voice_mode: d.voice_mode || 'clone', voice_id: d.voice_id || null,
+        params: d.params || {}, folder_path: folderPath,
+        output_dir: path.join(folderPath, 'outputs'),
+      });
+    }
+    res.json({ success: true, restored: defaults.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 router.get('/config', (req, res) => {
   res.json(getTtsConfig());
@@ -620,10 +630,7 @@ import modelManager from '../services/modelManager.js';
 function getModelForEngine(engineType) {
   const models = modelManager.getByType('tts');
   const norm = normalizeEngineType(engineType);
-  return models.find(m =>
-    normalizeEngineType(m.engine_version) === norm
-    || normalizeEngineType(m.id) === norm
-  ) || null;
+  return models.find(m => normalizeEngineType(m.engine_version) === norm || normalizeEngineType(m.id) === norm) || null;
 }
 
 export default router;

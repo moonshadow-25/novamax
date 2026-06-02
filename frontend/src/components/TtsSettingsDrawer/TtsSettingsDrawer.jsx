@@ -62,7 +62,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
       // 检测引擎更新
       if (variantVersions.length > 0 && variantInstalled.length > 0) {
-        const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+        const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version));
         const latest = sorted[0].version;
         setLatestAvailableVersion(latest);
         setEngineUpdateAvailable(latest !== latestInstalledVersion);
