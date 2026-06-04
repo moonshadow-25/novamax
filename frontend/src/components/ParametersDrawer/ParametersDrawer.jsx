@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Drawer,
   Form,
@@ -36,6 +37,7 @@ const { Panel } = Collapse;
 const { Option } = Select;
 
 function ParametersDrawer({ visible, modelId, model, onClose }) {
+  const { t } = useTranslation('home');
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [parameters, setParameters] = useState(null);
@@ -83,12 +85,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       const data = e.response?.data;
       if (e.response?.status === 409 && data?.error) {
         Modal.error({
-          title: '操作失败',
+          title: t('settingsDrawer.operationFailed'),
           content: data.error,
-          okText: '确定'
+          okText: t('settingsDrawer.confirm')
         });
       } else {
-        message.error('设置失败');
+        message.error(t('settingsDrawer.setFailed'));
       }
     }
   };
@@ -98,7 +100,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       await modelService.update(modelId, { multi_host: checked });
       setMultiHost(checked);
     } catch (e) {
-      message.error('设置失败');
+      message.error(t('settingsDrawer.setFailed'));
     }
   };
 
@@ -107,7 +109,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
     if (isCloudApi) return;
     if (!parameters) {
-      message.error('参数尚未加载，无法保存');
+      message.error(t('settingsDrawer.parametersNotLoaded'));
       return;
     }
 
@@ -120,10 +122,10 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         parameters: newParams
       });
       setParameters(prev => prev ? { ...prev, reasoning: checked ? 'on' : 'off' } : prev);
-      message.success(checked ? '已开启思考' : '已关闭思考');
+      message.success(checked ? t('settingsDrawer.reasoningEnabled') : t('settingsDrawer.reasoningDisabled'));
     } catch (error) {
       setReasoningOn(!checked);
-      message.error('设置失败');
+      message.error(t('settingsDrawer.setFailed'));
     }
   };
 
@@ -159,9 +161,9 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       // null 表示使用默认（最新）版本
       await modelService.update(modelId, { engine_version: version || null });
       setSelectedEngineVersion(version);
-      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+      message.success(version ? t('settingsDrawer.switchedEngineVersion', { version }) : t('settingsDrawer.switchedDefaultLatestVersion'));
     } catch (e) {
-      message.error('切换引擎版本失败');
+      message.error(t('settingsDrawer.switchEngineVersionFailed'));
     }
   };
 
@@ -213,7 +215,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       setRpcDevices(Array.isArray(params.rpc_devices) ? params.rpc_devices : []);
       form.setFieldsValue(formValues);
     } catch (error) {
-      message.error('加载参数失败');
+      message.error(t('settingsDrawer.loadParametersFailed'));
     }
   };
 
@@ -230,7 +232,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     const {
       rpcEnableOverride,
       rpcDevicesOverride,
-      successText = '参数已保存',
+      successText = t('settingsDrawer.parametersSaved'),
       silentSuccess = false
     } = options;
 
@@ -281,7 +283,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       }
       await loadParameters();
     } catch (error) {
-      message.error('保存失败');
+      message.error(t('settingsDrawer.saveFailed'));
     } finally {
       setLoading(false);
     }
@@ -291,13 +293,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     try {
       setLoading(true);
       await axios.post(`/api/parameters/${modelId}/reset`);
-      message.success('已重置为默认参数');
+      message.success(t('settingsDrawer.resetDefaultsSuccess'));
       // 同步重置引擎版本和自动启动状态
       setSelectedEngineVersion(null);
       setAutoStart(false);
       loadParameters();
     } catch (error) {
-      message.error('重置失败');
+      message.error(t('settingsDrawer.resetFailed'));
     } finally {
       setLoading(false);
     }
@@ -305,7 +307,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
   const handleAddCustom = async () => {
     if (!newKey.trim()) {
-      message.error('请输入参数名');
+      message.error(t('settingsDrawer.inputParameterName'));
       return;
     }
 
@@ -323,12 +325,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         value: parsedValue
       });
 
-      message.success('自定义参数已添加');
+      message.success(t('settingsDrawer.customParameterAdded'));
       setNewKey('');
       setNewValue('');
       loadParameters();
     } catch (error) {
-      message.error('添加失败');
+      message.error(t('settingsDrawer.addFailed'));
     }
   };
 
@@ -338,7 +340,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
     const exists = rpcDevices.some(device => device.trim().toLowerCase() === candidate.toLowerCase());
     if (exists) {
-      message.warning('该从机地址已存在');
+      message.warning(t('settingsDrawer.rpcDeviceExists'));
       return;
     }
 
@@ -348,7 +350,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     await handleSave({
       rpcEnableOverride: rpcEnable,
       rpcDevicesOverride: nextDevices,
-      successText: '已添加从机地址'
+      successText: t('settingsDrawer.rpcDeviceAdded')
     });
   };
 
@@ -358,36 +360,36 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
     await handleSave({
       rpcEnableOverride: rpcEnable,
       rpcDevicesOverride: nextDevices,
-      successText: '已删除从机地址'
+      successText: t('settingsDrawer.rpcDeviceRemoved')
     });
   };
 
   const handleDeleteCustom = async (key) => {
     try {
       await axios.delete(`/api/parameters/${modelId}/custom/${key}`);
-      message.success('参数已删除');
+      message.success(t('settingsDrawer.parameterDeleted'));
       loadParameters();
     } catch (error) {
-      message.error('删除失败');
+      message.error(t('settingsDrawer.deleteFailed'));
     }
   };
 
   const handleDeleteModel = async () => {
     if (deleteInput !== 'delete') {
-      message.error('请输入 "delete" 确认删除');
+      message.error(t('settingsDrawer.inputDeleteConfirm'));
       return;
     }
 
     try {
       setLoading(true);
       await axios.delete(`/api/models/${modelId}`);
-      message.success('模型已删除');
+      message.success(t('settingsDrawer.modelDeleted'));
       setDeleteModalVisible(false);
       setDeleteInput('');
       onClose(); // 关闭抽屉
       window.location.reload(); // 刷新页面以更新模型列表
     } catch (error) {
-      message.error(error.response?.data?.error || '删除失败');
+      message.error(error.response?.data?.error || t('settingsDrawer.deleteFailed'));
     } finally {
       setLoading(false);
     }
@@ -418,14 +420,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         }
       >
         {meta.type === 'boolean' ? (
-          <Input placeholder={`默认: ${meta.default}`} />
+          <Input placeholder={t('settingsDrawer.defaultWithValue', { value: meta.default })} />
         ) : (
           <InputNumber
             style={{ width: '100%' }}
             min={meta.min}
             max={meta.max}
             step={meta.step || 1}
-            placeholder={`默认: ${meta.default}`}
+            placeholder={t('settingsDrawer.defaultWithValue', { value: meta.default })}
           />
         )}
       </Form.Item>
@@ -435,7 +437,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   return (
     <>
       <Drawer
-        title="模型参数配置"
+        title={t('settingsDrawer.modelParametersTitle')}
         placement="right"
         width={500}
         open={visible}
@@ -444,12 +446,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         extra={
           <Space>
             <Popconfirm
-              title="确定重置为默认参数？"
+              title={t('settingsDrawer.confirmResetDefaults')}
               onConfirm={handleReset}
-              okText="确定"
-              cancelText="取消"
+              okText={t('settingsDrawer.confirm')}
+              cancelText={t('settingsDrawer.cancel')}
             >
-              <Button icon={<ReloadOutlined />}>恢复默认</Button>
+              <Button icon={<ReloadOutlined />}>{t('settingsDrawer.restoreDefaults')}</Button>
             </Popconfirm>
             <Button
               type="primary"
@@ -457,7 +459,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               onClick={handleSave}
               loading={loading}
             >
-              保存
+              {t('settingsDrawer.save')}
             </Button>
           </Space>
         }
@@ -466,17 +468,17 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           <>
             {/* 删除模型按钮 - 放在最顶部 */}
             <Alert
-              message="危险操作"
+              message={t('settingsDrawer.dangerOperation')}
               description={
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <div>删除此模型将永久删除配置和所有文件，此操作无法撤销。</div>
+                  <div>{t('settingsDrawer.deleteModelPermanentDesc')}</div>
                   <Button
                     danger
                     icon={<DeleteOutlined />}
                     onClick={() => setDeleteModalVisible(true)}
                     block
                   >
-                    删除模型
+                    {t('settingsDrawer.deleteModel')}
                   </Button>
                 </Space>
               }
@@ -489,11 +491,11 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               <Alert
                 message={
                   <Space>
-                    <span>参数来源:</span>
+                    <span>{t('settingsDrawer.parameterSource')}:</span>
                     <Tag color={parameters._source === 'user' ? 'blue' : 'default'}>
-                      {parameters._source === 'user' ? '用户自定义' : '默认配置'}
+                      {parameters._source === 'user' ? t('settingsDrawer.userCustom') : t('settingsDrawer.defaultConfig')}
                     </Tag>
-                    <span>版本: {parameters._version}</span>
+                    <span>{t('settingsDrawer.version')}: {parameters._version}</span>
                   </Space>
                 }
                 type={parameters._note ? 'warning' : 'info'}
@@ -512,8 +514,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 <Form.Item
                   label={
                     <Space>
-                      引擎版本
-                      <Tooltip title="选择运行此模型使用的 llama.cpp 版本，默认使用版本号最高的版本">
+                      {t('settingsDrawer.engineVersion')}
+                      <Tooltip title={t('settingsDrawer.llamacppEngineVersionHint')}>
                         <QuestionCircleOutlined style={{ color: '#999' }} />
                       </Tooltip>
                     </Space>
@@ -523,12 +525,12 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                     value={selectedEngineVersion}
                     onChange={handleEngineVersionChange}
                     style={{ width: '100%' }}
-                    placeholder="默认（最新版本）"
+                    placeholder={t('settingsDrawer.defaultLatestVersion')}
                     allowClear
                   >
                     {engineVersions.map((v) => (
                       <Option key={v.version} value={v.version}>
-                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? ` ${t('settingsDrawer.latestTag')}` : ''}
                       </Option>
                     ))}
                   </Select>
@@ -539,7 +541,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
             <Collapse defaultActiveKey={[]} ghost style={{ marginLeft: -16, marginBottom: 8 }}>
               {/* 运行时参数 */}
-              <Panel header="运行时参数" key="runtime">
+              <Panel header={t('settingsDrawer.runtimeParameters')} key="runtime">
                 {runtimeKeys
                   .filter(key => metadata[key])
                   .map(key => renderFormItem(key, metadata[key]))}
@@ -547,7 +549,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
               {/* 采样参数 */}
               {samplingKeys.length > 0 && (
-                <Panel header="采样参数" key="sampling">
+                <Panel header={t('settingsDrawer.samplingParameters')} key="sampling">
                   {samplingKeys
                     .filter(key => metadata[key])
                     .map(key => renderFormItem(key, metadata[key]))}
@@ -560,48 +562,48 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                   <Space style={{ marginRight: 12 }}>
-                    <span>自动启动</span>
-                    <Tooltip title="程序启动时自动运行此模型">
+                    <span>{t('settingsDrawer.autoStart')}</span>
+                    <Tooltip title={t('settingsDrawer.autoStartHint')}>
                       <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                     </Tooltip>
                   </Space>
                   <Switch
                     checked={autoStart}
                     onChange={handleAutoStartChange}
-                    checkedChildren="开"
-                    unCheckedChildren="关"
+                    checkedChildren={t('settingsDrawer.switchOn')}
+                    unCheckedChildren={t('settingsDrawer.switchOff')}
                   />
                 </div>
 
                 {!isCloudApi && (
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                   <Space style={{ marginRight: 12 }}>
-                    <span>思考开关</span>
-                    <Tooltip title="切换模型的思考模式，开启后模型会在回答前先输出思考过程（如果模型支持）">
+                    <span>{t('settingsDrawer.reasoningSwitch')}</span>
+                    <Tooltip title={t('settingsDrawer.reasoningHint')}>
                       <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                     </Tooltip>
                   </Space>
                   <Switch
                     checked={reasoningOn}
                     onChange={handleReasoningChange}
-                    checkedChildren="开"
-                    unCheckedChildren="关"
+                    checkedChildren={t('settingsDrawer.switchOn')}
+                    unCheckedChildren={t('settingsDrawer.switchOff')}
                   />
                 </div>
                 )}
 
                 {/* <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
                   <Space style={{ marginRight: 12 }}>
-                    <span>多机互联</span>
-                    <Tooltip title="允许局域网内其他设备通过本机 IP 访问（即将支持）">
+                    <span>{t('settingsDrawer.multiConnect')}</span>
+                    <Tooltip title={t('settingsDrawer.multiConnectComingSoonHint')}>
                       <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                     </Tooltip>
                   </Space>
                   <Switch
                     checked={multiHost}
                     onChange={handleMultiHostChange}
-                    checkedChildren="开"
-                    unCheckedChildren="关"
+                    checkedChildren={t('settingsDrawer.switchOn')}
+                    unCheckedChildren={t('settingsDrawer.switchOff')}
                     disabled
                   />
                 </div> */}
@@ -612,8 +614,8 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
                     <Space style={{ marginRight: 12 }}>
-                      <span>多机互联</span>
-                      <Tooltip title="启用后，模型推理任务将分发到多台从机">
+                      <span>{t('settingsDrawer.multiConnect')}</span>
+                      <Tooltip title={t('settingsDrawer.rpcHint')}>
                         <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
                       </Tooltip>
                     </Space>
@@ -624,18 +626,18 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                         await handleSave({
                           rpcEnableOverride: v,
                           rpcDevicesOverride: rpcDevices,
-                          successText: v ? '已开启 RPC 多机互联' : '已关闭 RPC 多机互联'
+                          successText: v ? t('settingsDrawer.rpcEnabled') : t('settingsDrawer.rpcDisabled')
                         });
                       }}
-                      checkedChildren="开"
-                      unCheckedChildren="关"
+                      checkedChildren={t('settingsDrawer.switchOn')}
+                      unCheckedChildren={t('settingsDrawer.switchOff')}
                     />
                   </div>
 
                   {rpcEnable && (
                     <div style={{ paddingLeft: 4 }}>
                       <div style={{ marginBottom: 6, color: '#999', fontSize: 12 }}>
-                        从机地址列表（格式：IP:端口，如 169.254.30.101:50052）
+                        {t('settingsDrawer.rpcDevicesHint')}
                       </div>
                       {rpcDevices.map((device, idx) => (
                         <Row key={idx} gutter={8} style={{ marginBottom: 6 }}>
@@ -647,7 +649,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                                 next[idx] = e.target.value;
                                 setRpcDevices(next);
                               }}
-                              placeholder="169.254.30.101:50052"
+                              placeholder={t('settingsDrawer.rpcDeviceExample')}
                             />
                           </Col>
                           <Col>
@@ -662,7 +664,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                       <Row gutter={8}>
                         <Col flex="auto">
                           <Input
-                            placeholder="添加从机地址"
+                            placeholder={t('settingsDrawer.addRpcDevice')}
                             value={newRpcDevice}
                             onChange={e => setNewRpcDevice(e.target.value)}
                             onPressEnter={addRpcDevice}
@@ -689,7 +691,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
                 {/* 自定义参数 */}
                 <div style={{ marginBottom: 16 }}>
-                  <h4>自定义参数</h4>
+                  <h4>{t('settingsDrawer.customParameters')}</h4>
                   {customParams.map(({ key, value }) => (
                     <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
                       <Col span={10}>
@@ -712,14 +714,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
                   <Row gutter={8} style={{ marginTop: 16 }}>
                     <Col span={10}>
                       <Input
-                        placeholder="参数名"
+                        placeholder={t('settingsDrawer.parameterName')}
                         value={newKey}
                         onChange={(e) => setNewKey(e.target.value)}
                       />
                     </Col>
                     <Col span={10}>
                       <Input
-                        placeholder="值"
+                        placeholder={t('settingsDrawer.value')}
                         value={newValue}
                         onChange={(e) => setNewValue(e.target.value)}
                       />
@@ -746,14 +748,14 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
               onClick={async () => {
                 try {
                   await backendService.openLogsFolder();
-                  message.success('已打开日志文件夹');
+                  message.success(t('settingsDrawer.logsFolderOpened'));
                 } catch {
-                  message.error('打开失败');
+                  message.error(t('settingsDrawer.openFailed'));
                 }
               }}
               block
             >
-              打开日志文件夹
+              {t('settingsDrawer.openLogsFolder')}
             </Button>
           </Form>
         </>
@@ -762,27 +764,27 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
     {/* 删除确认对话框 */}
     <Modal
-      title="确认删除模型"
+      title={t('settingsDrawer.confirmDeleteModel')}
       open={deleteModalVisible}
       onOk={handleDeleteModel}
       onCancel={() => {
         setDeleteModalVisible(false);
         setDeleteInput('');
       }}
-      okText="删除"
-      cancelText="取消"
+      okText={t('settingsDrawer.delete')}
+      cancelText={t('settingsDrawer.cancel')}
       okButtonProps={{ danger: true, loading }}
     >
       <Space direction="vertical" style={{ width: '100%' }}>
         <Alert
-          message="警告"
-          description="此操作将永久删除模型配置和所有下载的文件，无法恢复！"
+          message={t('settingsDrawer.warning')}
+          description={t('settingsDrawer.deleteModelIrreversible')}
           type="error"
           showIcon
         />
-        <div>请输入 <strong>delete</strong> 确认删除：</div>
+        <div>{t('settingsDrawer.inputDeleteToConfirmPrefix')} <strong>delete</strong> {t('settingsDrawer.inputDeleteToConfirmSuffix')}</div>
         <Input
-          placeholder="输入 delete"
+          placeholder={t('settingsDrawer.inputDelete')}
           value={deleteInput}
           onChange={(e) => setDeleteInput(e.target.value)}
           onPressEnter={handleDeleteModel}

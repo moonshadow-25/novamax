@@ -25,6 +25,7 @@ import {
   RedoOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
@@ -44,25 +45,25 @@ const normalizeErrorText = (raw = '') => String(raw)
   .replace(/\r/g, '')
   .trim();
 
-const summarizeDownloadError = (raw = '') => {
+const summarizeDownloadError = (raw = '', t) => {
   const text = normalizeErrorText(raw);
-  if (!text) return '未知错误';
+  if (!text) return t ? t('downloadError.unknown') : 'Unknown error';
 
   const lower = text.toLowerCase();
   if (lower.includes('chunkedencodingerror') || lower.includes('incompleteread') || lower.includes('connection broken')) {
-    return '下载中断，网络连接不稳定';
+    return t ? t('downloadError.interrupted') : 'Download interrupted, network unstable';
   }
   if (lower.includes('timed out') || lower.includes('timeout')) {
-    return '下载超时，请稍后重试';
+    return t ? t('downloadError.timeout') : 'Download timed out, please retry later';
   }
   if (lower.includes('404')) {
-    return '下载地址不存在（404）';
+    return t ? t('downloadError.notFound') : 'Download URL not found (404)';
   }
   if (lower.includes('403')) {
-    return '下载地址无权限访问（403）';
+    return t ? t('downloadError.forbidden') : 'Download URL forbidden (403)';
   }
   if (lower.includes('no space left on device')) {
-    return '磁盘空间不足';
+    return t ? t('downloadError.noDiskSpace') : 'Insufficient disk space';
   }
 
   const firstLine = text
@@ -76,6 +77,7 @@ const summarizeDownloadError = (raw = '') => {
 const getApiErrorMessage = (error) => error?.response?.data?.error || error?.message || '';
 
 function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
+  const { t } = useTranslation('home');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [parametersVisible, setParametersVisible] = useState(false);
@@ -218,7 +220,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     }
 
     if (rpcDevices.length === 0) {
-      message.warning('请先添加至少一个从机地址');
+      message.warning(t('modelCard.addAtLeastOneWorkerAddress'));
       return false;
     }
 
@@ -290,7 +292,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         // TTS 模型启动前检查模型文件是否已下载
         const filesStatus = await ttsService.getFilesStatus(model.id);
         if (filesStatus.summary && filesStatus.summary.missing > 0) {
-          message.warning('请先下载 TTS 模型文件');
+          message.warning(t('modelCard.downloadTtsFilesFirst'));
           setTtsModelsVisible(true);
           setLoading(false);
           return;
@@ -310,7 +312,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         // Whisper 模型启动前检查模型文件是否已下载
         const filesStatus = await whisperService.getFilesStatus(model.id);
         if (filesStatus.summary && filesStatus.summary.missing > 0) {
-          message.warning('请先下载 Whisper 模型文件');
+          message.warning(t('modelCard.downloadWhisperFilesFirst'));
           setWhisperModelsVisible(true);
           setLoading(false);
           return;
@@ -324,7 +326,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
       await doStartModel();
     } catch (error) {
-      const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
+      const errorMsg = error.response?.data?.error || error.message || t('modelCard.startModelFailed');
       message.error(errorMsg);
       console.error('模型启动失败:', error);
       onUpdate();
@@ -338,10 +340,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await backendService.start(model.id, 'single');
-      message.info('模型正在启动，请稍候...');
+      message.info(t('modelCard.modelStartingPleaseWait'));
       onUpdate();
     } catch (error) {
-      const errorMsg = error.response?.data?.error || error.message || '模型启动失败';
+      const errorMsg = error.response?.data?.error || error.message || t('modelCard.startModelFailed');
       message.error(errorMsg);
       console.error('模型启动失败:', error);
       onUpdate();
@@ -354,10 +356,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await backendService.stop(model.id);
-      message.success('模型已停止');
+      message.success(t('modelCard.modelStopped'));
       onUpdate();
     } catch (error) {
-      message.error('停止失败');
+      message.error(t('modelCard.stopFailed'));
     } finally {
       setLoading(false);
     }
@@ -387,7 +389,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
   const handleComfyUILaunch = async () => {
     setComfyuiLaunching(true);
-    setComfyuiLaunchStatus('正在检查引擎...');
+    setComfyuiLaunchStatus(t('modelCard.checkingEngine'));
 
     try {
       // 先检查本地引擎是否安装
@@ -402,13 +404,13 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       }
 
       // 检查所需模型是否全部下载
-      setComfyuiLaunchStatus('正在检查模型文件...');
+      setComfyuiLaunchStatus(t('modelCard.checkingModelFiles'));
       try {
         const res = await comfyuiService.getModelsStatus(model.id);
         if (res.summary?.missing > 0) {
           setComfyuiLaunchVisible(false);
           setComfyuiLaunching(false);
-          message.warning(`还有 ${res.summary.missing} 个模型未下载，请先下载所需模型`);
+          message.warning(t('modelCard.missingRequiredModels', { count: res.summary.missing }));
           onUpdate();
           setWorkflowModalVisible(true);
           return;
@@ -428,7 +430,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const doLaunchInstance = async () => {
     setComfyuiLaunchVisible(true);
     setComfyuiLaunching(true);
-    setComfyuiLaunchStatus('正在启动 ComfyUI...');
+      setComfyuiLaunchStatus(t('modelCard.startingComfyui'));
 
     try {
       await comfyuiService.ensureInstance();
@@ -436,14 +438,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       const instances = res.instances || [];
 
       if (instances.length === 0) {
-        throw new Error('无法创建 ComfyUI 实例');
+        throw new Error(t('modelCard.cannotCreateComfyuiInstance'));
       }
 
       const firstInstance = instances[0];
       await comfyuiService.startInstance(firstInstance.id);
 
       let attempts = 0;
-      setComfyuiLaunchStatus('等待 ComfyUI 就绪...');
+      setComfyuiLaunchStatus(t('modelCard.waitingComfyuiReady'));
 
       launchPollRef.current = setInterval(async () => {
         attempts++;
@@ -462,7 +464,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
         if (attempts >= 60) {
           clearInterval(launchPollRef.current);
-          setComfyuiLaunchStatus('连接超时，ComfyUI 可能启动失败');
+          setComfyuiLaunchStatus(t('modelCard.comfyuiConnectionTimeout'));
           setComfyuiLaunching(false);
         }
       }, 1000);
@@ -488,9 +490,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         setLoading(true);
         try {
           await downloadService.start(model.id, quantName);
-          message.success('开始重新下载');
+          message.success(t('modelCard.redownloadStarted'));
         } catch (error) {
-          message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
+          message.error(summarizeDownloadError(getApiErrorMessage(error), t) || t('modelCard.downloadFailed'));
         } finally {
           setLoading(false);
           onUpdate(); // 无论成功/失败都刷新，确保 active_file_ok 状态与磁盘同步
@@ -512,11 +514,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       console.log('调用下载服务, 模型ID:', model.id);
       const result = await downloadService.start(model.id);
       console.log('下载服务响应:', result);
-      message.success('开始下载');
+      message.success(t('modelCard.downloadStarted'));
       onUpdate();
     } catch (error) {
       console.error('下载失败:', error);
-      message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
+      message.error(summarizeDownloadError(getApiErrorMessage(error), t) || '下载失败');
     } finally {
       setLoading(false);
     }
@@ -545,10 +547,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await downloadService.start(model.id, quantizationName);
-      message.success(`开始下载 ${quantizationName} 版本`);
+      message.success(t('modelCard.downloadVersionStarted', { version: quantizationName }));
       onUpdate();
     } catch (error) {
-      message.error(summarizeDownloadError(getApiErrorMessage(error)) || '下载失败');
+      message.error(summarizeDownloadError(getApiErrorMessage(error), t) || '下载失败');
     } finally {
       setLoading(false);
     }
@@ -557,7 +559,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 切换到已下载的量化版本（旧方法，兼容保留）
   const handleSwitchQuantization = async (quantizationName) => {
     if (quantizationName === model.selected_quantization) {
-      message.info('已经是当前量化版本');
+      message.info(t('modelCard.alreadyCurrentQuantization'));
       return;
     }
 
@@ -570,9 +572,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       await onUpdate();
       const filesResult = await modelService.scanDownloadedFiles(model.id);
       setRealDownloadedFiles(filesResult.downloadedFiles || []);
-      message.success('量化版本已切换');
+      message.success(t('modelCard.quantizationSwitched'));
     } catch (error) {
-      message.error('切换失败');
+      message.error(t('modelCard.switchFailed'));
     }
   };
 
@@ -589,9 +591,9 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       } catch (e) {
         console.error('扫描文件失败:', e);
       }
-      message.success('已切换到: ' + filename);
+      message.success(t('modelCard.switchedToFile', { filename }));
     } catch (error) {
-      message.error('切换失败');
+      message.error(t('modelCard.switchFailed'));
     }
   };
 
@@ -599,10 +601,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await downloadService.pause(model.id, quantizationName);
-      message.success('已暂停下载');
+      message.success(t('modelCard.downloadPaused'));
       onUpdate();
     } catch (error) {
-      message.error('暂停失败');
+      message.error(t('modelCard.pauseFailed'));
     } finally {
       setLoading(false);
     }
@@ -612,35 +614,41 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     setLoading(true);
     try {
       await downloadService.resume(model.id, quantizationName);
-      message.success('继续下载');
+      message.success(t('modelCard.downloadResumed'));
       onUpdate();
     } catch (error) {
-      message.error('恢复下载失败');
+      message.error(t('modelCard.resumeFailed'));
     } finally {
       setLoading(false);
     }
   };
 
   const handleCancelDownload = async (quantizationName) => {
-    if (window.confirm('确定要取消下载吗？已下载的数据将被删除。')) {
-      setLoading(true);
-      try {
-        await downloadService.cancel(model.id, quantizationName);
-        message.success('已取消下载');
-        onUpdate();
-      } catch (error) {
-        message.error('取消失败');
-      } finally {
-        setLoading(false);
+    Modal.confirm({
+      title: t('modelCard.cancelDownload'),
+      content: t('modelCard.confirmCancelDownload'),
+      okText: t('modelCard.confirm'),
+      cancelText: t('modelCard.cancel'),
+      onOk: async () => {
+        setLoading(true);
+        try {
+          await downloadService.cancel(model.id, quantizationName);
+          message.success(t('modelCard.downloadCancelled'));
+          onUpdate();
+        } catch (error) {
+          message.error(t('modelCard.cancelFailed'));
+        } finally {
+          setLoading(false);
+        }
       }
-    }
+    });
   };
 
   // 删除指定量化版本文件
   const handleDeleteQuantization = async (filename) => {
     try {
       await modelService.deleteQuantization(model.id, filename);
-      message.success('已删除');
+      message.success(t('modelCard.deleted'));
       // 先刷新模型数据（更新卡片状态：启动/下载），再刷新文件列表
       await onUpdate();
       try {
@@ -651,7 +659,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         setRealDownloadedFiles([]);
       }
     } catch (error) {
-      message.error('删除失败');
+      message.error(t('modelCard.deleteFailed'));
     }
   };
 
@@ -692,33 +700,46 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   };
 
   const handleCleanFiles = async () => {
-    if (window.confirm('确定要清理此模型的文件吗？配置将保留，可以重新下载。')) {
-      try {
-        await modelService.deleteFiles(model.id);
-        message.success('文件已清理');
-        onUpdate();
-      } catch (error) {
-        message.error('清理失败');
+    Modal.confirm({
+      title: t('modelCard.deleteCard'),
+      content: t('modelCard.confirmClearFiles'),
+      okText: t('modelCard.confirm'),
+      cancelText: t('modelCard.cancel'),
+      onOk: async () => {
+        try {
+          await modelService.deleteFiles(model.id);
+          message.success(t('modelCard.filesCleared'));
+          onUpdate();
+        } catch (error) {
+          message.error(t('modelCard.clearFailed'));
+        }
       }
-    }
+    });
   };
 
   const handleDelete = async () => {
-    if (window.confirm('⚠️ 警告：此操作将删除模型配置和所有文件，确定要继续吗？')) {
-      try {
-        await modelService.delete(model.id);
-        message.success('模型已删除');
-        onUpdate();
-      } catch (error) {
-        message.error('删除失败');
+    Modal.confirm({
+      title: t('modelCard.deleteCard'),
+      content: t('modelCard.confirmDeleteModelWithFiles'),
+      okText: t('modelCard.delete'),
+      cancelText: t('modelCard.cancel'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await modelService.delete(model.id);
+          message.success(t('modelCard.modelDeleted'));
+          onUpdate();
+        } catch (error) {
+          message.error(t('modelCard.deleteFailed'));
+        }
       }
-    }
+    });
   };
 
   const handleSaveName = async () => {
     const trimmed = nameValue.trim();
     if (!trimmed) {
-      message.warning('模型名称不能为空');
+      message.warning(t('modelCard.modelNameRequired'));
       setNameValue(model.name);
       setEditingName(false);
       return;
@@ -728,7 +749,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       await modelService.update(model.id, { name: trimmed });
       onUpdate();
     } catch (e) {
-      const errorText = getApiErrorMessage(e) || '重命名失败';
+      const errorText = getApiErrorMessage(e) || t('modelCard.renameFailed');
       message.error(errorText);
       setNameValue(model.name);
     }
@@ -862,7 +883,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           />
         ) : (
           <h3
-            title={`${model.name}（点击重命名）`}
+            title={`${model.name} (${t('modelCard.clickToRename')})`}
             onClick={() => { setNameValue(model.name); setEditingName(true); }}
             style={{ cursor: 'text' }}
           >
@@ -877,34 +898,34 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 ? <StarFilled />
                 : <StarOutlined />}
               onClick={() => onToggleFavorite?.(model.id)}
-              title={isFavorited ? '取消收藏' : '收藏'}
+              title={isFavorited ? t('modelCard.unfavorite') : t('modelCard.favorite')}
             />
           )}
           {!!model.modelscope_id && model.type !== 'tts' && (
             <Button
               size="small"
               icon={<CloudSyncOutlined />}
-              title="从远端刷新模型配置"
+              title={t('modelCard.refreshRemoteConfig')}
               onClick={() => {
                 Modal.confirm({
-                  title: '刷新远端模型配置',
+                  title: t('modelCard.refreshRemoteConfig'),
                   content: (
                     <div>
-                      <p>将从模型仓库获取该模型的最新配置（量化列表、文件 SHA256 等）并更新本地数据库。</p>
+                      <p>{t('modelCard.refreshRemoteConfigDesc')}</p>
                       <p style={{ color: '#faad14', marginTop: 8 }}>
                         ⚠️ 注意：如果你已下载旧版本文件，刷新后 SHA256 校验将失败，建议重新下载以获取最新版本。
                       </p>
                     </div>
                   ),
-                  okText: '确认刷新',
-                  cancelText: '取消',
+                  okText: t('modelCard.confirmRefresh'),
+                  cancelText: t('modelCard.cancel'),
                   onOk: async () => {
                     try {
                       await modelService.refreshRemote(model.id);
-                      message.success('模型配置已更新');
+                      message.success(t('modelCard.modelConfigUpdated'));
                       onUpdate();
                     } catch (e) {
-                      message.error('刷新失败');
+                      message.error(t('modelCard.refreshFailed'));
                     }
                   }
                 });
@@ -915,7 +936,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             size="small"
             icon={<SettingOutlined />}
             onClick={handleSettings}
-            title="配置参数"
+            title={t('modelCard.configureParameters')}
           />
         </Space>
       </div>
@@ -925,7 +946,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         ) : model.source === 'custom' ? (
           <span className="model-source">custom</span>
         ) : model.source === 'cloudapi' ? (
-          <span className="model-source">{model.cloud_platform || '云API'}</span>
+          <span className="model-source">{model.cloud_platform || t('modelCard.cloudApi')}</span>
         ) : model.modelscope_id ? (
           <span className="model-source" title={model.modelscope_id}>
             {model.modelscope_id.split('/')[0]}
@@ -935,10 +956,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       {model.description_generating ? (
         <p className="model-description" style={{ color: '#999' }}>
           <LoadingOutlined style={{ marginRight: 6 }} />
-          AI 正在生成描述...
+          {t('modelCard.aiGeneratingDescription')}
         </p>
       ) : (
-        <p className="model-description" title={model.description || ''}>{model.description || '暂无描述'}</p>
+        <p className="model-description" title={model.description || ''}>{model.description || t('modelCard.noDescription')}</p>
       )}
 
       <div className="model-card-footer">
@@ -950,17 +971,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           )}
           {(currentQuant || model.source === 'custom' || model.source === 'cloudapi') && (
             model.source === 'custom' ? (
-              <Tag color="orange">自定义 <HddOutlined /></Tag>
+              <Tag color="orange">{t('modelCard.custom')} <HddOutlined /></Tag>
               // <Tag style={{ background: '#fff7e6', borderColor: '#ffd591', color: '#ff9800' }}>自定义 </Tag> //<HddOutlined />
             ) : model.source === 'cloudapi' ? (
-              <Tag color="geekblue">云API <CloudOutlined /></Tag>
+              <Tag color="geekblue">{t('modelCard.cloudApi')} <CloudOutlined /></Tag>
               // <Tag style={{ background: '#e6f7ff', borderColor: '#91d5ff', color: '#1890ff' }}>云API </Tag> //<CloudOutlined />
             ) : model.quantizations && model.quantizations.length > 1 ? (
               <Tag
                 color="blue"
                 style={{ cursor: 'pointer' }}
                 onClick={handleManageQuantizations}
-                title="点击切换量化版本"
+                title={t('modelCard.clickToSwitchQuantization')}
               >
                 {getQuantizationDisplayName(currentQuant.name)} <SwapOutlined />
               </Tag>
@@ -982,7 +1003,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             loading={loading}
             block
           >
-            下载模型
+            {t('modelCard.downloadModel')}
           </Button>
         </Space>
       )}
@@ -993,7 +1014,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="active" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
-            正在下载... {Math.floor(downloadProgress)}%
+            {t('modelCard.downloadingWithProgress', { progress: Math.floor(downloadProgress) })}
           </div>
           <Space style={{ width: '100%', marginTop: 8 }}>
             <Button
@@ -1002,7 +1023,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              暂停
+              {t('modelCard.pause')}
             </Button>
             <Button
               danger
@@ -1010,7 +1031,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              取消下载
+              {t('modelCard.cancelDownload')}
             </Button>
           </Space>
         </div>
@@ -1022,7 +1043,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <div className="download-progress" style={{ marginTop: 16 }}>
           <Progress percent={Math.floor(downloadProgress)} status="normal" />
           <div style={{ marginTop: 8, color: '#666', fontSize: '12px' }}>
-            已暂停 {Math.floor(downloadProgress)}%
+            {t('modelCard.pausedWithProgress', { progress: Math.floor(downloadProgress) })}
           </div>
           <Space style={{ width: '100%', marginTop: 8 }}>
             <Button
@@ -1032,7 +1053,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              继续下载
+              {t('modelCard.resumeDownload')}
             </Button>
             <Button
               danger
@@ -1040,7 +1061,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              取消下载
+              {t('modelCard.cancelDownload')}
             </Button>
           </Space>
         </div>
@@ -1061,7 +1082,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             )}
           />
           <div style={{ marginTop: 8, color: '#ff4d4f', fontSize: '12px' }}>
-            下载失败：{summarizeDownloadError(model.download_error)}
+            {t('modelCard.downloadFailedWithError', { error: summarizeDownloadError(model.download_error, t) })}
           </div>
           <Space style={{ width: '100%', marginTop: 8 }}>
             <Button
@@ -1071,7 +1092,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              重试
+              {t('modelCard.retry')}
             </Button>
             <Button
               danger
@@ -1079,7 +1100,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               loading={loading}
               size="small"
             >
-              取消下载
+              {t('modelCard.cancelDownload')}
             </Button>
           </Space>
         </div>
@@ -1094,14 +1115,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={handleComfyUIRun}
             block
           >
-            运行
+            {t('modelCard.run')}
           </Button>
           <Button
             icon={<FileTextOutlined />}
             onClick={() => setWorkflowModalVisible(true)}
             block
           >
-            管理工作流
+            {t('modelCard.manageWorkflow')}
           </Button>
         </Space>
       )}
@@ -1111,15 +1132,15 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
-              中断启动
+              {t('modelCard.abortStart')}
             </Button>
           ) : isRunning ? (
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                停止
+                {t('modelCard.stop')}
               </Button>
               <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                使用
+                {t('modelCard.use')}
               </Button>
             </div>
           ) : (
@@ -1132,7 +1153,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               color="blue"
               variant="solid"
             >
-              运行
+              {t('modelCard.run')}
             </Button>
           )}
           <Button
@@ -1140,7 +1161,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={() => setWhisperModelsVisible(true)}
             block
           >
-            管理工作流
+            {t('modelCard.manageWorkflow')}
           </Button>
         </Space>
       )}
@@ -1149,15 +1170,15 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
-              中断启动
+              {t('modelCard.abortStart')}
             </Button>
           ) : isRunning ? (
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                停止
+                {t('modelCard.stop')}
               </Button>
               <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                使用
+                {t('modelCard.use')}
               </Button>
             </div>
           ) : (
@@ -1170,17 +1191,17 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               color="blue"
               variant="solid"
             >
-              运行
+              {t('modelCard.run')}
             </Button>
           )}
           <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
-            管理工作流
+            {t('modelCard.manageWorkflow')}
           </Button>
         </Space>
       )}
 
       <Modal
-        title="多机互连设备验证"
+        title={t('modelCard.rpcValidationTitle')}
         open={rpcValidationVisible}
         footer={null}
         closable={!rpcValidationBusy}
@@ -1191,7 +1212,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div style={{ color: '#666' }}>
-            正在验证 <strong>{rpcValidationDeviceCount}</strong> 个设备的连接状态
+            {t('modelCard.rpcValidatingDevices', { count: rpcValidationDeviceCount })}
           </div>
 
           {rpcValidationSteps.map((step) => (
@@ -1232,7 +1253,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               onClick={handleRetryRpcValidation}
               loading={rpcValidationBusy}
             >
-              重新验证
+              {t('modelCard.retryValidation')}
             </Button>
           </div>
         </Space>
@@ -1240,7 +1261,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
       {/* ComfyUI 启动确认 Modal */}
       <Modal
-        title="启动 ComfyUI"
+        title={t('modelCard.startComfyuiTitle')}
         open={comfyuiLaunchVisible}
         onCancel={comfyuiLaunching ? undefined : handleComfyUILaunchCancel}
         closable={!comfyuiLaunching}
@@ -1251,10 +1272,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               key="skip"
               onClick={() => { handleComfyUILaunchCancel(); navigate(`/comfyui/${model.id}`); }}
             >
-              直接进入
+              {t('modelCard.enterDirectly')}
             </Button>,
             <Button key="launch" type="primary" onClick={handleComfyUILaunch}>
-              启动并进入
+              {t('modelCard.startAndEnter')}
             </Button>
           ]
         }
@@ -1266,10 +1287,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </Space>
         ) : (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <div>未检测到 ComfyUI 正在运行。</div>
-            <div>点击<strong>启动并进入</strong>将自动启动默认实例，就绪后自动进入运行界面。</div>
+            <div>{t('modelCard.comfyuiNotRunning')}</div>
+            <div>{t('modelCard.comfyuiStartAndEnterHint')}</div>
             <div style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
-              如果你已在其他端口运行了 ComfyUI，可点击"直接进入"后在运行页面选择实例。
+              {t('modelCard.comfyuiDirectEnterHint')}
             </div>
           </Space>
         )}
@@ -1329,8 +1350,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         destroyOnClose
       >
         <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
-          <Descriptions.Item label="模型描述">
-            <Text>{model.description || '暂无描述'}</Text>
+          <Descriptions.Item label={t('modelCard.modelDescription')}>
+            <Text>{model.description || t('modelCard.noDescription')}</Text>
           </Descriptions.Item>
         </Descriptions>
         <Divider style={{ margin: '12px 0' }} />
@@ -1358,8 +1379,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         destroyOnClose
       >
         <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
-          <Descriptions.Item label="模型描述">
-            <Text>{model.description || '暂无描述'}</Text>
+          <Descriptions.Item label={t('modelCard.modelDescription')}>
+            <Text>{model.description || t('modelCard.noDescription')}</Text>
           </Descriptions.Item>
         </Descriptions>
         <Divider style={{ margin: '12px 0' }} />
@@ -1378,7 +1399,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               color="red"
               variant="solid"
             >
-              中断启动
+              {t('modelCard.abortStart')}
             </Button>
           ) : !isRunning ? (
             <Button
@@ -1390,7 +1411,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
               color="green"
               variant="solid"
             >
-              启动
+              {t('modelCard.start')}
             </Button>
           ) : model.source === 'cloudapi' ? (
             <Button
@@ -1415,7 +1436,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 variant="solid"
                 style={{ flex: 1 }}
               >
-                停止
+                {t('modelCard.stop')}
               </Button>
               <Button
                 type="primary"
@@ -1425,7 +1446,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 variant="solid"
                 style={{ flex: 1 }}
               >
-                使用
+                {t('modelCard.use')}
               </Button>
             </div>
           )}
@@ -1451,7 +1472,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
       {/* ComfyUI 参数映射设置 */}
       <Drawer
-        title="参数映射配置"
+        title={t('modelCard.parameterMappingConfig')}
         placement="right"
         width={680}
         open={comfyuiSettingsVisible}
@@ -1461,41 +1482,41 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           <Space>
             {!!model.modelscope_id && (
               <Popconfirm
-                title="恢复默认映射？"
-                description="将清除自定义参数映射，恢复为远程默认值。"
+                title={t('modelCard.restoreDefaultMappingConfirm')}
+                description={t('modelCard.restoreDefaultMappingDesc')}
                 onConfirm={async () => {
                   try {
                     await modelService.restoreDefaults(model.id);
-                    message.success('已恢复默认');
+                    message.success(t('modelCard.restoredDefault'));
                     onUpdate();
                   } catch (e) {
-                    message.error('恢复失败');
+                    message.error(t('modelCard.restoreFailed'));
                   }
                 }}
-                okText="确定"
-                cancelText="取消"
+                okText={t('modelCard.confirm')}
+                cancelText={t('modelCard.cancel')}
               >
-                <Button icon={<UndoOutlined />}>恢复默认</Button>
+                <Button icon={<UndoOutlined />}>{t('modelCard.restoreDefault')}</Button>
               </Popconfirm>
             )}
             <Popconfirm
-              title="删除卡片"
-              description="删除此卡片配置及对应的工作流文件，已下载的模型文件不受影响。"
+              title={t('modelCard.deleteCard')}
+              description={t('modelCard.deleteCardDesc')}
               onConfirm={async () => {
                 try {
                   await modelService.delete(model.id);
-                  message.success('卡片已删除');
+                  message.success(t('modelCard.cardDeleted'));
                   setComfyuiSettingsVisible(false);
                   onUpdate();
                 } catch (e) {
-                  message.error('删除失败');
+                  message.error(t('modelCard.deleteFailed'));
                 }
               }}
-              okText="删除"
-              cancelText="取消"
+              okText={t('modelCard.delete')}
+              cancelText={t('modelCard.cancel')}
               okButtonProps={{ danger: true }}
             >
-              <Button danger icon={<DeleteOutlined />}>删除卡片</Button>
+              <Button danger icon={<DeleteOutlined />}>{t('modelCard.deleteCard')}</Button>
             </Popconfirm>
           </Space>
         }

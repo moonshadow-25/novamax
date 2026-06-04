@@ -10,6 +10,7 @@ import {
   PictureOutlined, DownOutlined, CloseCircleOutlined, PlusOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { modelService, comfyuiService, engineService } from '../../services/api';
 import EngineDownloadModal from '../../components/EngineDownloadModal/EngineDownloadModal';
 
@@ -58,6 +59,7 @@ const SIZE_PRESETS = [
 ];
 
 function ComfyUI() {
+  const { t } = useTranslation('home');
   const navigate = useNavigate();
   const { modelId } = useParams();
   const [form] = Form.useForm();
@@ -198,7 +200,7 @@ function ComfyUI() {
         setCustomHeight(defaults.height);
       }
     } catch (error) {
-      message.error('加载模型失败: ' + error.message);
+      message.error(t('comfyuiPage.loadModelFailed', { error: error.message }));
     } finally {
       setLoading(false);
     }
@@ -269,7 +271,7 @@ function ComfyUI() {
         setResults(result.data.map(item => item.url));
       }
     } catch (error) {
-      setGenerateError('获取结果失败: ' + error.message);
+      setGenerateError(t('comfyuiPage.fetchResultFailed', { error: error.message }));
     } finally {
       setGenerating(false);
     }
@@ -277,7 +279,7 @@ function ComfyUI() {
 
   const handleGenerate = async () => {
     if (!connected) {
-      message.error('ComfyUI 未连接，请检查地址配置');
+      message.error(t('comfyuiPage.notConnectedCheckConfig'));
       return;
     }
 
@@ -333,7 +335,7 @@ function ComfyUI() {
       setPromptId(result.promptId);
     } catch (error) {
       setGenerating(false);
-      setGenerateError(error.response?.data?.error || error.message || '生成失败');
+      setGenerateError(error.response?.data?.error || error.message || t('comfyuiPage.generateFailed'));
     }
   };
 
@@ -389,7 +391,7 @@ function ComfyUI() {
     const cols = imageKeys.length >= 5 ? 3 : 2;
     const circledNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨'];
     return (
-      <Form.Item key="image-grid" label="输入图像">
+      <Form.Item key="image-grid" label={t('comfyuiPage.inputImage')}>
         <Upload
           beforeUpload={() => false}
           onChange={handleBatchImageChange}
@@ -399,13 +401,13 @@ function ComfyUI() {
           fileList={batchFileList}
         >
           <Button icon={<UploadOutlined />} size="small" style={{ marginBottom: 10 }}>
-            批量选择（最多 {imageKeys.length} 张）
+            {t('comfyuiPage.batchSelectMax', { count: imageKeys.length })}
           </Button>
         </Upload>
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
           {imageKeys.map((key, index) => {
             const paramDef = inputs[key];
-            const label = paramDef.description || '输入图像';
+            const label = paramDef.description || t('comfyuiPage.inputImage');
             const preview = imagePreviews[key];
             const number = circledNumbers[index] || `${index + 1}`;
             return (
@@ -440,7 +442,7 @@ function ComfyUI() {
                         cursor: 'pointer', display: 'block'
                       }}
                     >
-                      重新选择
+                      {t('comfyuiPage.reselect')}
                       <input id={`refile-${key}`} type="file" accept="image/*" style={{ display: 'none' }}
                         onChange={e => { handleFileInput(key, e.target.files[0]); e.target.value = ''; }} />
                     </label>
@@ -462,7 +464,7 @@ function ComfyUI() {
                       onMouseLeave={e => { e.currentTarget.style.borderColor = '#3a3a3a'; e.currentTarget.style.color = '#555'; }}
                     >
                       <PlusOutlined style={{ fontSize: 26 }} />
-                      <span style={{ fontSize: 12 }}>上传</span>
+                      <span style={{ fontSize: 12 }}>{t('comfyuiPage.upload')}</span>
                     </div>
                     <input id={`file-${key}`} type="file" accept="image/*" style={{ display: 'none' }}
                       onChange={e => { handleFileInput(key, e.target.files[0]); e.target.value = ''; }} />
@@ -477,7 +479,7 @@ function ComfyUI() {
   };
 
   const renderImageField = (key, paramDef) => (
-    <Form.Item key={key} label={paramDef.description || '输入图像'}>
+    <Form.Item key={key} label={paramDef.description || t('comfyuiPage.inputImage')}>
       <Upload
         beforeUpload={() => false}
         onChange={info => handleImageChange(key, info)}
@@ -485,7 +487,7 @@ function ComfyUI() {
         maxCount={1}
         showUploadList={false}
       >
-        <Button icon={<UploadOutlined />}>{imagePreviews[key] ? '重新选择' : '选择图片'}</Button>
+        <Button icon={<UploadOutlined />}>{imagePreviews[key] ? t('comfyuiPage.reselect') : t('comfyuiPage.selectImage')}</Button>
       </Upload>
       {imagePreviews[key] && (
         <img src={imagePreviews[key]} alt="preview"
@@ -503,27 +505,27 @@ function ComfyUI() {
         maxCount={1}
         showUploadList={false}
       >
-        <Button icon={<UploadOutlined />}>{audioFiles[key] ? '重新选择' : '选择音频'}</Button>
+        <Button icon={<UploadOutlined />}>{audioFiles[key] ? t('comfyuiPage.audioReselect') : t('comfyuiPage.audioSelect')}</Button>
       </Upload>
       {audioFiles[key] && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
-          已选择: {audioFiles[key].name}
+          {t('comfyuiPage.selected', { name: audioFiles[key].name })}
         </div>
       )}
     </Form.Item>
   );
 
   const renderSizeField = () => (
-    <Form.Item key="size" label="尺寸">
+    <Form.Item key="size" label={t('comfyuiPage.size')}>
       <Space direction="vertical" style={{ width: '100%' }}>
         <Select value={sizePreset} onChange={setSizePreset}
-          options={SIZE_PRESETS.map(p => ({ label: p.label, value: p.value }))} />
+          options={SIZE_PRESETS.map(p => ({ label: p.value === 'custom' ? t('comfyuiPage.customSize') : p.label, value: p.value }))} />
         {sizePreset === 'custom' && (
           <Space>
             <InputNumber min={64} max={4096} step={64} value={customWidth}
-              onChange={v => setCustomWidth(v)} addonBefore="宽" />
+              onChange={v => setCustomWidth(v)} addonBefore={t('comfyuiPage.width')} />
             <InputNumber min={64} max={4096} step={64} value={customHeight}
-              onChange={v => setCustomHeight(v)} addonBefore="高" />
+              onChange={v => setCustomHeight(v)} addonBefore={t('comfyuiPage.height')} />
           </Space>
         )}
       </Space>
@@ -540,16 +542,16 @@ function ComfyUI() {
       <Form.Item key={key} label={description || key} name={key}>
         <Space.Compact style={{ width: '100%' }}>
           <Form.Item name={key} noStyle>
-            <InputNumber style={{ flex: 1 }} min={-1} placeholder="-1 为随机" />
+            <InputNumber style={{ flex: 1 }} min={-1} placeholder={t('comfyuiPage.randomSeedPlaceholder')} />
           </Form.Item>
-          <Button onClick={() => form.setFieldValue(key, -1)}>随机</Button>
+          <Button onClick={() => form.setFieldValue(key, -1)}>{t('comfyuiPage.randomSeed')}</Button>
         </Space.Compact>
       </Form.Item>
     );
     if (key === 'prompt' || key === 'negative_prompt' || field === 'text') return (
       <Form.Item key={key} label={description || key} name={key}>
         <TextArea rows={key === 'prompt' ? 4 : 2}
-          placeholder={key === 'negative_prompt' ? '负面提示词（可选）' : '请输入提示词'} />
+          placeholder={key === 'negative_prompt' ? t('comfyuiPage.negativePromptOptional') : t('comfyuiPage.inputPrompt')} />
       </Form.Item>
     );
     if (type === 'number') return (
@@ -595,8 +597,8 @@ function ComfyUI() {
     return (
       <Layout style={{ minHeight: '100vh' }}>
         <Content style={{ padding: 24 }}>
-          <Empty description="模型不存在" />
-          <Button onClick={() => navigate('/?tab=comfyui')} style={{ marginTop: 16 }}>返回首页</Button>
+          <Empty description={t('comfyuiPage.modelNotFound')} />
+          <Button onClick={() => navigate('/?tab=comfyui')} style={{ marginTop: 16 }}>{t('comfyuiPage.backToHome')}</Button>
         </Content>
       </Layout>
     );
@@ -609,8 +611,8 @@ function ComfyUI() {
   };
   const workflowType = model.workflow?.type || 'text2img';
   const workflowTypeLabels = {
-    text2img: '文生图', img2img: '图生图',
-    text2video: '文生视频', img2video: '图生视频'
+    text2img: t('textToImage'), img2img: t('imageToImage'),
+    text2video: t('textToVideo'), img2video: t('imageToVideo')
   };
 
   // 参数渲染顺序：动态收集所有 image 参数，统一排在 prompt 后
@@ -677,10 +679,10 @@ function ComfyUI() {
                     }}
                   />
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {connected === null ? '检查中...' : connected ? '已连接' : '未连接'}
+                    {connected === null ? t('comfyuiPage.checkingConnection') : connected ? t('comfyuiPage.connected') : t('comfyuiPage.notConnectedStatus')}
                   </Text>
                 </Space>
-                <Tooltip title="重新检查连接">
+                <Tooltip title={t('comfyuiPage.recheckConnection')}>
                   <Button
                     size="small"
                     icon={<ReloadOutlined />}
@@ -697,25 +699,25 @@ function ComfyUI() {
                     value={customMode ? 'custom' : selectedInstance}
                     onChange={handleInstanceChange}
                     style={{ flex: 1 }}
-                    placeholder="未找到实例"
+                    placeholder={t('comfyuiPage.noInstanceFound')}
                     options={[
                       ...instances.map(inst => ({
                         label: `${inst.name} (${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}) ${inst.status === 'running' ? '●' : '○'}`,
                         value: inst.id
                       })),
-                      { label: '自定义地址...', value: 'custom' }
+                      { label: t('comfyuiPage.customAddress'), value: 'custom' }
                     ]}
                   />
-                  <Tooltip title="新增实例">
+                  <Tooltip title={t('comfyuiPage.addInstance')}>
                     <Button
                       icon={<PlusOutlined />}
                       onClick={async () => {
                         try {
                           await comfyuiService.ensureInstance();
                           await loadInstances();
-                          message.success('实例已创建');
+                          message.success(t('comfyuiPage.instanceCreated'));
                         } catch (e) {
-                          message.error('创建实例失败');
+                          message.error(t('comfyuiPage.instanceCreateFailed'));
                         }
                       }}
                     />
@@ -723,7 +725,7 @@ function ComfyUI() {
                 </Space.Compact>
                 {instances.length === 0 && !customMode && (
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    暂无可用实例，请点击 <PlusOutlined /> 新增实例，或选择"自定义地址"
+                    {t('comfyuiPage.noInstancesHint')}
                   </Text>
                 )}
                 {customMode && (
@@ -753,7 +755,7 @@ function ComfyUI() {
             </Card>
 
             {/* 参数表单 */}
-            <Card size="small" title="参数设置">
+            <Card size="small" title={t('comfyuiPage.parameterSettings')}>
               <Form form={form} layout="vertical" size="small" initialValues={deriveDefaults(model)}>
                 {/* 主要参数 */}
                 {primaryKeys.map(key => {
@@ -768,7 +770,7 @@ function ComfyUI() {
                 {advancedKeys.length > 0 && (
                   <Collapse ghost size="small" style={{ marginTop: 4 }} items={[{
                     key: 'adv',
-                    label: <span style={{ fontSize: 12, color: '#888' }}>高级参数</span>,
+                    label: <span style={{ fontSize: 12, color: '#888' }}>{t('comfyuiPage.advancedParameters')}</span>,
                     children: advancedKeys.map(key => renderField(key, inputs[key]))
                   }]} />
                 )}
@@ -776,7 +778,7 @@ function ComfyUI() {
 
               <Button type="primary" icon={<PlayCircleOutlined />} block size="middle"
                 loading={generating} onClick={handleGenerate} style={{ marginTop: 8 }}>
-                {generating ? '生成中...' : '生成'}
+                {generating ? t('comfyuiPage.generating') : t('comfyuiPage.generate')}
               </Button>
             </Card>
           </Col>
@@ -785,7 +787,7 @@ function ComfyUI() {
           <Col xs={24} md={16} lg={17}>
             <Card
               size="small"
-              title="生成结果"
+              title={t('comfyuiPage.generateResult')}
               style={{ minHeight: 400 }}
             >
               {generateError && (
@@ -801,8 +803,8 @@ function ComfyUI() {
               {!connected && !generating && results.length === 0 && (
                 <Alert
                   type="warning"
-                  message="ComfyUI 未连接"
-                  description={`请确保 ComfyUI 正在运行，或在上方选择正确的实例地址`}
+                  message={t('comfyuiPage.notConnected')}
+                  description={t('comfyuiPage.notConnectedDesc')}
                   style={{ marginBottom: 12 }}
                 />
               )}
@@ -816,9 +818,9 @@ function ComfyUI() {
                   />
                   <div style={{ marginTop: 16 }}>
                     <Text type="secondary">
-                      {progressStatus === 'pending' && '等待队列中...'}
-                      {progressStatus === 'running' && '正在生成...'}
-                      {progressStatus === 'completed' && '生成完成，加载结果...'}
+                      {progressStatus === 'pending' && t('comfyuiPage.waitingInQueue')}
+                      {progressStatus === 'running' && t('comfyuiPage.generatingProgress')}
+                      {progressStatus === 'completed' && t('comfyuiPage.generationCompleteLoading')}
                     </Text>
                   </div>
                 </div>
@@ -827,7 +829,7 @@ function ComfyUI() {
               {!generating && results.length === 0 && !generateError && (
                 <Empty
                   image={<PictureOutlined style={{ fontSize: 48, color: '#ccc' }} />}
-                  description="点击「生成」按钮开始创作"
+                  description={t('comfyuiPage.clickGenerateToStart')}
                   style={{ padding: '60px 0' }}
                 />
               )}
@@ -862,7 +864,7 @@ function ComfyUI() {
                       setPromptId(null);
                     }}
                   >
-                    清除结果
+                    {t('comfyuiPage.clearResults')}
                   </Button>
                 </div>
               )}

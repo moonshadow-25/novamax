@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
 import { DeleteOutlined, UndoOutlined, QuestionCircleOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { engineService, modelService, backendService } from '../../services/api';
@@ -8,6 +9,7 @@ import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 const { Text } = Typography;
 
 function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
+  const { t } = useTranslation('home');
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -113,10 +115,10 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     try {
       await modelService.update(model.id, { engine_version: version || null });
       setSelectedEngineVersion(version || null);
-      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+      message.success(version ? t('settingsDrawer.switchedEngineVersion', { version }) : t('settingsDrawer.switchedDefaultLatestVersion'));
       onSave?.();
     } catch (e) {
-      message.error('切换引擎版本失败');
+      message.error(t('settingsDrawer.switchEngineVersionFailed'));
     }
   };
 
@@ -124,16 +126,16 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     if (!model?.id) return;
     try {
       await modelService.delete(model.id);
-      message.success('TTS 卡片已删除');
+      message.success(t('settingsDrawer.ttsCardDeleted'));
       onClose();
       onDelete?.();
       onSave?.();
     } catch (error) {
-      message.error(error.response?.data?.error || error.message || '删除失败');
+      message.error(error.response?.data?.error || error.message || t('settingsDrawer.deleteFailed'));
     }
   };
 
-  const handleSubmit = async ({ closeAfter = true, successText = 'TTS 配置已保存' } = {}) => {
+  const handleSubmit = async ({ closeAfter = true, successText = t('settingsDrawer.ttsConfigSaved') } = {}) => {
     if (!model?.id) return;
     try {
       const values = await form.validateFields();
@@ -153,7 +155,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       onSave?.();
     } catch (error) {
       if (error?.errorFields) return;
-      message.error(error.response?.data?.error || error.message || '保存失败');
+      message.error(error.response?.data?.error || error.message || t('settingsDrawer.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -162,7 +164,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   return (
     <>
       <Drawer
-        title={`${model?.name || 'TTS'} 配置`}
+        title={`${model?.name || 'TTS'} ${t('settingsDrawer.config')}`}
         placement="right"
         width={520}
         open={visible}
@@ -181,27 +183,27 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   workers: defaults.workers ?? 1,
                   fp16: defaults.fp16 ?? false,
                 });
-                await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
+                await handleSubmit({ closeAfter: false, successText: t('settingsDrawer.defaultsRestoredAndSaved') });
               }}
             >
-              恢复默认
+              {t('settingsDrawer.restoreDefaults')}
             </Button>
             <Popconfirm
-              title="删除卡片"
-              description="将删除此卡片配置及所有已下载的模型文件，此操作不可撤销。"
-              okText="删除"
+              title={t('settingsDrawer.deleteCard')}
+              description={t('settingsDrawer.deleteCardAndFilesDesc')}
+              okText={t('settingsDrawer.delete')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('settingsDrawer.cancel')}
               onConfirm={handleDelete}
             >
-              <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
+              <Button danger icon={<DeleteOutlined />} size="small">{t('settingsDrawer.deleteCard')}</Button>
             </Popconfirm>
           </Space>
         }
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={onClose}>取消</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}>保存</Button>
+            <Button onClick={onClose}>{t('settingsDrawer.cancel')}</Button>
+            <Button type="primary" loading={saving} onClick={handleSubmit}>{t('settingsDrawer.save')}</Button>
           </Space>
         }
       >
@@ -211,10 +213,10 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               <Alert
                 type="warning"
                 showIcon
-                message="未检测到已安装的 TTS 引擎"
+                message={t('settingsDrawer.ttsEngineNotInstalled')}
                 description={
                   <Button type="primary" size="small" onClick={() => setShowEngineModal(true)}>
-                    安装 TTS 引擎
+                    {t('settingsDrawer.installTtsEngine')}
                   </Button>
                 }
               />
@@ -223,8 +225,8 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                 <Form.Item
                   label={
                     <span>
-                      引擎版本
-                      <Tooltip title="选择运行此卡片使用的 TTS 引擎版本；留空表示默认（最新版本）。">
+                      {t('settingsDrawer.engineVersion')}
+                      <Tooltip title={t('settingsDrawer.ttsEngineVersionHint')}>
                         <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                       </Tooltip>
                     </span>
@@ -234,12 +236,12 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   <Select
                     value={selectedEngineVersion}
                     onChange={handleEngineVersionChange}
-                    placeholder="默认（最新版本）"
+                    placeholder={t('settingsDrawer.defaultLatestVersion')}
                     allowClear
                   >
                     {engines.map((v) => (
                       <Select.Option key={v.version} value={v.version}>
-                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? ` ${t('settingsDrawer.latestTag')}` : ''}
                       </Select.Option>
                     ))}
                   </Select>
@@ -251,23 +253,23 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
           <Divider style={{ margin: '6px 0' }} />
 
           <Form form={form} layout="vertical">
-            <Form.Item label="API 端口" name="api_port" rules={[{ required: true, message: '请输入 API 端口' }]}>
+            <Form.Item label={t('settingsDrawer.apiPort')} name="api_port" rules={[{ required: true, message: t('settingsDrawer.inputApiPort') }]}>
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
-            <Form.Item label="WebUI 端口" name="webui_port" rules={[{ required: true, message: '请输入 WebUI 端口' }]}>
+            <Form.Item label={t('settingsDrawer.webuiPort')} name="webui_port" rules={[{ required: true, message: t('settingsDrawer.inputWebuiPort') }]}>
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
-            <Form.Item label="Workers" name="workers" rules={[{ required: true, message: '请输入 workers 数' }]}>
+            <Form.Item label="Workers" name="workers" rules={[{ required: true, message: t('settingsDrawer.inputWorkers') }]}>
               <InputNumber min={1} max={8} style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span>
-                  启用 FP16
-                  <Tooltip title="启用后使用半精度推理，通常可降低显存占用并提升速度，可能对音质稳定性有轻微影响。">
+                  {t('settingsDrawer.enableFp16')}
+                  <Tooltip title={t('settingsDrawer.fp16Hint')}>
                     <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                   </Tooltip>
                 </span>
@@ -284,14 +286,14 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
             onClick={async () => {
               try {
                 await backendService.openLogsFolder();
-                message.success('已打开日志文件夹');
+                message.success(t('settingsDrawer.logsFolderOpened'));
               } catch {
-                message.error('打开失败');
+                message.error(t('settingsDrawer.openFailed'));
               }
             }}
             block
           >
-            打开日志文件夹
+            {t('settingsDrawer.openLogsFolder')}
           </Button>
         </Space>
       </Drawer>
@@ -303,7 +305,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
         onComplete={async () => {
           setShowEngineModal(false);
           await refreshEngineStatus();
-          message.success('TTS 引擎安装完成');
+          message.success(t('settingsDrawer.ttsEngineInstalled'));
         }}
         onCancel={() => setShowEngineModal(false)}
       />

@@ -8,6 +8,7 @@ import {
   LoadingOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons';
 import { multiConnectService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
@@ -36,6 +37,7 @@ function parseIpSuffix(ip) {
  * 允许用户将本机配置为 RPC 从机节点
  */
 function MultiConnectModal({ visible, onClose }) {
+  const { t } = useTranslation('home');
   const [checking, setChecking] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [disabling, setDisabling] = useState(false);
@@ -128,7 +130,7 @@ function MultiConnectModal({ visible, onClose }) {
       setAdapters(list);
       setUsbConnected(connected);
     } catch {
-      message.error('检测 USB4 网卡失败');
+      message.error(t('multiConnectModal.checkUsb4Failed'));
       setAdapters([]);
       setUsbConnected(false);
     } finally {
@@ -148,11 +150,11 @@ function MultiConnectModal({ visible, onClose }) {
     const { normalizedSuffix, normalizedPort } = normalizeInputs();
 
     if (!Number.isInteger(normalizedSuffix) || normalizedSuffix < 101 || normalizedSuffix > 254) {
-      message.error('IP 后缀需在 101-254 之间');
+      message.error(t('multiConnectModal.ipSuffixRangeError'));
       return;
     }
     if (!Number.isInteger(normalizedPort) || normalizedPort < 1024 || normalizedPort > 65535) {
-      message.error('端口需在 1024-65535 之间');
+      message.error(t('multiConnectModal.portRangeError'));
       return;
     }
 
@@ -174,9 +176,9 @@ function MultiConnectModal({ visible, onClose }) {
         detail: { ip, port: realPort }
       }));
 
-      message.success(`从机模式已启用，RPC 地址: ${ip}:${realPort}`);
+      message.success(t('multiConnectModal.enabledWithAddress', { ip, port: realPort }));
     } catch (e) {
-      message.error(e.response?.data?.error || '设置失败');
+      message.error(e.response?.data?.error || t('multiConnectModal.enableFailed'));
     } finally {
       setEnabling(false);
     }
@@ -189,9 +191,9 @@ function MultiConnectModal({ visible, onClose }) {
       setStatus('disabled');
       setEnabledConfig(null);
       localStorage.removeItem(STORAGE_KEY);
-      message.success('从机模式已关闭');
+      message.success(t('multiConnectModal.disabled'));
     } catch {
-      message.error('关闭失败');
+      message.error(t('multiConnectModal.disableFailed'));
     } finally {
       setDisabling(false);
     }
@@ -199,16 +201,16 @@ function MultiConnectModal({ visible, onClose }) {
 
   const requestDisableConfirm = () => {
     Modal.confirm({
-      title: '确认退出从机模式？',
+      title: t('multiConnectModal.confirmExitTitle'),
       icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
       content: (
         <div>
-          退出后将停止 RPC 服务，主机将无法连接到此设备。<br />
-          请确保主机已断开连接，避免任务中断。
+          {t('multiConnectModal.confirmExitDescLine1')}<br />
+          {t('multiConnectModal.confirmExitDescLine2')}
         </div>
       ),
-      okText: '确认退出',
-      cancelText: '取消',
+      okText: t('multiConnectModal.confirmExit'),
+      cancelText: t('settingsDrawer.cancel'),
       okButtonProps: { danger: true, loading: disabling },
       onOk: () => { handleDisable(); },
       centered: true,
@@ -229,10 +231,10 @@ function MultiConnectModal({ visible, onClose }) {
         <Space direction="vertical" size={0}>
           <Space>
             <WifiOutlined />
-            <span>{isEnabled ? '从机模式已启用' : '多机互联设置'}</span>
+            <span>{isEnabled ? t('multiConnectModal.enabledTitle') : t('multiConnectModal.settingsTitle')}</span>
           </Space>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {isEnabled ? '设备正在作为 RPC 从机节点运行' : '将此设备设置为 RPC 从机节点'}
+            {isEnabled ? t('multiConnectModal.enabledSubtitle') : t('multiConnectModal.settingsSubtitle')}
           </Text>
         </Space>
       }
@@ -250,12 +252,12 @@ function MultiConnectModal({ visible, onClose }) {
         {!isEnabled && (
           <Alert
             type="info"
-            message="注意事项"
+            message={t('multiConnectModal.notes')}
             description={
               <ul style={{ margin: 0, paddingLeft: 18 }}>
-                <li>设置后将关闭所有运行中的模块</li>
-                <li>确保设备已通过 Type-C/USB4 接口连接主机</li>
-                <li>设置前请关闭其他占用 GPU 的程序，避免冲突</li>
+                <li>{t('multiConnectModal.noteStopModules')}</li>
+                <li>{t('multiConnectModal.noteConnectHost')}</li>
+                <li>{t('multiConnectModal.noteCloseGpuApps')}</li>
               </ul>
             }
           />
@@ -264,12 +266,12 @@ function MultiConnectModal({ visible, onClose }) {
         {isEnabled && (
           <Alert
             type="info"
-            message="运行注意事项"
+            message={t('multiConnectModal.runtimeNotes')}
             description={
               <ul style={{ margin: 0, paddingLeft: 18 }}>
-                <li>请勿启动其他模块，以免与 RPC 服务冲突</li>
-                <li>确保保持网络连接稳定，避免主机连接中断</li>
-                <li>退出从机模式前，请确认主机已断开连接</li>
+                <li>{t('multiConnectModal.runtimeNoteNoOtherModules')}</li>
+                <li>{t('multiConnectModal.runtimeNoteKeepStable')}</li>
+                <li>{t('multiConnectModal.runtimeNoteDisconnectBeforeExit')}</li>
               </ul>
             }
           />
@@ -280,13 +282,13 @@ function MultiConnectModal({ visible, onClose }) {
             {/* USB4 连接状态 */}
             <div>
               <Space>
-                <Text type="secondary">连接状态：</Text>
+                <Text type="secondary">{t('multiConnectModal.connectionStatus')}</Text>
                 {checking ? (
-                  <Tag icon={<LoadingOutlined />}>检查中...</Tag>
+                  <Tag icon={<LoadingOutlined />}>{t('multiConnectModal.checking')}</Tag>
                 ) : usbConnected === true ? (
-                  <Tag color="success" icon={<CheckCircleOutlined />}>已连接</Tag>
+                  <Tag color="success" icon={<CheckCircleOutlined />}>{t('multiConnectModal.connected')}</Tag>
                 ) : usbConnected === false ? (
-                  <Tag color="error" icon={<CloseCircleOutlined />}>未连接主机</Tag>
+                  <Tag color="error" icon={<CloseCircleOutlined />}>{t('multiConnectModal.notConnectedToHost')}</Tag>
                 ) : (
                   <Spin size="small" />
                 )}

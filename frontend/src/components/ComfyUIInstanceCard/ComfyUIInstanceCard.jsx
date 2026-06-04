@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { Card, Space, Tag, Button, message } from 'antd';
 import { PlayCircleOutlined, StopOutlined, SettingOutlined, GlobalOutlined } from '@ant-design/icons';
 import { comfyuiService, engineService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 import './ComfyUIInstanceCard.css';
 
 function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
+  const { t } = useTranslation('home');
   const [loading, setLoading] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -32,10 +34,10 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
         return;
       }
       await comfyuiService.startInstance(instance.id);
-      message.success('实例启动中...');
+      message.success(t('comfyuiInstanceCard.instanceStarting'));
       setTimeout(onUpdate, 1000);
     } catch (error) {
-      message.error(error.response?.data?.error || '启动失败');
+      message.error(error.response?.data?.error || t('comfyuiInstanceCard.startFailed'));
     } finally {
       setLoading(false);
     }
@@ -45,10 +47,10 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
     setLoading(true);
     try {
       await comfyuiService.stopInstance(instance.id);
-      message.success('实例已停止');
+      message.success(t('comfyuiInstanceCard.instanceStopped'))
       onUpdate();
     } catch (error) {
-      message.error(error.response?.data?.error || '停止失败');
+      message.error(error.response?.data?.error || t('comfyuiInstanceCard.stopFailed'));
     } finally {
       setLoading(false);
     }
@@ -65,12 +67,12 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
   const displayHost = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host;
 
   const statusTag = isCrashed
-    ? <Tag color="red" style={{ margin: 0 }}>已崩溃</Tag>
+    ? <Tag color="red" style={{ margin: 0 }}>{t('comfyuiInstanceCard.crashed')}</Tag>
     : isRunning
-    ? <Tag color="green" style={{ margin: 0 }}>运行中</Tag>
+    ? <Tag color="green" style={{ margin: 0 }}>{t('comfyuiInstanceCard.running')}</Tag>
     : isStarting
-    ? <Tag color="orange" style={{ margin: 0 }}>启动中</Tag>
-    : <Tag style={{ margin: 0 }}>已停止</Tag>;
+    ? <Tag color="orange" style={{ margin: 0 }}>{t('comfyuiInstanceCard.starting')}</Tag>
+    : <Tag style={{ margin: 0 }}>{t('comfyuiInstanceCard.stopped')}</Tag>;
 
   return (
     <>
@@ -85,7 +87,7 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
             size="small"
             icon={<SettingOutlined />}
             onClick={() => onSettings(instance)}
-            title="设置"
+            title={t('settingsDrawer.config')}
           />
         </Space>
         <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -100,7 +102,7 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
                 icon={<GlobalOutlined />}
                 onClick={handleOpen}
               >
-                打开
+                {t('comfyuiInstanceCard.open')}
               </Button>
             )}
             {isRunning || isStarting ? (
@@ -111,7 +113,7 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
                 onClick={handleStop}
                 loading={loading}
               >
-                停止
+                {t('modelCard.stop')}
               </Button>
             ) : isCrashed ? (
               <Space size={4}>
@@ -122,13 +124,13 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
                   onClick={handleStart}
                   loading={loading}
                 >
-                  重启
+                  {t('comfyuiInstanceCard.restart')}
                 </Button>
                 <Button
                   size="small"
                   onClick={handleStop}
                 >
-                  清除
+                  {t('comfyuiInstanceCard.clear')}
                 </Button>
               </Space>
             ) : (
@@ -139,7 +141,7 @@ function ComfyUIInstanceCard({ instance, onUpdate, onSettings }) {
                 onClick={handleStart}
                 loading={loading}
               >
-                启动
+                {t('modelCard.start')}
               </Button>
             )}
           </Space>

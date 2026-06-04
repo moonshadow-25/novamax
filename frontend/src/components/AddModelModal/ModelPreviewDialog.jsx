@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Modal, Descriptions, Badge, Collapse, Tag, Space, Typography } from 'antd';
 import { CheckCircleOutlined, StarOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 
 const { Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 
 function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
+  const { t } = useTranslation('home');
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   if (!preview) return null;
@@ -36,11 +38,11 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
   });
 
   const categoryLabels = {
-    original: '原始精度',
-    high: '高质量',
-    balanced: '平衡推荐',
-    compressed: '极致压缩',
-    ultra_compressed: '超级压缩'
+    original: t('quantization.category.original'),
+    high: t('quantization.category.high'),
+    balanced: t('quantization.category.balanced'),
+    compressed: t('quantization.category.compressed'),
+    ultra_compressed: t('quantization.category.ultraCompressed')
   };
 
   const categoryColors = {
@@ -53,30 +55,30 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
 
   return (
     <Modal
-      title="模型预览"
+      title={t('modelPreviewDialog.title')}
       open={visible}
       onOk={handleConfirm}
       onCancel={onCancel}
       confirmLoading={confirmLoading}
-      okText="确认添加模型"
-      cancelText="取消"
+      okText={t('modelPreviewDialog.confirmAddModel')}
+      cancelText={t('settingsDrawer.cancel')}
       width={700}
     >
       <Descriptions column={1} bordered size="small">
-        <Descriptions.Item label="名称">
+        <Descriptions.Item label={t('modelPreviewDialog.name')}>
           <Text strong>{preview.name}</Text>
         </Descriptions.Item>
-        <Descriptions.Item label="类型">
+        <Descriptions.Item label={t('modelPreviewDialog.type')}>
           <Tag color="blue">{config?.type?.toUpperCase() || 'LLM'}</Tag>
         </Descriptions.Item>
         {preview.filter_folder && (
-          <Descriptions.Item label="文件夹筛选">
+          <Descriptions.Item label={t('modelPreviewDialog.folderFilter')}>
             <Tag color="gold" icon={<FolderOutlined />}>
-              已筛选至: {preview.filter_folder}
+              {t('modelPreviewDialog.filteredTo', { folder: preview.filter_folder })}
             </Tag>
           </Descriptions.Item>
         )}
-        <Descriptions.Item label="描述">
+        <Descriptions.Item label={t('modelPreviewDialog.description')}>
           <Paragraph ellipsis={{ rows: 3, expandable: true }}>
             {preview.description}
           </Paragraph>
@@ -85,7 +87,7 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
 
       <div style={{ marginTop: 16 }}>
         <Text strong>
-          可用量化版本 ({preview.quantizations.length})
+          {t('modelPreviewDialog.availableQuantizations', { count: preview.quantizations.length })}
         </Text>
         <Collapse
           defaultActiveKey={[]}
@@ -126,7 +128,7 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
                       )}
                       <Text strong>{q.label}</Text>
                       {q.recommended && (
-                        <Tag color="gold">推荐</Tag>
+                        <Tag color="gold">{t('quantization.recommendedVersion')}</Tag>
                       )}
                     </Space>
                     {q.description && (
@@ -147,21 +149,21 @@ function ModelPreviewDialog({ visible, preview, config, onConfirm, onCancel }) {
       <div style={{ marginTop: 16 }}>
         <Space direction="vertical" size="small">
           <Space>
-            <Text strong>功能支持:</Text>
+            <Text strong>{t('modelPreviewDialog.capabilitySupport')}</Text>
             {preview.capabilities?.chat && (
-              <Badge status="success" text="聊天" />
+              <Badge status="success" text={t('modelPreviewDialog.capabilityChat')} />
             )}
             {preview.capabilities?.vision && (
-              <Badge status="success" text={`视觉 (${preview.mmproj_count} 个 mmproj)`} />
+              <Badge status="success" text={t('modelPreviewDialog.capabilityVisionWithCount', { count: preview.mmproj_count })} />
             )}
             {preview.capabilities?.completion && (
-              <Badge status="success" text="补全" />
+              <Badge status="success" text={t('modelPreviewDialog.capabilityCompletion')} />
             )}
           </Space>
           {preview.mmproj_count > 0 && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               <CheckCircleOutlined style={{ color: '#52c41a' }} />
-              检测到多模态支持文件，该模型支持图像理解
+              {t('modelPreviewDialog.multimodalDetectedHint')}
             </Text>
           )}
         </Space>

@@ -1,46 +1,49 @@
 import React from 'react';
 import { Descriptions, Tag, Typography, Space } from 'antd';
 import { FileTextOutlined, NumberOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import './WorkflowAnalysisView.css';
 
 const { Title, Text } = Typography;
 
 const WORKFLOW_TYPE_LABELS = {
-  'text2img': { label: '文生图', color: 'blue' },
-  'img2img': { label: '图生图', color: 'green' },
-  'text2video': { label: '文生视频', color: 'purple' },
-  'img2video': { label: '图生视频', color: 'orange' }
+  'text2img': { labelKey: 'textToImage', color: 'blue' },
+  'img2img': { labelKey: 'imageToImage', color: 'green' },
+  'text2video': { labelKey: 'textToVideo', color: 'purple' },
+  'img2video': { labelKey: 'imageToVideo', color: 'orange' }
 };
 
 function WorkflowAnalysisView({ analysis }) {
+  const { t } = useTranslation('home');
   if (!analysis) return null;
 
   const { workflow, parameter_mapping, default_parameters, node_count } = analysis;
-  const workflowType = WORKFLOW_TYPE_LABELS[workflow.type] || { label: workflow.type, color: 'default' };
+  const workflowType = WORKFLOW_TYPE_LABELS[workflow.type] || null;
+  const workflowTypeLabel = workflowType ? t(workflowType.labelKey) : workflow.type;
 
   return (
     <div className="workflow-analysis-view">
       <Title level={5}>
-        <FileTextOutlined /> 工作流分析结果
+        <FileTextOutlined /> {t('workflowAnalysisView.analysisResult')}
       </Title>
 
       <Descriptions bordered size="small" column={1}>
-        <Descriptions.Item label="工作流类型">
-          <Tag color={workflowType.color}>{workflowType.label}</Tag>
+        <Descriptions.Item label={t('workflowAnalysisView.workflowType')}>
+          <Tag color={workflowType?.color || 'default'}>{workflowTypeLabel}</Tag>
         </Descriptions.Item>
 
-        <Descriptions.Item label="功能描述">
+        <Descriptions.Item label={t('workflowAnalysisView.functionDescription')}>
           <Text>{workflow.llm_analysis}</Text>
         </Descriptions.Item>
 
-        <Descriptions.Item label="节点数量">
+        <Descriptions.Item label={t('workflowAnalysisView.nodeCount')}>
           <Space>
             <NumberOutlined />
-            <Text>{node_count} 个节点</Text>
+            <Text>{t('workflowAnalysisView.nodeCountValue', { count: node_count })}</Text>
           </Space>
         </Descriptions.Item>
 
-        <Descriptions.Item label="支持的参数">
+        <Descriptions.Item label={t('workflowAnalysisView.supportedParameters')}>
           <Space wrap>
             {Object.keys(parameter_mapping.inputs).map(param => (
               <Tag key={param}>{param}</Tag>
@@ -48,7 +51,7 @@ function WorkflowAnalysisView({ analysis }) {
           </Space>
         </Descriptions.Item>
 
-        <Descriptions.Item label="默认参数">
+        <Descriptions.Item label={t('workflowAnalysisView.defaultParameters')}>
           <Space direction="vertical" size={2}>
             {Object.entries(default_parameters).map(([key, value]) => (
               <Text key={key} type="secondary" style={{ fontSize: 12 }}>

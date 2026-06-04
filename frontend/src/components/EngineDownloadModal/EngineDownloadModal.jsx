@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Alert, Progress, Space, Typography, Button, Select, Spin } from 'antd';
 import { DownloadOutlined, CloseOutlined } from '@ant-design/icons';
 import { engineService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 const { Text, Title } = Typography;
 const { Option } = Select;
@@ -11,6 +12,7 @@ const { Option } = Select;
  * 支持依赖提示和多进度条显示
  */
 const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCancel }) => {
+  const { t } = useTranslation('home');
   const [downloading, setDownloading] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [selectedVersion, setSelectedVersion] = useState(null);
@@ -126,7 +128,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   if (!engineInfo) {
     return (
       <Modal
-        title="检查引擎..."
+        title={t('engineDownloadModal.checkingEngineTitle')}
         open={visible}
         onCancel={onCancel}
         footer={null}
@@ -135,7 +137,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
       >
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
           <Spin size="large" />
-          <div style={{ marginTop: 16, color: '#888' }}>正在检查引擎状态...</div>
+          <div style={{ marginTop: 16, color: '#888' }}>{t('engineDownloadModal.checkingEngineStatus')}</div>
         </div>
       </Modal>
     );
@@ -143,17 +145,17 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
 
   return (
     <Modal
-      title={`需要下载 ${engineInfo.name || ''}`}
+      title={t('engineDownloadModal.needDownloadTitle', { name: engineInfo.name || '' })}
       open={visible}
       onCancel={onCancel}
       footer={
         downloading ? [
           <Button key="bg" onClick={onCancel}>
-            后台运行
+            {t('engineDownloadModal.runInBackground')}
           </Button>
         ] : [
           <Button key="cancel" onClick={onCancel} icon={<CloseOutlined />}>
-            取消
+            {t('settingsDrawer.cancel')}
           </Button>,
           <Button
             key="download"
@@ -162,7 +164,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
             icon={<DownloadOutlined />}
             disabled={!selectedVersion}
           >
-            开始下载
+            {t('engineDownloadModal.startDownload')}
           </Button>
         ]
       }
@@ -172,7 +174,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
       <Space direction="vertical" style={{ width: '100%' }} size="large">
         {!downloading && flatVersions.length > 1 && (
           <div>
-            <Text strong>选择版本：</Text>
+            <Text strong>{t('engineDownloadModal.selectVersion')}</Text>
             <Select
               value={selectedVersion}
               onChange={(value) => {
@@ -196,11 +198,11 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
         <div>
           <Text type="secondary">{engineInfo?.description}</Text>
           <div style={{ marginTop: 8 }}>
-            <Text strong>版本：</Text>
+            <Text strong>{t('engineDownloadModal.versionLabel')}</Text>
             <Text>{selectedVersion}</Text>
           </div>
           <div style={{ marginTop: 4 }}>
-            <Text strong>大小：</Text>
+            <Text strong>{t('engineDownloadModal.sizeLabel')}</Text>
             <Text>
               {formatBytes(flatVersions.find(v => v.version === selectedVersion)?.size)}
             </Text>
@@ -210,10 +212,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
         {/* 依赖提示 */}
         {dependencies.length > 0 && !downloading && (
           <Alert
-            message="依赖提示"
+            message={t('engineDownloadModal.dependenciesHint')}
             description={
               <div>
-                此引擎依赖以下组件，将一起下载：
+                {t('engineDownloadModal.dependenciesDescription')}
                 <ul style={{ marginTop: 8, marginBottom: 0 }}>
                   {dependencies.map(dep => (
                     <li key={dep.id}>
@@ -231,7 +233,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
         {/* 下载进度 */}
         {downloading && tasks.length > 0 && (
           <div>
-            <Title level={5}>下载进度</Title>
+            <Title level={5}>{t('engineDownloadModal.downloadProgress')}</Title>
             {tasks.map(task => {
               const isInstalling = task.status === 'installing';
               const isUnpacking = task.status === 'unpacking';
@@ -242,10 +244,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
                 Math.round((task.progress || 0) * 0.6);
               const statusText = {
                 downloading: formatSpeed(task.speed),
-                unpacking: '正在解压...',
-                installing: '正在安装...',
-                completed: '✓ 完成',
-                failed: `✗ 失败: ${task.error}`,
+                unpacking: t('engineDownloadModal.unpacking'),
+                installing: t('engineDownloadModal.installing'),
+                completed: t('engineDownloadModal.completed'),
+                failed: t('engineDownloadModal.failedWithError', { error: task.error }),
               }[task.status] || task.status;
 
               return (

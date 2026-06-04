@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Drawer, Progress, Button, Space, Tag, Empty, Typography, message } from 'antd';
 import { PauseCircleOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import { downloadService, comfyuiService, whisperService, ttsService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
@@ -19,33 +20,34 @@ const formatSize = (bytes) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
 };
 
-const summarizeDownloadError = (raw = '') => {
+const summarizeDownloadError = (raw = '', t) => {
   const text = String(raw || '').replace(/\uFFFD+/g, '').replace(/\r/g, '').trim();
-  if (!text) return '下载失败';
+  if (!text) return t ? t('downloadError.unknown') : 'Unknown error';
   const lower = text.toLowerCase();
   if (lower.includes('chunkedencodingerror') || lower.includes('incompleteread') || lower.includes('connection broken')) {
-    return '下载中断，网络连接不稳定';
+    return t ? t('downloadError.interrupted') : 'Download interrupted, network unstable';
   }
   if (lower.includes('timed out') || lower.includes('timeout')) {
-    return '下载超时，请稍后重试';
+    return t ? t('downloadError.timeout') : 'Download timed out, please retry later';
   }
-  if (lower.includes('404')) return '下载地址不存在（404）';
-  if (lower.includes('403')) return '下载地址无权限访问（403）';
-  if (lower.includes('no space left on device')) return '磁盘空间不足';
+  if (lower.includes('404')) return t ? t('downloadError.notFound') : 'Download URL not found (404)';
+  if (lower.includes('403')) return t ? t('downloadError.forbidden') : 'Download URL forbidden (403)';
+  if (lower.includes('no space left on device')) return t ? t('downloadError.noDiskSpace') : 'Insufficient disk space';
   const firstLine = text.split('\n').map(s => s.trim()).find(Boolean) || text;
   return firstLine.length > 100 ? `${firstLine.slice(0, 100)}...` : firstLine;
 };
 
 const statusMap = {
-  downloading: { color: 'processing', label: '下载中' },
-  unpacking: { color: 'processing', label: '解压中' },
-  installing: { color: 'processing', label: '安装中' },
-  paused: { color: 'warning', label: '已暂停' },
-  completed: { color: 'success', label: '已完成' },
-  failed: { color: 'error', label: '失败' }
+  downloading: { color: 'processing', label: 'downloading' },
+  unpacking: { color: 'processing', label: 'unpacking' },
+  installing: { color: 'processing', label: 'installing' },
+  paused: { color: 'warning', label: 'paused' },
+  completed: { color: 'success', label: 'completed' },
+  failed: { color: 'error', label: 'failed' }
 };
 
 function DownloadCenter({ visible, onClose }) {
+  const { t } = useTranslation('home');
   const [downloads, setDownloads] = useState([]);
   const esRef = useRef(null);
 
@@ -85,7 +87,7 @@ function DownloadCenter({ visible, onClose }) {
       }
       loadDownloads();
     } catch (e) {
-      message.error('暂停失败');
+      message.error(t('downloadCenterPanel.pauseFailed'));
     }
   };
 
@@ -102,7 +104,7 @@ function DownloadCenter({ visible, onClose }) {
       }
       loadDownloads();
     } catch (e) {
-      message.error('恢复失败');
+      message.error(t('downloadCenterPanel.resumeFailed'));
     }
   };
 
@@ -119,19 +121,19 @@ function DownloadCenter({ visible, onClose }) {
       }
       loadDownloads();
     } catch (e) {
-      message.error('取消失败');
+      message.error(t('downloadCenterPanel.cancelFailed'));
     }
   };
 
   return (
     <Drawer
-      title="下载中心"
+      title={t('downloadCenter')}
       open={visible}
       onClose={onClose}
       width={480}
     >
       {downloads.length === 0 ? (
-        <Empty description="暂无下载任务" />
+        <Empty description={t('downloadCenterPanel.noTasks')} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {downloads.map((dl, idx) => {
@@ -159,7 +161,7 @@ function DownloadCenter({ visible, onClose }) {
                   <Text strong style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {dl.modelName}
                     {dl.type === 'model' && <Tag color="blue" style={{ marginLeft: 8 }}>LLM</Tag>}
-                    {dl.type === 'engine' && <Tag color="purple" style={{ marginLeft: 8 }}>引擎</Tag>}
+                    {dl.type === 'engine' && <Tag color="purple" style={{ marginLeft: 8 }}>{t('downloadCenterPanel.engine')}</Tag>}
                     {dl.type === 'comfyui' && <Tag color="green" style={{ marginLeft: 8 }}>ComfyUI</Tag>}
                     {dl.type === 'whisper' && <Tag color="cyan" style={{ marginLeft: 8 }}>Whisper</Tag>}
                     {dl.type === 'tts' && <Tag color="geekblue" style={{ marginLeft: 8 }}>TTS</Tag>}
@@ -186,7 +188,7 @@ function DownloadCenter({ visible, onClose }) {
                         {dl.speed > 0 && ` - ${formatSpeed(dl.speed)}`}
                       </>
                     )}
-                    {dl.status === 'failed' && summarizeDownloadError(dl.error)}
+                    {dl.status === 'failed' && summarizeDownloadError(dl.error, t)}
                   </Text>
 
                   <Space size={4}>
@@ -196,7 +198,7 @@ function DownloadCenter({ visible, onClose }) {
                         icon={<PauseCircleOutlined />}
                         onClick={() => handlePause(dl)}
                       >
-                        暂停
+                        {t('downloadCenterPanel.pause')}
                       </Button>
                     )}
                     {dl.status === 'paused' && (
@@ -205,7 +207,7 @@ function DownloadCenter({ visible, onClose }) {
                         icon={<PlayCircleOutlined />}
                         onClick={() => handleResume(dl)}
                       >
-                        继续
+                        {t('downloadCenterPanel.resume')}
                       </Button>
                     )}
                     {(dl.status === 'downloading' || dl.status === 'paused') && (
@@ -215,7 +217,7 @@ function DownloadCenter({ visible, onClose }) {
                         icon={<DeleteOutlined />}
                         onClick={() => handleCancel(dl)}
                       >
-                        取消
+                        {t('downloadCenterPanel.cancel')}
                       </Button>
                     )}
                   </Space>

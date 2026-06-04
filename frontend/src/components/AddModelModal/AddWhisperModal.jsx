@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Modal, Form, Input, Button, Space, Alert, Divider } from 'antd';
 import { FolderOpenOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { systemService, modelService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 function AddWhisperModal({ visible, onClose, onSuccess }) {
+  const { t } = useTranslation('home');
   const [enginePath, setEnginePath] = useState('');
   const [models, setModels] = useState([{ name: '', path: '' }]);
   const [error, setError] = useState('');
@@ -76,16 +78,16 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
 
   const handleConfirm = async () => {
     if (!enginePath.trim()) {
-      setError('请选择引擎路径');
+      setError(t('addWhisperModal.selectEnginePath'));
       return;
     }
     for (let i = 0; i < models.length; i++) {
       if (!models[i].name.trim()) {
-        setError(`第 ${i + 1} 个模型名称不能为空`);
+        setError(t('addWhisperModal.modelNameRequiredAtIndex', { index: i + 1 }));
         return;
       }
       if (!models[i].path.trim()) {
-        setError(`第 ${i + 1} 个模型路径不能为空`);
+        setError(t('addWhisperModal.modelPathRequiredAtIndex', { index: i + 1 }));
         return;
       }
     }
@@ -101,10 +103,10 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
         handleClose();
         if (onSuccess) onSuccess();
       } else {
-        setError(response.error || '添加失败');
+        setError(response.error || t('addModelModal.addFailed'));
       }
     } catch (err) {
-      setError(err.response?.data?.error || err.message || '添加失败');
+      setError(err.response?.data?.error || err.message || t('addModelModal.addFailed'));
     } finally {
       setLoading(false);
     }
@@ -112,7 +114,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
 
   return (
     <Modal
-      title="添加 Whisper 模型"
+      title={t('addWhisperModal.title')}
       open={visible}
       onCancel={handleClose}
       footer={null}
@@ -120,10 +122,10 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
       destroyOnClose
     >
       <Form layout="vertical" style={{ marginTop: 8 }}>
-        <Form.Item label="引擎路径" required extra="选择 whisper-server 所在目录">
+        <Form.Item label={t('addWhisperModal.enginePath')} required extra={t('addWhisperModal.enginePathHint')}>
           <Space.Compact style={{ width: '100%' }}>
             <Input
-              placeholder="例如：D:\novastudio\llm"
+              placeholder={t('addWhisperModal.enginePathPlaceholder')}
               value={enginePath}
               onChange={(e) => { setEnginePath(e.target.value); setError(''); }}
             />
@@ -132,26 +134,26 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
               loading={engineBrowseLoading}
               onClick={handleBrowseEngine}
             >
-              浏览
+              {t('addModelModal.browse')}
             </Button>
           </Space.Compact>
         </Form.Item>
 
-        <Divider orientation="left" style={{ fontSize: 13 }}>模型列表</Divider>
+        <Divider orientation="left" style={{ fontSize: 13 }}>{t('addWhisperModal.modelList')}</Divider>
 
         {models.map((model, index) => (
           <div key={index} style={{ marginBottom: 12, padding: '12px 12px 4px', border: '1px solid #f0f0f0', borderRadius: 6 }}>
-            <Form.Item label="模型名称" required style={{ marginBottom: 8 }}>
+            <Form.Item label={t('addWhisperModal.modelName')} required style={{ marginBottom: 8 }}>
               <Input
-                placeholder="例如：ggml-large-v3"
+                placeholder={t('addWhisperModal.modelNamePlaceholder')}
                 value={model.name}
                 onChange={(e) => updateModel(index, 'name', e.target.value)}
               />
             </Form.Item>
-            <Form.Item label="模型文件路径" required style={{ marginBottom: 8 }}>
+            <Form.Item label={t('addWhisperModal.modelFilePath')} required style={{ marginBottom: 8 }}>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
-                  placeholder="例如：D:\models\ggml-large-v3.bin"
+                  placeholder={t('addWhisperModal.modelFilePathPlaceholder')}
                   value={model.path}
                   onChange={(e) => updateModel(index, 'path', e.target.value)}
                 />
@@ -160,7 +162,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
                   loading={modelBrowseLoading === index}
                   onClick={() => handleBrowseModel(index)}
                 >
-                  浏览
+                  {t('addModelModal.browse')}
                 </Button>
               </Space.Compact>
             </Form.Item>
@@ -173,7 +175,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
                 onClick={() => removeModelEntry(index)}
                 style={{ marginBottom: 4 }}
               >
-                删除此模型
+                {t('addWhisperModal.deleteThisModel')}
               </Button>
             )}
           </div>
@@ -186,7 +188,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
           onClick={addModelEntry}
           style={{ marginTop: 4, marginBottom: 16 }}
         >
-          添加模型
+          {t('addWhisperModal.addModel')}
         </Button>
 
         {error && (
@@ -200,7 +202,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
         )}
 
         <Button type="primary" block loading={loading} onClick={handleConfirm}>
-          确认添加
+          {t('addModelModal.confirmAdd')}
         </Button>
       </Form>
     </Modal>

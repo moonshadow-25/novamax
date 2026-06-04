@@ -5,6 +5,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined
 } from '@ant-design/icons';
 import { whisperService, downloadService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 import './WhisperModelsPanel.css';
 
 const { Title, Text } = Typography;
@@ -22,6 +23,7 @@ function formatSpeed(bps) {
 }
 
 function WhisperModelsPanel({ modelId, onPathReady }) {
+  const { t } = useTranslation('home');
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState({ total: 0, downloaded: 0, missing: 0 });
   // { [filename]: { taskId, progress, totalBytes, downloadedBytes, speed, paused } }
@@ -128,11 +130,11 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
         setTasks(prev => ({ ...prev, [filename]: { taskId: res.taskId, progress: 0 } }));
       } else {
         setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-        message.error(res.error || '下载失败');
+        message.error(res.error || t('whisperModelsPanel.downloadFailed'));
       }
     } catch (e) {
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-      message.error(e.response?.data?.error || e.message || '下载失败');
+      message.error(e.response?.data?.error || e.message || t('whisperModelsPanel.downloadFailed'));
     }
   };
 
@@ -142,7 +144,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     try {
       await whisperService.pauseDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: true, speed: 0 } }));
-    } catch (e) { message.error('暂停失败'); }
+    } catch (e) { message.error(t('whisperModelsPanel.pauseFailed')); }
   };
 
   const handleResume = async (filename) => {
@@ -151,7 +153,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     try {
       await whisperService.resumeDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: false } }));
-    } catch (e) { message.error('恢复失败'); }
+    } catch (e) { message.error(t('whisperModelsPanel.resumeFailed')); }
   };
 
   const handleCancel = async (filename) => {
@@ -160,24 +162,24 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     try {
       await whisperService.cancelDownload(taskId);
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-    } catch (e) { message.error('取消失败'); }
+    } catch (e) { message.error(t('whisperModelsPanel.cancelFailed')); }
   };
 
   const columns = [
     {
-      title: '类型', dataIndex: 'role', key: 'role', width: 100,
+      title: t('whisperModelsPanel.type'), dataIndex: 'role', key: 'role', width: 100,
       render: role => <Tag color={role === 'vad' ? 'orange' : 'blue'}>{role === 'vad' ? 'VAD' : 'ASR'}</Tag>
     },
     {
-      title: '文件名', dataIndex: 'filename', key: 'filename',
+      title: t('whisperModelsPanel.fileName'), dataIndex: 'filename', key: 'filename',
       render: v => <Text code>{v}</Text>
     },
     {
-      title: '大小', dataIndex: 'size', key: 'size', width: 100,
+      title: t('whisperModelsPanel.size'), dataIndex: 'size', key: 'size', width: 100,
       render: v => <Text type="secondary">{v ? formatBytes(v) : '-'}</Text>
     },
     {
-      title: '状态', key: 'status', width: 180,
+      title: t('whisperModelsPanel.status'), key: 'status', width: 180,
       render: (_, record) => {
         const task = tasks[record.filename];
         if (task) {
@@ -190,7 +192,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
                 </div>
               )}
               {task.paused
-                ? <div style={{ fontSize: 11, color: '#faad14' }}>已暂停</div>
+                ? <div style={{ fontSize: 11, color: '#faad14' }}>{t('whisperModelsPanel.paused')}</div>
                 : task.speed > 0
                   ? <div style={{ fontSize: 11, color: '#1677ff' }}>↓ {formatSpeed(task.speed)}</div>
                   : null}
@@ -198,28 +200,28 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
           );
         }
         return record.downloaded
-          ? <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>
-          : <Tag icon={<CloseCircleOutlined />} color="error">缺失</Tag>;
+          ? <Tag icon={<CheckCircleOutlined />} color="success">{t('whisperModelsPanel.downloaded')}</Tag>
+          : <Tag icon={<CloseCircleOutlined />} color="error">{t('whisperModelsPanel.missing')}</Tag>;
       }
     },
     {
-      title: '操作', key: 'actions', width: 180,
+      title: t('whisperModelsPanel.actions'), key: 'actions', width: 180,
       render: (_, record) => {
         const task = tasks[record.filename];
         if (task) {
           return (
             <Space size={4}>
               {task.paused
-                ? <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>继续</Button>
-                : <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>暂停</Button>}
-              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>取消</Button>
+                ? <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>{t('whisperModelsPanel.resume')}</Button>
+                : <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>{t('whisperModelsPanel.pause')}</Button>}
+              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>{t('whisperModelsPanel.cancel')}</Button>
             </Space>
           );
         }
-        if (record.downloaded) return <Button size="small" disabled>已下载</Button>;
+        if (record.downloaded) return <Button size="small" disabled>{t('whisperModelsPanel.downloaded')}</Button>;
         return (
           <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownload(record.filename)}>
-            下载
+            {t('whisperModelsPanel.download')}
           </Button>
         );
       }
@@ -232,10 +234,10 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Title level={5} style={{ margin: 0 }}>
-          模型文件列表
+          {t('whisperModelsPanel.modelFileList')}
           {summary.total > 0 && (
             <Text type="secondary" style={{ fontSize: 14, fontWeight: 'normal', marginLeft: 8 }}>
-              ({summary.downloaded}/{summary.total} 已下载)
+              {t('whisperModelsPanel.downloadedSummary', { downloaded: summary.downloaded, total: summary.total })}
             </Text>
           )}
         </Title>
@@ -249,7 +251,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
               targets.forEach(f => handleDownload(f.filename));
             }}
           >
-            下载全部缺失
+            {t('whisperModelsPanel.downloadAllMissing')}
           </Button>
         )}
       </div>
@@ -257,7 +259,7 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
       {missingCount > 0 && (
         <div style={{ marginBottom: 12 }}>
           <Text type="warning">
-            还有 {missingCount} 个文件未下载，请先下载后才能启动 Whisper。
+            {t('whisperModelsPanel.missingFilesHint', { count: missingCount })}
           </Text>
         </div>
       )}

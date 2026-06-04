@@ -5,6 +5,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined
 } from '@ant-design/icons';
 import { ttsService, downloadService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 const { Title, Text } = Typography;
 
@@ -31,6 +32,7 @@ function getTypeLabel(record) {
 }
 
 function TtsModelsPanel({ modelId }) {
+  const { t } = useTranslation('home');
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState({ total: 0, downloaded: 0, missing: 0 });
   const [tasks, setTasks] = useState({});
@@ -135,11 +137,11 @@ function TtsModelsPanel({ modelId }) {
         setTasks(prev => ({ ...prev, [filename]: { taskId: res.taskId, progress: 0 } }));
       } else {
         setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-        message.error(res.error || '下载失败');
+        message.error(res.error || t('ttsModelsPanel.downloadFailed'));
       }
     } catch (e) {
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-      message.error(e.response?.data?.error || e.message || '下载失败');
+      message.error(e.response?.data?.error || e.message || t('ttsModelsPanel.downloadFailed'));
     }
   };
 
@@ -149,7 +151,7 @@ function TtsModelsPanel({ modelId }) {
     try {
       await ttsService.pauseDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: true, speed: 0 } }));
-    } catch { message.error('暂停失败'); }
+    } catch { message.error(t('ttsModelsPanel.pauseFailed')); }
   };
 
   const handleResume = async (filename) => {
@@ -158,7 +160,7 @@ function TtsModelsPanel({ modelId }) {
     try {
       await ttsService.resumeDownload(taskId);
       setTasks(prev => ({ ...prev, [filename]: { ...prev[filename], paused: false } }));
-    } catch { message.error('恢复失败'); }
+    } catch { message.error(t('ttsModelsPanel.resumeFailed')); }
   };
 
   const handleCancel = async (filename) => {
@@ -167,7 +169,7 @@ function TtsModelsPanel({ modelId }) {
     try {
       await ttsService.cancelDownload(taskId);
       setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
-    } catch { message.error('取消失败'); }
+    } catch { message.error(t('ttsModelsPanel.cancelFailed')); }
   };
 
   const handleDownloadGroup = async (groupName, fileList) => {
@@ -176,7 +178,7 @@ function TtsModelsPanel({ modelId }) {
     for (const f of missing) {
       await handleDownload(f.filename);
     }
-    message.success(`已开始下载分组 ${groupName} 下 ${missing.length} 个文件`);
+    message.success(t('ttsModelsPanel.groupDownloadStarted', { groupName, count: missing.length }));
   };
 
   const rows = useMemo(() => {
@@ -226,21 +228,21 @@ function TtsModelsPanel({ modelId }) {
 
   const columns = [
     {
-      title: '类型', dataIndex: 'role', key: 'role', width: 120,
+      title: t('ttsModelsPanel.type'), dataIndex: 'role', key: 'role', width: 120,
       render: (_, record) => {
         if (record.isGroup) return <Tag color="blue">{record.groupName}</Tag>;
         return <Tag color="blue">{getTypeLabel(record)}</Tag>;
       }
     },
     {
-      title: '文件名', dataIndex: 'filename', key: 'filename',
+      title: t('ttsModelsPanel.fileName'), dataIndex: 'filename', key: 'filename',
       render: (_, record) => {
         if (record.isGroup) {
           return (
             <div>
               <Text code>{record.groupName}</Text>
               <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-                自动对应 {record.total} 个文件（弹窗内不展开）
+                {t('ttsModelsPanel.autoMatchedFiles', { count: record.total })}
               </div>
             </div>
           );
@@ -249,7 +251,7 @@ function TtsModelsPanel({ modelId }) {
       }
     },
     {
-      title: '大小', dataIndex: 'size', key: 'size', width: 140,
+      title: t('ttsModelsPanel.size'), dataIndex: 'size', key: 'size', width: 140,
       render: (_, record) => {
         if (record.isGroup) {
           const label = record.totalSize > 0 ? formatBytes(record.totalSize) : '-';
@@ -259,7 +261,7 @@ function TtsModelsPanel({ modelId }) {
       }
     },
     {
-      title: '状态', key: 'status', width: 220,
+      title: t('ttsModelsPanel.status'), key: 'status', width: 220,
       render: (_, record) => {
         if (record.isGroup) {
           if (record.running > 0) {
@@ -268,13 +270,13 @@ function TtsModelsPanel({ modelId }) {
               <div style={{ minWidth: 160 }}>
                 <Progress percent={percent} size="small" status={record.paused === record.running ? 'exception' : 'active'} style={{ margin: 0 }} />
                 <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                  {record.downloaded}/{record.total} 已下载
+                  {t('ttsModelsPanel.downloadedSummaryNoParens', { downloaded: record.downloaded, total: record.total })}
                 </div>
               </div>
             );
           }
-          if (record.downloaded === record.total) return <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>;
-          return <Tag icon={<CloseCircleOutlined />} color="error">缺失{record.total - record.downloaded}个文件</Tag>;
+          if (record.downloaded === record.total) return <Tag icon={<CheckCircleOutlined />} color="success">{t('ttsModelsPanel.downloaded')}</Tag>;
+          return <Tag icon={<CloseCircleOutlined />} color="error">{t('ttsModelsPanel.missingCountFiles', { count: record.total - record.downloaded })}</Tag>;
         }
 
         const task = tasks[record.filename];
@@ -288,7 +290,7 @@ function TtsModelsPanel({ modelId }) {
                 </div>
               )}
               {task.paused
-                ? <div style={{ fontSize: 11, color: '#faad14' }}>已暂停</div>
+                ? <div style={{ fontSize: 11, color: '#faad14' }}>{t('ttsModelsPanel.paused')}</div>
                 : task.speed > 0
                   ? <div style={{ fontSize: 11, color: '#1677ff' }}>↓ {formatSpeed(task.speed)}</div>
                   : null}
@@ -296,19 +298,19 @@ function TtsModelsPanel({ modelId }) {
           );
         }
         return record.downloaded
-          ? <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>
-          : <Tag icon={<CloseCircleOutlined />} color="error">缺失</Tag>;
+          ? <Tag icon={<CheckCircleOutlined />} color="success">{t('ttsModelsPanel.downloaded')}</Tag>
+          : <Tag icon={<CloseCircleOutlined />} color="error">{t('ttsModelsPanel.missing')}</Tag>;
       }
     },
     {
-      title: '操作', key: 'actions', width: 200,
+      title: t('ttsModelsPanel.actions'), key: 'actions', width: 200,
       render: (_, record) => {
         if (record.isGroup) {
           const missing = record.files.filter(f => !f.downloaded);
-          if (missing.length === 0) return <Button size="small" disabled>已下载</Button>;
+          if (missing.length === 0) return <Button size="small" disabled>{t('ttsModelsPanel.downloaded')}</Button>;
           return (
             <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadGroup(record.groupName, record.files)}>
-              下载
+              {t('ttsModelsPanel.download')}
             </Button>
           );
         }
@@ -318,16 +320,16 @@ function TtsModelsPanel({ modelId }) {
           return (
             <Space size={4}>
               {task.paused
-                ? <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>继续</Button>
-                : <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>暂停</Button>}
-              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>取消</Button>
+                ? <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>{t('ttsModelsPanel.resume')}</Button>
+                : <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>{t('ttsModelsPanel.pause')}</Button>}
+              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>{t('ttsModelsPanel.cancel')}</Button>
             </Space>
           );
         }
-        if (record.downloaded) return <Button size="small" disabled>已下载</Button>;
+        if (record.downloaded) return <Button size="small" disabled>{t('ttsModelsPanel.downloaded')}</Button>;
         return (
           <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownload(record.filename)}>
-            下载
+            {t('ttsModelsPanel.download')}
           </Button>
         );
       }
@@ -340,10 +342,10 @@ function TtsModelsPanel({ modelId }) {
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Title level={5} style={{ margin: 0 }}>
-          模型文件列表
+          {t('ttsModelsPanel.modelFileList')}
           {summary.total > 0 && (
             <Text type="secondary" style={{ fontSize: 14, fontWeight: 'normal', marginLeft: 8 }}>
-              ({summary.downloaded}/{summary.total} 已下载)
+              {t('ttsModelsPanel.downloadedSummary', { downloaded: summary.downloaded, total: summary.total })}
             </Text>
           )}
         </Title>
@@ -357,7 +359,7 @@ function TtsModelsPanel({ modelId }) {
               targets.forEach(f => handleDownload(f.filename));
             }}
           >
-            下载全部缺失
+            {t('ttsModelsPanel.downloadAllMissing')}
           </Button>
         )}
       </div>

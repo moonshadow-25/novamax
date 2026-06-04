@@ -5,15 +5,17 @@ import {
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { comfyuiService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
-const TYPE_OPTIONS = [
-  { label: '数字 (number)', value: 'number' },
-  { label: '文本 (string)', value: 'string' },
+const TYPE_OPTIONS = (t) => [
+  { label: t('userMappingPanel.typeNumber'), value: 'number' },
+  { label: t('userMappingPanel.typeString'), value: 'string' },
 ];
 
 function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false }) {
+  const { t } = useTranslation('home');
   const [nodes, setNodes] = useState([]);
   const [userMapping, setUserMapping] = useState(model?.user_parameter_mapping || {});
   const [modalOpen, setModalOpen] = useState(false);
@@ -38,7 +40,7 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const fieldOptions = selectedNode
     ? Object.entries(selectedNode.inputs || {}).map(([field, value]) => ({
-        label: `${field}  =  ${Array.isArray(value) ? '[引用]' : JSON.stringify(value)}`,
+        label: `${field}  =  ${Array.isArray(value) ? `[${t('userMappingPanel.reference')}]` : JSON.stringify(value)}`,
         value: field
       }))
     : [];
@@ -90,9 +92,9 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
       setUserMapping(newMapping);
       setModalOpen(false);
       onMappingUpdate?.(newMapping);
-      message.success('映射已保存');
+      message.success(t('userMappingPanel.mappingSaved'));
     } catch {
-      message.error('保存失败');
+      message.error(t('userMappingPanel.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -105,9 +107,9 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
       await comfyuiService.updateUserMapping(modelId, newMapping);
       setUserMapping(newMapping);
       onMappingUpdate?.(newMapping);
-      message.success('已删除');
+      message.success(t('userMappingPanel.deleted'));
     } catch {
-      message.error('删除失败');
+      message.error(t('userMappingPanel.deleteFailed'));
     }
   };
 
@@ -122,19 +124,19 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
 
   const columns = [
     {
-      title: '参数名', dataIndex: 'key', key: 'key', width: 110,
+      title: t('userMappingPanel.paramName'), dataIndex: 'key', key: 'key', width: 110,
       render: v => <Text code style={{ fontSize: 11 }}>{v}</Text>
     },
     {
-      title: '节点 ID', dataIndex: 'node_id', key: 'node_id', width: 80,
+      title: t('userMappingPanel.nodeId'), dataIndex: 'node_id', key: 'node_id', width: 80,
       render: v => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>
     },
     {
-      title: '字段', dataIndex: 'field', key: 'field', width: 80,
+      title: t('userMappingPanel.field'), dataIndex: 'field', key: 'field', width: 80,
       render: v => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text>
     },
     {
-      title: '默认值', dataIndex: 'default_value', key: 'default_value', width: 100,
+      title: t('userMappingPanel.defaultValue'), dataIndex: 'default_value', key: 'default_value', width: 100,
       ellipsis: true,
       render: v => {
         if (v === undefined || v === null) return <Text type="secondary">—</Text>;
@@ -149,10 +151,10 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
       }
     },
     {
-      title: '来源', dataIndex: 'source', key: 'source', width: 55,
+      title: t('userMappingPanel.source'), dataIndex: 'source', key: 'source', width: 55,
       render: v => v === 'auto'
-        ? <Tag color="blue" style={{ fontSize: 10, padding: '0 4px' }}>自动</Tag>
-        : <Tag color="green" style={{ fontSize: 10, padding: '0 4px' }}>手动</Tag>
+        ? <Tag color="blue" style={{ fontSize: 10, padding: '0 4px' }}>{t('userMappingPanel.auto')}</Tag>
+        : <Tag color="green" style={{ fontSize: 10, padding: '0 4px' }}>{t('userMappingPanel.manual')}</Tag>
     },
     {
       title: '', key: 'action', width: 60,
@@ -160,9 +162,9 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
         <Space size={0}>
           <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(row.key)} />
           <Popconfirm
-            title="确认删除此映射？"
+            title={t('userMappingPanel.confirmDeleteMapping')}
             onConfirm={() => handleDelete(row.key)}
-            okText="删除" cancelText="取消"
+            okText={t('settingsDrawer.delete')} cancelText={t('settingsDrawer.cancel')}
           >
             <Button size="small" type="text" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -187,7 +189,7 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
         style={{ marginTop: 8 }}
         onClick={openAdd}
       >
-        添加映射
+        {t('userMappingPanel.addMapping')}
       </Button>
     </>
   );
@@ -201,41 +203,41 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
           style={{ marginTop: 8 }}
           items={[{
             key: 'mapping',
-            label: <span style={{ fontSize: 12, color: '#888' }}>参数映射配置</span>,
+            label: <span style={{ fontSize: 12, color: '#888' }}>{t('userMappingPanel.mappingConfig')}</span>,
             children: tableContent
           }]}
         />
       )}
 
       <Modal
-        title={editingKey ? `编辑映射：${editingKey}` : '添加参数映射'}
+        title={editingKey ? t('userMappingPanel.editMappingWithKey', { key: editingKey }) : t('userMappingPanel.addParamMapping')}
         open={modalOpen}
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
         confirmLoading={saving}
-        okText="保存"
-        cancelText="取消"
+        okText={t('settingsDrawer.save')}
+        cancelText={t('settingsDrawer.cancel')}
         destroyOnClose
         width={480}
       >
         <Form form={form} layout="vertical" size="small">
           <Form.Item
             name="param_name"
-            label="参数名"
-            rules={[{ required: true, message: '请输入参数名' }]}
-            extra="运行时使用的参数键名，如 frame_count"
+            label={t('userMappingPanel.paramName')}
+            rules={[{ required: true, message: t('userMappingPanel.inputParamName') }]}
+            extra={t('userMappingPanel.paramNameExtra')}
           >
-            <Input placeholder="例: frame_count" disabled={!!editingKey} />
+            <Input placeholder={t('userMappingPanel.paramNamePlaceholder')} disabled={!!editingKey} />
           </Form.Item>
 
           <Form.Item
             name="node_id"
-            label="节点"
-            rules={[{ required: true, message: '请选择节点' }]}
+            label={t('userMappingPanel.node')}
+            rules={[{ required: true, message: t('userMappingPanel.selectNode') }]}
           >
             <Select
               options={nodeOptions}
-              placeholder="选择节点"
+              placeholder={t('userMappingPanel.selectNode')}
               showSearch
               filterOption={(input, opt) =>
                 opt.label.toLowerCase().includes(input.toLowerCase())
@@ -249,27 +251,27 @@ function UserMappingPanel({ modelId, model, onMappingUpdate, embedded = false })
 
           <Form.Item
             name="field"
-            label="字段"
-            rules={[{ required: true, message: '请选择字段' }]}
+            label={t('userMappingPanel.field')}
+            rules={[{ required: true, message: t('userMappingPanel.selectField') }]}
           >
             <Select
               options={fieldOptions}
-              placeholder={selectedNodeId ? '选择字段' : '请先选择节点'}
+              placeholder={selectedNodeId ? t('userMappingPanel.selectField') : t('userMappingPanel.selectNodeFirst')}
               disabled={!selectedNodeId}
               showSearch
             />
           </Form.Item>
 
-          <Form.Item name="type" label="类型">
-            <Select options={TYPE_OPTIONS} />
+          <Form.Item name="type" label={t('userMappingPanel.type')}>
+            <Select options={TYPE_OPTIONS(t)} />
           </Form.Item>
 
-          <Form.Item name="description" label="描述">
-            <Input placeholder="例: 视频帧数" />
+          <Form.Item name="description" label={t('userMappingPanel.description')}>
+            <Input placeholder={t('userMappingPanel.descriptionPlaceholder')} />
           </Form.Item>
 
-          <Form.Item name="default_value" label="默认值">
-            <InputNumber style={{ width: '100%' }} placeholder="留空则无默认值" />
+          <Form.Item name="default_value" label={t('userMappingPanel.defaultValue')}>
+            <InputNumber style={{ width: '100%' }} placeholder={t('userMappingPanel.defaultValuePlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>

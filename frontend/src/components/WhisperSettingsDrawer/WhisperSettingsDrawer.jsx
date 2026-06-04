@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Drawer, Form, InputNumber, Select, Switch, Button, Space, message, Alert, Tag, Popconfirm, Divider, Typography, Tooltip } from 'antd';
 import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { engineService, modelService, backendService } from '../../services/api';
@@ -8,18 +9,19 @@ import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 const { Text } = Typography;
 
 const WHISPER_LANGUAGES = [
-  { value: 'auto', label: '自动检测' },
-  { value: 'zh', label: '中文' },
+  { value: 'auto', label: 'Auto Detect' },
+  { value: 'zh', label: 'Chinese' },
   { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
-  { value: 'ko', label: '한국어' },
-  { value: 'fr', label: 'Français' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'es', label: 'Español' },
-  { value: 'ru', label: 'Русский' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'ru', label: 'Russian' },
 ];
 
 function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
+  const { t } = useTranslation('home');
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -72,10 +74,10 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     try {
       await modelService.update(model.id, { engine_version: version || null });
       setSelectedEngineVersion(version || null);
-      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+      message.success(version ? t('settingsDrawer.switchedEngineVersion', { version }) : t('settingsDrawer.switchedDefaultLatestVersion'));
       onSave?.();
     } catch (e) {
-      message.error('切换引擎版本失败');
+      message.error(t('settingsDrawer.switchEngineVersionFailed'));
     }
   };
 
@@ -83,16 +85,16 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     if (!model?.id) return;
     try {
       await modelService.delete(model.id);
-      message.success('Whisper 卡片已删除');
+      message.success(t('settingsDrawer.whisperCardDeleted'));
       onClose();
       onDelete?.();
       onSave?.();
     } catch (error) {
-      message.error(error.response?.data?.error || error.message || '删除失败');
+      message.error(error.response?.data?.error || error.message || t('settingsDrawer.deleteFailed'));
     }
   };
 
-  const handleSubmit = async ({ closeAfter = true, successText = 'Whisper 配置已保存' } = {}) => {
+  const handleSubmit = async ({ closeAfter = true, successText = t('settingsDrawer.whisperConfigSaved') } = {}) => {
     if (!model?.id) return;
     try {
       const values = await form.validateFields();
@@ -114,7 +116,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       onSave?.();
     } catch (error) {
       if (error?.errorFields) return;
-      message.error(error.response?.data?.error || error.message || '保存失败');
+      message.error(error.response?.data?.error || error.message || t('settingsDrawer.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -123,7 +125,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   return (
     <>
       <Drawer
-        title={`${model?.name || 'Whisper'} 配置`}
+        title={`${model?.name || 'Whisper'} ${t('settingsDrawer.config')}`}
         placement="right"
         width={520}
         open={visible}
@@ -143,27 +145,27 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   whisper_port: defaults.port ?? 18181,
                   flask_port: defaults.flask_port ?? 8281,
                 });
-                await handleSubmit({ closeAfter: false, successText: '已恢复默认参数并保存' });
+                await handleSubmit({ closeAfter: false, successText: t('settingsDrawer.defaultsRestoredAndSaved') });
               }}
             >
-              恢复默认
+              {t('settingsDrawer.restoreDefaults')}
             </Button>
             <Popconfirm
-              title="删除卡片"
-              description="将删除此卡片配置及所有已下载的模型文件，此操作不可撤销。"
-              okText="删除"
+              title={t('settingsDrawer.deleteCard')}
+              description={t('settingsDrawer.deleteCardAndFilesDesc')}
+              okText={t('settingsDrawer.delete')}
               okButtonProps={{ danger: true }}
-              cancelText="取消"
+              cancelText={t('settingsDrawer.cancel')}
               onConfirm={handleDelete}
             >
-              <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
+              <Button danger icon={<DeleteOutlined />} size="small">{t('settingsDrawer.deleteCard')}</Button>
             </Popconfirm>
           </Space>
         }
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={onClose}>取消</Button>
-            <Button type="primary" loading={saving} onClick={handleSubmit}>保存</Button>
+            <Button onClick={onClose}>{t('settingsDrawer.cancel')}</Button>
+            <Button type="primary" loading={saving} onClick={handleSubmit}>{t('settingsDrawer.save')}</Button>
           </Space>
         }
       >
@@ -173,10 +175,10 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               <Alert
                 type="warning"
                 showIcon
-                message="未检测到已安装的 Whisper 引擎"
+                message={t('settingsDrawer.whisperEngineNotInstalled')}
                 description={
                   <Button type="primary" size="small" onClick={() => setShowEngineModal(true)}>
-                    安装 Whisper 引擎
+                    {t('settingsDrawer.installWhisperEngine')}
                   </Button>
                 }
               />
@@ -185,8 +187,8 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                 <Form.Item
                   label={
                     <span>
-                      引擎版本
-                      <Tooltip title="选择运行此卡片使用的 Whisper 引擎版本；留空表示默认（最新版本）。">
+                      {t('settingsDrawer.engineVersion')}
+                      <Tooltip title={t('settingsDrawer.whisperEngineVersionHint')}>
                         <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                       </Tooltip>
                     </span>
@@ -196,12 +198,12 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   <Select
                     value={selectedEngineVersion}
                     onChange={handleEngineVersionChange}
-                    placeholder="默认（最新版本）"
+                    placeholder={t('settingsDrawer.defaultLatestVersion')}
                     allowClear
                   >
                     {engines.map((v) => (
                       <Select.Option key={v.version} value={v.version}>
-                        {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
+                        {v.version}{v.version === latestEngineVersion ? ` ${t('settingsDrawer.latestTag')}` : ''}
                       </Select.Option>
                     ))}
                   </Select>
@@ -213,27 +215,27 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
           <Divider style={{ margin: '6px 0' }} />
 
           <Form form={form} layout="vertical">
-            <Form.Item label="线程数" name="threads" rules={[{ required: true, message: '请输入线程数' }]}>
+            <Form.Item label={t('settingsDrawer.whisperThreads')} name="threads" rules={[{ required: true, message: t('settingsDrawer.inputThreads') }]}>
               <InputNumber min={1} max={8} style={{ width: '100%' }} />
             </Form.Item>
 
-            <Form.Item label="默认语言" name="language" rules={[{ required: true, message: '请选择默认语言' }]}>
+            <Form.Item label={t('settingsDrawer.defaultLanguage')} name="language" rules={[{ required: true, message: t('settingsDrawer.selectDefaultLanguage') }]}>
               <Select options={WHISPER_LANGUAGES} />
             </Form.Item>
 
-            <Form.Item label="Whisper 端口" name="whisper_port" rules={[{ required: true, message: '请输入 Whisper 端口' }]}>
+            <Form.Item label={t('settingsDrawer.whisperPort')} name="whisper_port" rules={[{ required: true, message: t('settingsDrawer.inputWhisperPort') }]}>
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
-            <Form.Item label="Flask 端口" name="flask_port" rules={[{ required: true, message: '请输入 Flask 端口' }]}>
+            <Form.Item label={t('settingsDrawer.flaskPort')} name="flask_port" rules={[{ required: true, message: t('settingsDrawer.inputFlaskPort') }]}>
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span>
-                  启用 VAD
-                  <Tooltip title="VAD（语音活动检测）可自动过滤音频中的静默片段，提升转写准确率并减少幻听。需要提前下载 VAD 模型文件（ggml-silero-v6.2.0.bin）才能生效。">
+                  {t('settingsDrawer.enableVad')}
+                  <Tooltip title={t('settingsDrawer.vadHint')}>
                     <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
                   </Tooltip>
                 </span>
@@ -250,14 +252,14 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
             onClick={async () => {
               try {
                 await backendService.openLogsFolder();
-                message.success('已打开日志文件夹');
+                message.success(t('settingsDrawer.logsFolderOpened'));
               } catch {
-                message.error('打开失败');
+                message.error(t('settingsDrawer.openFailed'));
               }
             }}
             block
           >
-            打开日志文件夹
+            {t('settingsDrawer.openLogsFolder')}
           </Button>
         </Space>
       </Drawer>
@@ -269,7 +271,7 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
         onComplete={async () => {
           setShowEngineModal(false);
           await refreshEngineStatus();
-          message.success('Whisper 引擎安装完成');
+          message.success(t('settingsDrawer.whisperEngineInstalled'));
         }}
         onCancel={() => setShowEngineModal(false)}
       />

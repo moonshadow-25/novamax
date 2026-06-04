@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Table, Tag, Button, Space, Typography, message, Tooltip, Progress } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
 import { comfyuiService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 import './RequiredModelsPanel.css';
 
 const { Title, Text } = Typography;
@@ -30,6 +31,7 @@ const MODEL_TYPE_LABELS = {
 };
 
 function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
+  const { t } = useTranslation('home');
   const [models, setModels] = useState(requiredModels || []);
   const [batchInitiating, setBatchInitiating] = useState(false);
   // { [filename]: { taskId, progress } }
@@ -127,9 +129,9 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
 
       // 首次轮询不弹提示（从 localStorage 恢复的旧任务）
       if (!isFirstPollRef.current) {
-        toComplete.forEach(filename => message.success(`下载完成: ${filename}`));
+        toComplete.forEach(filename => message.success(t('requiredModelsPanel.downloadCompletedWithFilename', { filename })));
         toFail.forEach(({ filename, error }) =>
-          message.error(`下载失败: ${filename}${error ? ' - ' + error : ''}`)
+          message.error(t('requiredModelsPanel.downloadFailedWithFilenameAndError', { filename, error: error || '' }))
         );
       }
       isFirstPollRef.current = false;
@@ -192,11 +194,11 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
 
   const handleDownload = async (record) => {
     if (!modelId) {
-      message.warning('请先保存工作流后再下载模型');
+      message.warning(t('requiredModelsPanel.saveWorkflowFirst'));
       return;
     }
     if (!record.has_url) {
-      message.warning('该模型没有配置下载源，请先搜索模型');
+      message.warning(t('requiredModelsPanel.noDownloadSource'));
       return;
     }
 
@@ -223,7 +225,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
           delete next[record.filename];
           return next;
         });
-        message.error('下载失败: ' + (response.error || '未知错误'));
+        message.error(t('requiredModelsPanel.downloadFailedWithError', { error: response.error || t('requiredModelsPanel.unknownError') }));
       }
     } catch (error) {
       setDownloadingTasks(prev => {
@@ -231,13 +233,13 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         delete next[record.filename];
         return next;
       });
-      message.error('下载失败: ' + (error.response?.data?.error || error.message));
+      message.error(t('requiredModelsPanel.downloadFailedWithError', { error: error.response?.data?.error || error.message }));
     }
   };
 
   const handleDownloadAll = async () => {
     if (!modelId) {
-      message.warning('请先保存工作流后再下载模型');
+      message.warning(t('requiredModelsPanel.saveWorkflowFirst'));
       return;
     }
 
@@ -245,7 +247,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
       m => !m.downloaded && m.has_url && !downloadingTasks[m.filename]
     );
     if (missingWithUrls.length === 0) {
-      message.info('没有需要下载的模型');
+      message.info(t('requiredModelsPanel.noModelsToDownload'));
       return;
     }
 
@@ -273,7 +275,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
           missingWithUrls.forEach(m => delete next[m.filename]);
           return next;
         });
-        message.error('批量下载失败: ' + (response.error || '未知错误'));
+        message.error(t('requiredModelsPanel.batchDownloadFailedWithError', { error: response.error || t('requiredModelsPanel.unknownError') }));
       }
     } catch (error) {
       setDownloadingTasks(prev => {
@@ -281,7 +283,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         missingWithUrls.forEach(m => delete next[m.filename]);
         return next;
       });
-      message.error('批量下载失败: ' + (error.response?.data?.error || error.message));
+      message.error(t('requiredModelsPanel.batchDownloadFailedWithError', { error: error.response?.data?.error || error.message }));
     } finally {
       setBatchInitiating(false);
     }
@@ -297,7 +299,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         [filename]: { ...prev[filename], paused: true, speed: 0 }
       }));
     } catch (error) {
-      message.error('暂停失败: ' + (error.response?.data?.error || error.message));
+      message.error(t('requiredModelsPanel.pauseFailedWithError', { error: error.response?.data?.error || error.message }));
     }
   };
 
@@ -311,7 +313,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         [filename]: { ...prev[filename], paused: false }
       }));
     } catch (error) {
-      message.error('恢复失败: ' + (error.response?.data?.error || error.message));
+      message.error(t('requiredModelsPanel.resumeFailedWithError', { error: error.response?.data?.error || error.message }));
     }
   };
 
@@ -325,15 +327,15 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         delete next[filename];
         return next;
       });
-      message.info(`已取消下载: ${filename}`);
+      message.info(t('requiredModelsPanel.cancelledDownloadWithFilename', { filename }));
     } catch (error) {
-      message.error('取消失败: ' + (error.response?.data?.error || error.message));
+      message.error(t('requiredModelsPanel.cancelFailedWithError', { error: error.response?.data?.error || error.message }));
     }
   };
 
   const columns = [
     {
-      title: '类型',
+      title: t('requiredModelsPanel.type'),
       dataIndex: 'type',
       key: 'type',
       width: 120,
@@ -342,21 +344,21 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
       )
     },
     {
-      title: '文件名',
+      title: t('requiredModelsPanel.fileName'),
       dataIndex: 'filename',
       key: 'filename',
       ellipsis: true,
       render: (filename) => <Text code>{filename}</Text>
     },
     {
-      title: '节点位置',
+      title: t('requiredModelsPanel.nodePosition'),
       dataIndex: 'node_id',
       key: 'node_id',
       width: 100,
       render: (nodeId) => <Text type="secondary">{nodeId}</Text>
     },
     {
-      title: '状态',
+      title: t('requiredModelsPanel.status'),
       dataIndex: 'downloaded',
       key: 'downloaded',
       width: 180,
@@ -377,7 +379,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
                 </div>
               )}
               {taskInfo.paused ? (
-                <div style={{ fontSize: 11, color: '#faad14', lineHeight: 1.4 }}>已暂停</div>
+                <div style={{ fontSize: 11, color: '#faad14', lineHeight: 1.4 }}>{t('requiredModelsPanel.paused')}</div>
               ) : taskInfo.speed > 0 ? (
                 <div style={{ fontSize: 11, color: '#1677ff', lineHeight: 1.4 }}>
                   ↓ {formatSpeed(taskInfo.speed)}
@@ -387,14 +389,14 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
           );
         }
         return downloaded ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">已下载</Tag>
+          <Tag icon={<CheckCircleOutlined />} color="success">{t('requiredModelsPanel.downloaded')}</Tag>
         ) : (
-          <Tag icon={<CloseCircleOutlined />} color="error">缺失</Tag>
+          <Tag icon={<CloseCircleOutlined />} color="error">{t('requiredModelsPanel.missing')}</Tag>
         );
       }
     },
     {
-      title: '操作',
+      title: t('requiredModelsPanel.actions'),
       key: 'actions',
       width: 180,
       render: (_, record) => {
@@ -404,23 +406,23 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
           return (
             <Space size={4}>
               {taskInfo.paused ? (
-                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>继续</Button>
+                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleResume(record.filename)}>{t('requiredModelsPanel.resume')}</Button>
               ) : (
-                <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>暂停</Button>
+                <Button size="small" type="primary" icon={<PauseCircleOutlined />} onClick={() => handlePause(record.filename)}>{t('requiredModelsPanel.pause')}</Button>
               )}
-              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>取消</Button>
+              <Button size="small" type="primary" danger icon={<StopOutlined />} onClick={() => handleCancel(record.filename)}>{t('requiredModelsPanel.cancel')}</Button>
             </Space>
           );
         }
 
         if (record.downloaded) {
-          return <Button size="small" disabled>已下载</Button>;
+          return <Button size="small" disabled>{t('requiredModelsPanel.downloaded')}</Button>;
         }
 
         if (!record.has_url) {
           return (
-            <Tooltip title="无下载源">
-              <Button size="small" disabled icon={<DownloadOutlined />}>下载</Button>
+            <Tooltip title={t('requiredModelsPanel.noDownloadSource')}>
+              <Button size="small" disabled icon={<DownloadOutlined />}>{t('requiredModelsPanel.download')}</Button>
             </Tooltip>
           );
         }
@@ -433,7 +435,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
             disabled={!modelId}
             onClick={() => handleDownload(record)}
           >
-            下载
+            {t('requiredModelsPanel.download')}
           </Button>
         );
       }
@@ -450,10 +452,10 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     <div className="required-models-panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Title level={5} style={{ margin: 0 }}>
-          所需模型列表
+          {t('requiredModelsPanel.requiredModelList')}
           {totalCount > 0 && (
             <Text type="secondary" style={{ fontSize: 14, fontWeight: 'normal', marginLeft: 8 }}>
-              ({totalCount - missingCount}/{totalCount} 已下载)
+              ({totalCount - missingCount}/{totalCount} {t('requiredModelsPanel.downloaded')})
             </Text>
           )}
         </Title>
@@ -465,7 +467,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
             onClick={handleDownloadAll}
             loading={batchInitiating}
           >
-            下载所有缺失模型 ({downloadableCount})
+            {t('requiredModelsPanel.downloadAllMissing')} ({downloadableCount})
           </Button>
         )}
       </div>
@@ -473,7 +475,7 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
       {missingCount > 0 && (
         <div style={{ marginBottom: 12 }}>
           <Text type="warning">
-            还有 {missingCount} 个模型未下载，请先下载所需模型后才能启动工作流。
+            {t('requiredModelsPanel.missingModelsHint', { count: missingCount })}
           </Text>
         </div>
       )}

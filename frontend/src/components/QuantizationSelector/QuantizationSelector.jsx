@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Space, Tag, Divider, Alert, Progress, Tooltip, Collapse } from 'antd';
+import { useTranslation } from 'react-i18next';
 import {
   StarOutlined,
   CheckCircleFilled,
@@ -14,12 +15,12 @@ import {
 import { systemService } from '../../services/api';
 import './QuantizationSelector.css';
 
-const CATEGORY_LABELS = {
-  original: '原始精度',
-  high: '高质量',
-  balanced: '平衡推荐',
-  compressed: '极致压缩',
-  ultra_compressed: '超级压缩'
+const CATEGORY_KEY_MAP = {
+  original: 'original',
+  high: 'high',
+  balanced: 'balanced',
+  compressed: 'compressed',
+  ultra_compressed: 'ultraCompressed'
 };
 
 const CATEGORY_COLORS = {
@@ -48,6 +49,7 @@ function QuantizationSelector({
   onStart,
   onCancel
 }) {
+  const { t } = useTranslation('home');
   // 使用新的 downloadedFiles 或回退到旧的 downloadedQuantizations
   const files = downloadedFiles || [];
   const oldQuants = downloadedQuantizations || [];
@@ -140,7 +142,7 @@ function QuantizationSelector({
 
   // 格式化字节数
   function formatBytes(bytes) {
-    if (!bytes) return '未知';
+    if (!bytes) return t('quantization.unknown');
     const gb = bytes / (1024 * 1024 * 1024);
     if (gb >= 1) return `${parseFloat(gb.toFixed(2))} GB`;
     const mb = bytes / (1024 * 1024);
@@ -195,19 +197,19 @@ function QuantizationSelector({
                 {item.label}
               </span>
               {item.recommended && (
-                <Tooltip title="推荐版本">
+                <Tooltip title={t('quantization.recommendedVersion')}>
                   <StarOutlined style={{ color: '#faad14', marginLeft: 8, fontSize: 16 }} />
                 </Tooltip>
               )}
             </div>
             <div style={{ fontSize: 12, color: '#666' }}>
               {item.description}
-              {item.quality && ` · 质量: ${item.quality}%`}
+              {item.quality && ` · ${t('quantization.quality')}: ${item.quality}%`}
             </div>
             {/* 显示文件名（如果有） */}
             {item.file && item.type === 'preset' && (
               <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
-                文件: {item.file.filename}
+                {t('quantization.file')}: {item.file.filename}
               </div>
             )}
           </div>
@@ -221,18 +223,23 @@ function QuantizationSelector({
                 danger
                 icon={<DeleteOutlined />}
                 onClick={() => {
-                  if (window.confirm(`确定要删除 ${item.label} 吗？此操作不可恢复。`)) {
-                    onDeleteQuantization(item.file.filename);
-                  }
+                  Modal.confirm({
+                    title: t('quantization.deleteThisVersion'),
+                    content: t('quantization.confirmDelete', { label: item.label }),
+                    okText: t('modelCard.delete'),
+                    cancelText: t('modelCard.cancel'),
+                    okButtonProps: { danger: true },
+                    onOk: () => onDeleteQuantization(item.file.filename)
+                  });
                 }}
-                title="删除此量化版本"
+                title={t('quantization.deleteThisVersion')}
               />
             )}
 
             {/* 内存不足警告图标 - 仅未下载且文件大小超过设备可用内存时显示 */}
             {!item.isDownloaded && !isDownloading && !isPaused && !isCompleted && !isFailed && item.type === 'preset' &&
               systemMemoryTotal > 0 && item.presetFileSize > 0 && item.presetFileSize > systemMemoryTotal && (
-              <Tooltip title="此模型文件所需内存超过设备可用内存，不推荐下载此文件">
+              <Tooltip title={t('quantization.memoryExceededWarning')}>
                 <WarningFilled style={{ color: '#faad14', fontSize: 20, cursor: 'default' }} />
               </Tooltip>
             )}
@@ -245,7 +252,7 @@ function QuantizationSelector({
                 onClick={() => onDownload(item.name)}
                 size="small"
               >
-                下载
+                {t('quantization.download')}
               </Button>
             )}
 
@@ -266,22 +273,22 @@ function QuantizationSelector({
                   }
                 }}
               >
-                设为默认
+                {t('quantization.setAsDefault')}
               </Button>
             )}
 
             {/* 下载失败 */}
             {isFailed && (
               <Space size="small">
-                <span style={{ fontSize: 12, color: '#ff4d4f' }}>失败</span>
-                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeDownload(item.name)}>重试</Button>
+                <span style={{ fontSize: 12, color: '#ff4d4f' }}>{t('quantization.failed')}</span>
+                <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeDownload(item.name)}>{t('quantization.retry')}</Button>
                 <Button
                   size="small"
                   danger
                   icon={<CloseCircleOutlined />}
                   onClick={() => onCancelDownload(item.name)}
                 >
-                  取消
+                  {t('quantization.cancel')}
                 </Button>
               </Space>
             )}
@@ -295,7 +302,7 @@ function QuantizationSelector({
                   icon={<PauseCircleOutlined />}
                   onClick={() => onPauseDownload(item.name)}
                 >
-                  暂停
+                  {t('quantization.pause')}
                 </Button>
                 <Button
                   size="small"
@@ -303,7 +310,7 @@ function QuantizationSelector({
                   icon={<CloseCircleOutlined />}
                   onClick={() => onCancelDownload(item.name)}
                 >
-                  取消
+                  {t('quantization.cancel')}
                 </Button>
               </Space>
             )}
@@ -311,14 +318,14 @@ function QuantizationSelector({
             {/* 已暂停 */}
             {isPaused && (
               <Space size="small">
-                <span style={{ fontSize: 12, color: '#faad14' }}>已暂停 {progress.toFixed(0)}%</span>
+                <span style={{ fontSize: 12, color: '#faad14' }}>{t('quantization.pausedWithProgress', { progress: progress.toFixed(0) })}</span>
                 <Button
                   size="small"
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   onClick={() => onResumeDownload(item.name)}
                 >
-                  继续
+                  {t('quantization.resume')}
                 </Button>
                 <Button
                   size="small"
@@ -326,7 +333,7 @@ function QuantizationSelector({
                   icon={<CloseCircleOutlined />}
                   onClick={() => onCancelDownload(item.name)}
                 >
-                  取消
+                  {t('quantization.cancel')}
                 </Button>
               </Space>
             )}
@@ -338,12 +345,12 @@ function QuantizationSelector({
 
   return (
     <Modal
-      title="量化版本管理"
+      title={t('quantization.title')}
       open={visible}
       onCancel={onCancel}
       footer={[
         <Button key="close" onClick={onCancel}>
-          关闭
+          {t('quantization.close')}
         </Button>
       ]}
       width={800}
@@ -353,7 +360,7 @@ function QuantizationSelector({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <StarOutlined style={{ color: '#faad14', fontSize: 20 }} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>推荐版本: {recommended.label}</div>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>{t('quantization.recommendedVersionWithLabel', { label: recommended.label })}</div>
               <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{recommended.description}</div>
             </div>
             {recommendedDownloaded ? (
@@ -361,7 +368,7 @@ function QuantizationSelector({
             ) : !recommendedDownloading && !recommendedPaused && (
               <>
                 {systemMemoryTotal > 0 && (recommended?.total_size || recommended?.file?.size || 0) > systemMemoryTotal && (
-                  <Tooltip title="此模型文件所需内存超过设备可用内存，不推荐下载此文件">
+                  <Tooltip title={t('quantization.memoryExceededWarning')}>
                     <WarningFilled style={{ color: '#faad14', fontSize: 20, cursor: 'default' }} />
                   </Tooltip>
                 )}
@@ -371,15 +378,15 @@ function QuantizationSelector({
                   size="small"
                   onClick={() => onDownload(recommended.name)}
                 >
-                  下载
+                  {t('quantization.download')}
                 </Button>
               </>
             )}
             {recommendedDownloading && (
-              <span style={{ fontSize: 12, color: '#1890ff' }}>{(recommendedState?.progress || 0).toFixed(0)}% 下载中</span>
+              <span style={{ fontSize: 12, color: '#1890ff' }}>{t('quantization.downloadingWithProgress', { progress: (recommendedState?.progress || 0).toFixed(0) })}</span>
             )}
             {recommendedPaused && (
-              <span style={{ fontSize: 12, color: '#faad14' }}>已暂停</span>
+              <span style={{ fontSize: 12, color: '#faad14' }}>{t('quantization.paused')}</span>
             )}
           </div>
         </div>
@@ -392,7 +399,7 @@ function QuantizationSelector({
             key: category,
             label: (
               <Tag color={CATEGORY_COLORS[category]}>
-                {CATEGORY_LABELS[category] || category}
+                {t(`quantization.category.${CATEGORY_KEY_MAP[category]}`) || category}
               </Tag>
             ),
             children: (
@@ -407,10 +414,10 @@ function QuantizationSelector({
       <Divider />
 
       <div style={{ fontSize: '12px', color: '#999' }}>
-        <div>💡 提示：</div>
-        <div>• 点击"设为默认"可以选择默认的量化版本，然后在卡片上点击"下载模型"</div>
-        <div>• 可以同时下载和保留多个量化版本</div>
-        <div>• 质量越高效果越好，但文件越大、占用显存越多</div>
+        <div>💡 {t('quantization.tipTitle')}</div>
+        <div>{t('quantization.tipSetDefaultThenDownload')}</div>
+        <div>{t('quantization.tipKeepMultiple')}</div>
+        <div>{t('quantization.tipQualityTradeoff')}</div>
       </div>
     </Modal>
   );

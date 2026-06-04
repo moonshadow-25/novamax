@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Drawer, Form, Input, InputNumber, Button, Space, Select, message, Divider, Tooltip } from 'antd';
+import { Drawer, Form, Input, InputNumber, Button, Space, Select, message, Divider, Tooltip, Modal } from 'antd';
 import { FolderOpenOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { comfyuiService, engineService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
+import { useTranslation } from 'react-i18next';
 
 function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete }) {
+  const { t } = useTranslation('home');
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [engines, setEngines] = useState([]);
@@ -56,10 +58,12 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
     try {
       await comfyuiService.updateInstance(instance.id, { engine_version: version || null });
       setSelectedEngineVersion(version || null);
-      message.success(version ? `已切换到引擎版本 ${version}` : '已切换到默认（最新）版本');
+      message.success(version
+        ? t('comfyuiInstanceSettings.switchVersionSuccessWithVersion', { version })
+        : t('comfyuiInstanceSettings.switchVersionSuccessDefault'));
       onSave();
     } catch (error) {
-      message.error(error.response?.data?.error || '切换引擎版本失败');
+      message.error(error.response?.data?.error || t('comfyuiInstanceSettings.switchVersionFailed'));
     }
   };
 
@@ -71,12 +75,12 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
         ...values,
         engine_version: selectedEngineVersion || null
       });
-      message.success('保存成功');
+      message.success(t('comfyuiInstanceSettings.saveSuccess'));
       onSave();
       onClose();
     } catch (error) {
       if (error.response) {
-        message.error(error.response?.data?.error || '保存失败');
+        message.error(error.response?.data?.error || t('comfyuiInstanceSettings.saveFailed'));
       }
     } finally {
       setLoading(false);
@@ -84,32 +88,40 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('确定要删除此实例吗？')) return;
-    try {
-      setLoading(true);
-      await comfyuiService.deleteInstance(instance.id);
-      message.success('已删除');
-      onDelete();
-      onClose();
-    } catch (error) {
-      message.error(error.response?.data?.error || '删除失败');
-    } finally {
-      setLoading(false);
-    }
+    Modal.confirm({
+      title: t('comfyuiInstanceSettings.deleteInstance'),
+      content: t('comfyuiInstanceSettings.confirmDeleteInstance'),
+      okText: t('settingsDrawer.confirm'),
+      cancelText: t('settingsDrawer.cancel'),
+      okButtonProps: { danger: true, loading },
+      onOk: async () => {
+        try {
+          setLoading(true);
+          await comfyuiService.deleteInstance(instance.id);
+          message.success(t('comfyuiInstanceSettings.deleted'));
+          onDelete();
+          onClose();
+        } catch (error) {
+          message.error(error.response?.data?.error || t('comfyuiInstanceSettings.deleteFailed'));
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
   };
 
   const handleOpenFolder = async () => {
     try {
       await comfyuiService.openInstanceFolder(instance.id);
-      message.success('已打开文件夹');
+      message.success(t('comfyuiInstanceSettings.openFolderSuccess'));
     } catch (error) {
-      message.error(error.response?.data?.error || '打开失败');
+      message.error(error.response?.data?.error || t('comfyuiInstanceSettings.openFolderFailed'));
     }
   };
 
   return (
     <Drawer
-      title="ComfyUI 实例设置"
+      title={t('comfyuiInstanceSettings.title')}
       placement="right"
       width={480}
       open={visible}
@@ -117,12 +129,12 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
       footer={
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Button danger onClick={handleDelete} loading={loading}>
-            删除此实例
+            {t('comfyuiInstanceSettings.deleteInstance')}
           </Button>
           <Space>
-            <Button onClick={onClose}>取消</Button>
+            <Button onClick={onClose}>{t('settingsDrawer.cancel')}</Button>
             <Button type="primary" onClick={handleSave} loading={loading}>
-              保存
+              {t('settingsDrawer.save')}
             </Button>
           </Space>
         </Space>
@@ -130,18 +142,18 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
     >
       <Form form={form} layout="vertical">
         <Form.Item
-          label="实例名称"
+          label={t('comfyuiInstanceSettings.instanceNameLabel')}
           name="name"
-          rules={[{ required: true, message: '请输入实例名称' }]}
+          rules={[{ required: true, message: t('comfyuiInstanceSettings.instanceNameRequired') }]}
         >
-          <Input placeholder="例如：默认实例" />
+          <Input placeholder={t('comfyuiInstanceSettings.instanceNamePlaceholder')} />
         </Form.Item>
 
         <Form.Item
           label={
             <span>
-              引擎版本
-              <Tooltip title="选择运行此实例使用的 ComfyUI 引擎版本；留空表示默认（最新版本）。">
+              {t('comfyuiInstanceSettings.engineVersionLabel')}
+              <Tooltip title={t('comfyuiInstanceSettings.engineVersionTooltip')}>
                 <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999', cursor: 'help' }} />
               </Tooltip>
             </span>
@@ -150,37 +162,37 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
           <Select
             value={selectedEngineVersion}
             onChange={handleEngineVersionChange}
-            placeholder="默认（最新版本）"
+            placeholder={t('comfyuiInstanceSettings.defaultLatest')}
             allowClear
           >
             {engines.map((v) => (
               <Select.Option key={v.version} value={v.version}>
-                {v.version}{v.version === latestEngineVersion ? '（最新）' : ''}
+                {v.version}{v.version === latestEngineVersion ? ` (${t('comfyuiInstanceSettings.latest')})` : ''}
               </Select.Option>
             ))}
           </Select>
         </Form.Item>
 
         <Form.Item
-          label="监听地址"
+          label={t('comfyuiInstanceSettings.hostLabel')}
           name="host"
-          rules={[{ required: true, message: '请输入监听地址' }]}
+          rules={[{ required: true, message: t('comfyuiInstanceSettings.hostRequired') }]}
         >
           <Input placeholder="0.0.0.0" />
         </Form.Item>
 
         <Form.Item
-          label="端口"
+          label={t('comfyuiInstanceSettings.portLabel')}
           name="port"
-          rules={[{ required: true, message: '请输入端口' }]}
+          rules={[{ required: true, message: t('comfyuiInstanceSettings.portRequired') }]}
         >
           <InputNumber min={1} max={65535} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item
-          label="启动参数"
+          label={t('comfyuiInstanceSettings.customArgsLabel')}
           name="custom_args"
-          tooltip="直接输入命令行参数，例如：--preview-method auto --fp8_e4m3fn"
+          tooltip={t('comfyuiInstanceSettings.customArgsTooltip')}
         >
           <Input.TextArea
             rows={4}
@@ -196,7 +208,7 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
           block
           style={{ marginBottom: 8 }}
         >
-          打开 ComfyUI 文件夹
+          {t('comfyuiInstanceSettings.openFolder')}
         </Button>
       </Form>
     </Drawer>

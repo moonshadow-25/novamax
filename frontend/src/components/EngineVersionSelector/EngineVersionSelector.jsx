@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Select, Button, Drawer, List, Tag, Space, Popconfirm, message } from 'antd';
 import { SettingOutlined, StarFilled, StarOutlined, DeleteOutlined } from '@ant-design/icons';
 import { engineService } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 引擎版本选择器组件
  * 支持版本切换和管理
  */
 const EngineVersionSelector = ({ engineId, onChange }) => {
+  const { t } = useTranslation('home');
   const [versions, setVersions] = useState([]);
   const [currentVersion, setCurrentVersion] = useState(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -39,9 +41,9 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
       setCurrentVersion(version);
       await loadVersions();
       onChange?.(version);
-      message.success('版本切换成功');
+      message.success(t('engineVersionSelector.switchSuccess'));
     } catch (error) {
-      message.error('版本切换失败');
+      message.error(t('engineVersionSelector.switchFailed'));
       console.error('Failed to change version:', error);
     } finally {
       setLoading(false);
@@ -53,9 +55,9 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
       setLoading(true);
       await engineService.uninstall(engineId, version);
       await loadVersions();
-      message.success('卸载成功');
+      message.success(t('engineVersionSelector.uninstallSuccess'));
     } catch (error) {
-      message.error('卸载失败');
+      message.error(t('engineVersionSelector.uninstallFailed'));
       console.error('Failed to uninstall:', error);
     } finally {
       setLoading(false);
@@ -80,7 +82,7 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
           loading={loading}
           style={{ width: 200 }}
           options={versions.map(v => ({
-            label: `${v.version}${v.is_default ? ' (默认)' : ''}`,
+            label: `${v.version}${v.is_default ? ` (${t('engineVersionSelector.default')})` : ''}`,
             value: v.version
           }))}
         />
@@ -88,12 +90,12 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
           icon={<SettingOutlined />}
           onClick={() => setDrawerVisible(true)}
         >
-          管理版本
+          {t('engineVersionSelector.manageVersions')}
         </Button>
       </Space>
 
       <Drawer
-        title="版本管理"
+        title={t('engineVersionSelector.versionManagement')}
         placement="right"
         onClose={() => setDrawerVisible(false)}
         open={drawerVisible}
@@ -105,7 +107,7 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
             <List.Item
               actions={[
                 item.is_default ? (
-                  <Tag color="blue" icon={<StarFilled />}>默认</Tag>
+                  <Tag color="blue" icon={<StarFilled />}>{t('engineVersionSelector.default')}</Tag>
                 ) : (
                   <Button
                     type="link"
@@ -113,14 +115,14 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
                     icon={<StarOutlined />}
                     onClick={() => handleSetDefault(item.version)}
                   >
-                    设为默认
+                    {t('engineVersionSelector.setAsDefault')}
                   </Button>
                 ),
                 <Popconfirm
-                  title="确定要卸载此版本吗？"
+                  title={t('engineVersionSelector.confirmUninstallVersion')}
                   onConfirm={() => handleUninstall(item.version)}
-                  okText="确定"
-                  cancelText="取消"
+                  okText={t('settingsDrawer.confirm')}
+                  cancelText={t('settingsDrawer.cancel')}
                   disabled={item.is_default}
                 >
                   <Button
@@ -130,14 +132,14 @@ const EngineVersionSelector = ({ engineId, onChange }) => {
                     icon={<DeleteOutlined />}
                     disabled={item.is_default}
                   >
-                    卸载
+                    {t('engineVersionSelector.uninstall')}
                   </Button>
                 </Popconfirm>
               ]}
             >
               <List.Item.Meta
                 title={item.version}
-                description={`安装于 ${new Date(item.installed_at).toLocaleString()}`}
+                description={t('engineVersionSelector.installedAt', { time: new Date(item.installed_at).toLocaleString() })}
               />
             </List.Item>
           )}
