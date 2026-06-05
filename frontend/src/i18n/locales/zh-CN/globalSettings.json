@@ -4,6 +4,7 @@
   "menu": {
     "runtime": "运行状态",
     "logs": "系统日志",
+    "appearance": "外观",
     "storage": "模型存储",
     "engines": "引擎管理",
     "cache": "缓存管理",
@@ -42,12 +43,21 @@
   },
   "sections": {
     "engines": "引擎管理",
+    "appearance": "外观",
     "export": "导出配置",
     "update": "更新设置",
     "cache": "缓存管理",
     "runtime": "运行状态",
     "logs": "系统日志",
     "storage": "模型存储"
+  },
+  "appearance": {
+    "themeModeLabel": "主题模式",
+    "light": "浅色模式",
+    "dark": "深色模式",
+    "system": "跟随系统",
+    "systemHint": "当前跟随系统，正在使用{{mode}}。",
+    "currentHint": "当前正在使用{{mode}}。"
   },
   "update": {
     "autoUpdate": "自动更新",

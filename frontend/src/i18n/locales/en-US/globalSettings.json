@@ -4,6 +4,7 @@
   "menu": {
     "runtime": "Runtime",
     "logs": "System Logs",
+    "appearance": "Appearance",
     "storage": "Model Storage",
     "engines": "Engine Management",
     "cache": "Cache Management",
@@ -42,12 +43,21 @@
   },
   "sections": {
     "engines": "Engine Management",
+    "appearance": "Appearance",
     "export": "Export Config",
     "update": "Update Settings",
     "cache": "Cache Management",
     "runtime": "Runtime",
     "logs": "System Logs",
     "storage": "Model Storage"
+  },
+  "appearance": {
+    "themeModeLabel": "Theme mode",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "Follow system",
+    "systemHint": "Currently following the system and using {{mode}}.",
+    "currentHint": "Currently using {{mode}}."
   },
   "update": {
     "autoUpdate": "Auto update",

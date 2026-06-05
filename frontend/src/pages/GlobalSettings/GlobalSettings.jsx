@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Collapse } from 'antd';
-import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined, BgColorsOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../../contexts/ThemeContext';
 import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
 
@@ -19,6 +20,7 @@ const GlobalSettings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation('globalSettings');
+  const { themeMode, effectiveTheme, setThemeMode } = useTheme();
   const { token } = theme.useToken();
   const [form] = Form.useForm();
   const [checking, setChecking] = useState(false);
@@ -1132,6 +1134,36 @@ const GlobalSettings = () => {
     );
   };
 
+  const renderAppearanceContent = () => (
+    <>
+    <div className="gs-section-head">
+      <span className="gs-section-title">{t('sections.appearance')}</span>
+    </div>
+    <div className="gs-section-body">
+    <Card className="gs-section-card gs-appearance-card" style={{ maxWidth: 720 }}>
+      <Form layout="vertical">
+        <Form.Item label={t('appearance.themeModeLabel')}>
+          <Select
+            value={themeMode}
+            onChange={setThemeMode}
+            options={[
+              { value: 'light', label: t('appearance.light') },
+              { value: 'dark', label: t('appearance.dark') },
+              { value: 'system', label: t('appearance.system') }
+            ]}
+          />
+        </Form.Item>
+        <Text type="secondary">
+          {themeMode === 'system'
+            ? t('appearance.systemHint', { mode: effectiveTheme === 'dark' ? t('appearance.dark') : t('appearance.light') })
+            : t('appearance.currentHint', { mode: themeMode === 'dark' ? t('appearance.dark') : t('appearance.light') })}
+        </Text>
+      </Form>
+    </Card>
+    </div>
+    </>
+  );
+
   const renderUpdateContent = () => (
     <>
     <div className="gs-section-head">
@@ -1348,17 +1380,17 @@ const GlobalSettings = () => {
             {hw && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
                 {/* CPU */}
-                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>CPU</div>
+                <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>CPU</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 6 }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 6 }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
                   <Progress percent={hw.cpu.usagePercent ?? 0} size="small"
                     strokeColor={(hw.cpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#1890ff'}
                     format={(p) => `${p}%`} />
                 </div>
                 {/* RAM */}
-                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>内存 (RAM)</div>
+                <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>内存 (RAM)</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
                   <Progress percent={hw.memory.usagePercent} size="small"
                     strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
@@ -1366,45 +1398,45 @@ const GlobalSettings = () => {
                 </div>
                 {/* VRAM */}
                 {hw.gpus && hw.gpus.length > 0 ? (
-                  <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>显存 (VRAM)</div>
+                  <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>显存 (VRAM)</div>
                     {hw.gpus.map((gpu, i) => (
                       <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
                         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
                         {gpu.amdSoftwareVersion ? (
-                          <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>
+                          <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>
                             AMD Software: {gpu.amdSoftwareVersion}
                           </div>
                         ) : null}
                         {gpu.used != null ? (
                           <>
-                            <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
+                            <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
                             <Progress percent={gpu.usagePercent ?? 0} size="small"
                               strokeColor={(gpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#722ed1'}
                               format={(p) => `${p}%`} />
                           </>
                         ) : (
-                          <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>容量: {formatBytes(gpu.total)}</div>
+                          <div style={{ fontSize: 12, color: token.colorText }}>容量: {formatBytes(gpu.total)}</div>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>显存 (VRAM)</div>
-                    <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.25)', marginTop: 8 }}>未检测到 GPU 信息</div>
+                  <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>显存 (VRAM)</div>
+                    <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 8 }}>未检测到 GPU 信息</div>
                   </div>
                 )}
                 {/* 系统 */}
-                <div style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>系统</div>
+                <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>系统</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>
-                  <div style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
                 </div>
               </div>
             )}
-            <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                 <Space>
                   <Text strong>{t('runtime.processList')}</Text>
                   <Tag color={processes.length > 0 ? 'green' : 'default'}>{t('runtime.processCount', { count: processes.length })}</Tag>
@@ -1554,9 +1586,10 @@ const GlobalSettings = () => {
     switch (selectedMenu) {
       case 'runtime': return renderRuntimeContent();
       case 'logs':    return renderLogsContent();
-      case 'engines': return renderEnginesContent();
       case 'storage': return renderStorageContent();
+      case 'engines': return renderEnginesContent();
       case 'cache':   return renderCacheContent();
+      case 'appearance': return renderAppearanceContent();
       case 'export':  return renderExportContent();
       case 'update':  return renderUpdateContent();
       default:        return null;
@@ -1789,6 +1822,7 @@ const GlobalSettings = () => {
             items={[
               { key: 'runtime', icon: <DashboardOutlined />, label: t('menu.runtime') },
               { key: 'logs',    icon: <FileTextOutlined />,  label: t('menu.logs') },
+              { key: 'appearance', icon: <BgColorsOutlined />, label: t('menu.appearance') },
               { key: 'storage', icon: <DatabaseOutlined />, label: t('menu.storage') },
               { key: 'engines', icon: <AppstoreOutlined />, label: t('menu.engines') },
               { key: 'cache',   icon: <HddOutlined />,      label: t('menu.cache') },
