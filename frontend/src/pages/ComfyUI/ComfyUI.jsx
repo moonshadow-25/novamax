@@ -5,9 +5,9 @@ import {
   Tag, Tooltip, Select, Image, Alert, Collapse
 } from 'antd';
 import {
-  ArrowLeftOutlined, PlayCircleOutlined, EditOutlined,
-  CheckOutlined, CloseOutlined, ReloadOutlined, UploadOutlined,
-  PictureOutlined, DownOutlined, CloseCircleOutlined, PlusOutlined
+  ArrowLeftOutlined, PlayCircleOutlined,
+  CheckOutlined, ReloadOutlined, UploadOutlined,
+  PictureOutlined, CloseCircleOutlined, PlusOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { modelService, comfyuiService, engineService } from '../../services/api';

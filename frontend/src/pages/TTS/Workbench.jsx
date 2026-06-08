@@ -11,12 +11,14 @@ import {
   SoundOutlined, PlayCircleOutlined, PauseCircleOutlined,
   DownloadOutlined, ThunderboltOutlined, FileTextOutlined, CheckCircleOutlined,
   AudioOutlined, StarOutlined, StarFilled, ClockCircleOutlined, LoadingOutlined, ClearOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import './TTS.css';
 import { ttsService, ttsStudioService, engineService, systemService } from '../../services/api';
 import VramBar from '../../components/VramBar/VramBar';
 import FfmpegRequiredModal from '../../components/FfmpegRequiredModal/FfmpegRequiredModal';
+import ApiUsageModal from '../../components/ApiUsageModal/ApiUsageModal';
 import { ENGINE_STATUS_MAP } from '../../utils/engineStatus';
 import axios from 'axios';
 
@@ -70,6 +72,7 @@ function WorkbenchPage() {
   const [taskQueue, setTaskQueue] = useState([]); // { id, text, status, error? }
   const queueIdRef = useRef(0);
   const [ffmpegModalOpen, setFfmpegModalOpen] = useState(false);
+  const [apiModalOpen, setApiModalOpen] = useState(false);
   const [gpuInfo, setGpuInfo] = useState(null);
   const [paramDefinitions, setParamDefinitions] = useState([]);
   const [paramValues, setParamValues] = useState({});
@@ -171,12 +174,10 @@ function WorkbenchPage() {
   // === Voice 激活 ===
   const handleActivateVoice = async (voiceId) => {
     try {
-      await ttsStudioService.updateOutputDir(id, outputDir); // reuse: any PUT to workspace
-      // Use a dedicated API call
       await axios.post(`/api/tts-studio/workspaces/${id}/activate-voice`, { voice_id: voiceId });
       setSelectedVoiceId(voiceId);
       message.success('已设为默认 Voice');
-      loadData(); // refresh workspace
+      loadData();
     } catch { message.error('激活失败'); }
   };
 
@@ -411,6 +412,7 @@ function WorkbenchPage() {
       <Header className="tts-header" style={{ flexWrap: 'wrap', height: 'auto', minHeight: 48, padding: '8px 16px' }}>
         <Space wrap><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/?tab=tts')} /><Title level={5} style={{ margin: 0 }}>{workspace.name}</Title></Space>
         <Space style={{ marginLeft: 'auto' }}>
+          <Button size="small" icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)}>API 调用</Button>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: ind.color, display: 'inline-block', boxShadow: indicator.status === 'running' ? `0 0 6px ${ind.color}` : 'none' }} />
           <Text style={{ color: ind.color, fontSize: 13 }}>{ind.text || indicator.reason}</Text>
           {gpuInfo && <VramBar gpu={gpuInfo} compact />}
@@ -535,6 +537,17 @@ function WorkbenchPage() {
             message.success('已开始下载 FFmpeg ' + latest);
           } catch { message.error('下载失败，请重试'); }
           setFfmpegModalOpen(false);
+        }}
+      />
+
+      <ApiUsageModal
+        open={apiModalOpen}
+        onClose={() => setApiModalOpen(false)}
+        type="tts"
+        context={{
+          modelId: workspace?.model_id,
+          voiceId: workspace?.active_voice_id || selectedVoiceId,
+          isCloneMode,
         }}
       />
     </Layout>

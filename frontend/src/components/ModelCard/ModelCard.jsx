@@ -34,9 +34,9 @@ import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
 import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
-import WhisperModelsPanel from '../WhisperModelsPanel/WhisperModelsPanel';
+import AsrModelsPanel from '../AsrModelsPanel/AsrModelsPanel';
 import TtsModelsPanel from '../TtsModelsPanel/TtsModelsPanel';
-import WhisperSettingsDrawer from '../WhisperSettingsDrawer/WhisperSettingsDrawer';
+import AsrSettingsDrawer from '../AsrSettingsDrawer/AsrSettingsDrawer';
 import TtsSettingsDrawer from '../TtsSettingsDrawer/TtsSettingsDrawer';
 import './ModelCard.css';
 
@@ -1186,122 +1186,101 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* TTS 专属按钮 */}
+      {/* TTS 专属按钮 — 样式对齐 ASR */}
       {model.type === 'tts' && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: ttsStatus === 'error' ? ENGINE_STATUS_MAP.error.color : ENGINE_STATUS_MAP[ttsStatus]?.color || ENGINE_STATUS_MAP.idle.color, display: 'inline-block', boxShadow: ttsStatus === 'running' ? `0 0 6px ${ENGINE_STATUS_MAP.running.color}` : 'none' }} />
-            <span style={{ color: ttsStatus === 'error' ? ENGINE_STATUS_MAP.error.color : ENGINE_STATUS_MAP[ttsStatus]?.color || ENGINE_STATUS_MAP.idle.color }}>{ttsStatus === 'error' ? '引擎未安装' : ENGINE_STATUS_MAP[ttsStatus]?.label || ENGINE_STATUS_MAP.idle.label}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {ttsStatus === 'error' ? (
-              <Button type="primary" icon={<DownloadOutlined />} block style={{ flex: 1 }}
-                loading={ttsModelDownloading}
-                disabled={ttsModelDownloading}
-                onClick={async () => {
-                  // 模型文件缺失但引擎已安装 → 直接下载模型，跳过引擎安装
-                  if (ttsModelMissing) {
-                    setTtsModelDownloading(true);
-                    try {
-                      const filesStatus = await ttsService.getFilesStatus(model.id);
-                      const files = filesStatus?.files || [];
-                      const missing = files.filter(f => !f.downloaded);
-                      if (missing.length > 0) {
-                        message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
-                        // 逐个启动下载，每个文件等待真正完成后再下一个
-                        for (const f of missing) {
-                          const result = await ttsService.downloadFile(model.id, f.filename || f.name);
-                          const taskId = result?.taskId;
-                          if (taskId) {
-                            // 轮询等待该文件下载完成
-                            await new Promise((resolve) => {
-                              const check = setInterval(async () => {
-                                try {
-                                  const s = await ttsService.getDownloadStatus(taskId);
-                                  if (s?.task?.status === 'completed') {
-                                    clearInterval(check);
-                                    resolve();
-                                  } else if (s?.task?.status === 'failed') {
-                                    clearInterval(check);
-                                    resolve(); // 继续下一个，不中断
-                                  }
-                                } catch { clearInterval(check); resolve(); }
-                              }, 2000);
-                            });
-                          }
+          {ttsStatus === 'error' ? (
+            <Button type="primary" icon={<DownloadOutlined />} block color="blue" variant="solid"
+              loading={ttsModelDownloading}
+              disabled={ttsModelDownloading}
+              onClick={async () => {
+                if (ttsModelMissing) {
+                  setTtsModelDownloading(true);
+                  try {
+                    const filesStatus = await ttsService.getFilesStatus(model.id);
+                    const files = filesStatus?.files || [];
+                    const missing = files.filter(f => !f.downloaded);
+                    if (missing.length > 0) {
+                      message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                      for (const f of missing) {
+                        const result = await ttsService.downloadFile(model.id, f.filename || f.name);
+                        const taskId = result?.taskId;
+                        if (taskId) {
+                          await new Promise((resolve) => {
+                            const check = setInterval(async () => {
+                              try {
+                                const s = await ttsService.getDownloadStatus(taskId);
+                                if (s?.task?.status === 'completed' || s?.task?.status === 'failed') { clearInterval(check); resolve(); }
+                              } catch { clearInterval(check); resolve(); }
+                            }, 2000);
+                          });
                         }
-                        message.success({ content: '模型下载完成', key: 'tts-model-dl' });
                       }
-                      // 下载完成后刷新状态
-                      setTtsModelMissing(false);
-                      setTtsStatus('idle');
-                      onUpdate();
-                    } catch (e) {
-                      message.error('模型下载失败，请重试');
-                    } finally {
-                      setTtsModelDownloading(false);
+                      message.success({ content: '模型下载完成', key: 'tts-model-dl' });
                     }
-                    return;
-                  }
-                  // 引擎未安装 → 完整安装流程
-                  try {
-                    const engData = await engineService.getById('tts');
-                    setEngineInfo(buildTtsVariantEngineInfo(engData, model));
-                    setEngineTarget('tts');
-                    ttsInstallModeRef.current = true;
-                    setShowEngineModal(true);
-                  } catch { message.error('无法获取引擎信息'); }
-                }}>
-                安装引擎
-              </Button>
-            ) : ttsEngineUpdate ? (
-              <Button type="primary" icon={<CloudSyncOutlined />} block style={{ flex: 1 }}
-                onClick={async () => {
-                  try {
-                    const engData = await engineService.getById('tts');
-                    setEngineInfo(buildTtsVariantEngineInfo(engData, model));
-                    setEngineTarget('tts');
-                    ttsInstallModeRef.current = false;
-                    setShowEngineModal(true);
-                  } catch { message.error('无法获取引擎信息'); }
-                }}>
-                升级引擎
-              </Button>
-            ) : ttsStatus === 'starting' ? (
-              <Button icon={<LoadingOutlined />} block style={{ flex: 1 }} disabled>启动中...</Button>
-            ) : ttsStatus === 'running' ? (
-              <Popconfirm
-                title="确定要停止引擎吗？"
-                onConfirm={async () => {
-                  try {
-                    const engineType = model.engine_version || model.engine_type || model.id;
-                    await ttsStudioService.stopEngine(engineType);
-                    message.success('引擎已停止');
+                    setTtsModelMissing(false);
+                    setTtsStatus('idle');
                     onUpdate();
-                  } catch { message.error('停止失败'); }
-                }}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button danger icon={<StopOutlined />} block style={{ flex: 1 }}>停止引擎</Button>
-              </Popconfirm>
-            ) : (
-              <Button type="primary" icon={<PlayCircleOutlined />} block style={{ flex: 1 }}
-                onClick={async () => {
-                  try {
-                    const engineType = model.engine_version || model.engine_type || model.id;
-                    await ttsStudioService.startEngine(engineType);
-                    message.success('引擎启动中');
-                    onUpdate();
-                  } catch { message.error('启动失败'); }
-                }}>
-                启动引擎
-              </Button>
-            )}
-            <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block style={{ flex: 1 }}>
-              管理模型
+                  } catch (e) { message.error('模型下载失败，请重试'); }
+                  finally { setTtsModelDownloading(false); }
+                  return;
+                }
+                try {
+                  const engData = await engineService.getById('tts');
+                  setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                  setEngineTarget('tts');
+                  ttsInstallModeRef.current = true;
+                  setShowEngineModal(true);
+                } catch { message.error('无法获取引擎信息'); }
+              }}>
+              安装引擎
             </Button>
-          </div>
+          ) : ttsEngineUpdate ? (
+            <Button type="primary" icon={<CloudSyncOutlined />} block color="blue" variant="solid"
+              onClick={async () => {
+                try {
+                  const engData = await engineService.getById('tts');
+                  setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                  setEngineTarget('tts');
+                  ttsInstallModeRef.current = false;
+                  setShowEngineModal(true);
+                } catch { message.error('无法获取引擎信息'); }
+              }}>
+              升级引擎
+            </Button>
+          ) : ttsStatus === 'starting' ? (
+            <Button icon={<LoadingOutlined />} block disabled>启动中...</Button>
+          ) : ttsStatus === 'running' ? (
+            <Button danger icon={<StopOutlined />} block color="red" variant="solid"
+              onClick={async () => {
+                setTtsStatus('idle');
+                try {
+                  const engineType = model.engine_version || model.engine_type || model.id;
+                  await ttsStudioService.stopEngine(engineType);
+                  message.success('引擎已停止');
+                  onUpdate();
+                } catch { message.error('停止失败'); }
+              }}>
+              停止引擎
+            </Button>
+          ) : (
+            <Button type="primary" icon={<PlayCircleOutlined />} block color="blue" variant="solid"
+              loading={ttsStatus === 'starting'}
+              onClick={async () => {
+                setTtsStatus('starting');
+                try {
+                  const engineType = model.engine_version || model.engine_type || model.id;
+                  await ttsStudioService.startEngine(engineType);
+                  message.success('引擎启动中');
+                  onUpdate();
+                } catch { setTtsStatus('idle'); message.error('启动失败'); }
+              }}>
+              启动引擎
+            </Button>
+          )}
+          <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
+            管理模型文件
+          </Button>
         </Space>
       )}
 
@@ -1495,7 +1474,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </Descriptions.Item>
         </Descriptions>
         <Divider style={{ margin: '12px 0' }} />
-        <WhisperModelsPanel
+        <AsrModelsPanel
           modelId={model.id}
           onPathReady={(asrPath) => {
             if (asrPath && !model.path) onUpdate();
@@ -1680,7 +1659,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         }}
       />
 
-      <WhisperSettingsDrawer
+      <AsrSettingsDrawer
         visible={whisperSettingsVisible}
         model={model}
         onClose={() => setWhisperSettingsVisible(false)}

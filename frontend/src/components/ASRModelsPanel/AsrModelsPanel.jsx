@@ -5,7 +5,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined
 } from '@ant-design/icons';
 import { asrModelsService, downloadService } from '../../services/api';
-import './WhisperModelsPanel.css';
+import './AsrModelsPanel.css';
 
 const { Title, Text } = Typography;
 
@@ -21,7 +21,7 @@ function formatSpeed(bps) {
   return `${formatBytes(bps)}/s`;
 }
 
-function WhisperModelsPanel({ modelId, onPathReady }) {
+function AsrModelsPanel({ modelId, onPathReady }) {
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState({ total: 0, downloaded: 0, missing: 0 });
   // { [filename]: { taskId, progress, totalBytes, downloadedBytes, speed, paused } }
@@ -275,4 +275,4 @@ function WhisperModelsPanel({ modelId, onPathReady }) {
   );
 }
 
-export default WhisperModelsPanel;
+export default AsrModelsPanel;

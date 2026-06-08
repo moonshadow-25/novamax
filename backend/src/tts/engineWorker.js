@@ -11,14 +11,13 @@
 import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
-import { TTS_PID_DIR } from '../config/constants.js';
 
-const { engineType, adapterPath, contract } = workerData;
+const { engineType, adapterPath, contract, PROJECT_ROOT } = workerData;
 let adapter = null;
 let initPromise = null;
 let runtimeConfig = {};
 
-const PID_FILE = path.join(TTS_PID_DIR, `.engine-pid-${engineType}`);
+const PID_FILE = path.join(PROJECT_ROOT, 'data', 'tts_services', `.engine-pid-${engineType}`);
 
 function log(level, message) {
   parentPort.postMessage({
@@ -123,6 +122,7 @@ async function dispatch(type, payload) {
       const { key, value } = payload;
       await a.setRuntimeConfig(key, value);
       runtimeConfig[key] = value;
+      pushReport({ runtimeConfig });
       log('info', `Runtime config: ${key}=${value}`);
       return runtimeConfig;
     }

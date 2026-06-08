@@ -74,6 +74,7 @@ def main():
     parser.add_argument('--rocm-path', default='')
     parser.add_argument('--project-root', required=True)
     parser.add_argument('--runtime-id', default='')
+    parser.add_argument('--skip-runtime-download', action='store_true', default=False)
     args = parser.parse_args()
 
     install_root = args.install_root
@@ -138,38 +139,42 @@ def main():
     print(f"  [OK] Variant: {variant_name}")
     print(f"  [OK] Engine package: {engine_file}")
 
-    # [3/4] 从 ModelScope 下载运行环境
-    print("[3/4] Downloading runtime environment from ModelScope...")
-    # 兼容开发环境（src/services/）和打包后生产环境（dist/scripts/）
-    downloader_candidates = [
-        os.path.join(project_root, 'backend', 'dist', 'scripts', 'modelscope_downloader.py'),
-        os.path.join(project_root, 'backend', 'src', 'services', 'modelscope_downloader.py'),
-    ]
-    downloader_script = next((p for p in downloader_candidates if os.path.exists(p)), None)
-    if not downloader_script:
-        raise RuntimeError(f"ModelScope 下载脚本未找到，已查找路径：{downloader_candidates}")
+    if args.skip_runtime_download:
+        print("[3/4] Download skipped — runtime handled by engine downloader")
+        print("[4/4] Extract skipped — runtime handled by engine downloader")
+    else:
+        # [3/4] 从 ModelScope 下载运行环境
+        print("[3/4] Downloading runtime environment from ModelScope...")
+        # 兼容开发环境（src/services/）和打包后生产环境（dist/scripts/）
+        downloader_candidates = [
+            os.path.join(project_root, 'backend', 'dist', 'scripts', 'modelscope_downloader.py'),
+            os.path.join(project_root, 'backend', 'src', 'services', 'modelscope_downloader.py'),
+        ]
+        downloader_script = next((p for p in downloader_candidates if os.path.exists(p)), None)
+        if not downloader_script:
+            raise RuntimeError(f"ModelScope 下载脚本未找到，已查找路径：{downloader_candidates}")
 
-    result = run(
-        [python313, downloader_script, MODELSCOPE_REPO, '--output', install_root, '--files', engine_file],
-        cwd=project_root,
-        check=False,
-        stream=True,
-        env={**os.environ, 'PYTHONIOENCODING': 'utf-8'}
-    )
-    if result.returncode != 0:
-        raise RuntimeError('ModelScope 下载失败，请检查上方日志')
-    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
-        raise RuntimeError(f"下载后未找到文件或文件为空: {zip_path}")
-    print(f"  [OK] Downloaded: {zip_path}")
+        result = run(
+            [python313, downloader_script, MODELSCOPE_REPO, '--output', install_root, '--files', engine_file],
+            cwd=project_root,
+            check=False,
+            stream=True,
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'}
+        )
+        if result.returncode != 0:
+            raise RuntimeError('ModelScope 下载失败，请检查上方日志')
+        if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+            raise RuntimeError(f"下载后未找到文件或文件为空: {zip_path}")
+        print(f"  [OK] Downloaded: {zip_path}")
 
-    # [4/4] 解压并清理
-    print("[4/4] Extracting runtime environment...")
-    with zipfile.ZipFile(zip_path, 'r') as zf:
-        zf.extractall(install_root)
-    print(f"  [OK] Extracted to: {install_root}")
+        # [4/4] 解压并清理
+        print("[4/4] Extracting runtime environment...")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(install_root)
+        print(f"  [OK] Extracted to: {install_root}")
 
-    os.remove(zip_path)
-    print(f"  [OK] Removed archive: {zip_filename}")
+        os.remove(zip_path)
+        print(f"  [OK] Removed archive: {zip_filename}")
 
     marker_path = os.path.join(install_root, '.installed')
     marker_data = {

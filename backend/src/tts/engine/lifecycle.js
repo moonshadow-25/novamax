@@ -6,7 +6,7 @@ import { discoverEngines } from './discovery.js';
 
 const genId = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 
-export function getOrCreateEngine(registry, engineType, log, enginesDir, engineWorkerPath, versionOrder) {
+export function getOrCreateEngine(registry, engineType, log, enginesDir, engineWorkerPath, versionOrder, PROJECT_ROOT) {
   const norm = normalizeEngineType(engineType);
   const existing = registry.get(norm);
   if (existing && existing.worker && existing._alive) return existing;
@@ -30,6 +30,7 @@ export function getOrCreateEngine(registry, engineType, log, enginesDir, engineW
         engineType,
         adapterPath: installed.adapterPath,
         contract: installed.contract,
+        PROJECT_ROOT,
       }
     }
   );
@@ -105,8 +106,8 @@ export function sendToEngine(entry, type, payload) {
   });
 }
 
-export async function ensureInitialized(registry, engineType, modelDir, log, enginesDir, engineWorkerPath, versionOrder) {
-  const entry = getOrCreateEngine(registry, engineType, log, enginesDir, engineWorkerPath, versionOrder);
+export async function ensureInitialized(registry, engineType, modelDir, log, enginesDir, engineWorkerPath, versionOrder, PROJECT_ROOT) {
+  const entry = getOrCreateEngine(registry, engineType, log, enginesDir, engineWorkerPath, versionOrder, PROJECT_ROOT);
   entry.lastActiveTime = Date.now();
 
   if (entry.status === 'running') return;

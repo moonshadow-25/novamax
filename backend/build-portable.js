@@ -116,17 +116,21 @@ try {
   process.exit(1);
 }
 
-// 复制 TTS Worker 源文件（动态 Worker 线程需要从磁盘加载）
-console.log('📋 复制 TTS 源文件...');
+// 复制 Worker 源文件（动态 Worker 线程和引擎 adapter 需要从磁盘加载）
+console.log('📋 复制 TTS/ASR 源文件...');
 const srcBase = path.join(PROJECT_ROOT, 'backend/src');
 const destBase = path.join(backendDest, 'src');
 fs.mkdirSync(destBase, { recursive: true });
 // tts/ 完整目录树
 copyDirectory(path.join(srcBase, 'tts'), path.join(destBase, 'tts'));
+// asr/ — 引擎 adapter 通过 findProjectRoot() + 动态 import 加载 baseAsrAdapter.js
+//   不再需要 external/asr/baseAsrAdapter.js 副本
+copyDirectory(path.join(srcBase, 'asr'), path.join(destBase, 'asr'));
 // contracts/
 const destContractsDir = path.join(destBase, 'contracts');
 fs.mkdirSync(destContractsDir, { recursive: true });
 fs.copyFileSync(path.join(srcBase, 'contracts', 'tts-engine-contract.ts'), path.join(destContractsDir, 'tts-engine-contract.ts'));
+fs.copyFileSync(path.join(srcBase, 'contracts', 'asr-engine-contract.ts'), path.join(destContractsDir, 'asr-engine-contract.ts'));
 // utils/
 const destUtilsDir = path.join(destBase, 'utils');
 fs.mkdirSync(destUtilsDir, { recursive: true });
@@ -137,7 +141,7 @@ for (const f of fs.readdirSync(path.join(srcBase, 'utils')).filter(f => f.endsWi
 const destConfigDir = path.join(destBase, 'config');
 fs.mkdirSync(destConfigDir, { recursive: true });
 fs.copyFileSync(path.join(srcBase, 'config', 'constants.js'), path.join(destConfigDir, 'constants.js'));
-console.log('✅ TTS 源文件已复制');
+console.log('✅ TTS/ASR 源文件已复制');
 
 // 复制 Python 脚本到 dist/scripts/
 console.log('📋 复制 Python 脚本...');
@@ -250,19 +254,6 @@ for (const tool of ['node', 'python313']) {
   }
 }
 console.log('✅ 外部工具已复制 (node, python313)');
-
-// 5a2. 复制 ASR 引擎共享基类（引擎 adapter 运行时依赖，按需下载的引擎通过相对路径导入）
-{
-  const asrSharedDir = path.join(externalDest, 'asr');
-  fs.mkdirSync(asrSharedDir, { recursive: true });
-  const baseAdapterSrc = path.join(PROJECT_ROOT, 'backend/src/asr/baseAsrAdapter.js');
-  if (fs.existsSync(baseAdapterSrc)) {
-    fs.copyFileSync(baseAdapterSrc, path.join(asrSharedDir, 'baseAsrAdapter.js'));
-    console.log('   ✓ baseAsrAdapter.js → external/asr/');
-  } else {
-    console.warn('⚠️  baseAsrAdapter.js 不存在，引擎 adapter 将无法导入');
-  }
-}
 
 // 5b. 复制 ci/ 安装脚本（引擎安装时需要）
 console.log('📋 复制 ci/ 安装脚本...');

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Drawer, Form, InputNumber, Select, Button, Space, message, Alert, Popconfirm, Divider, Tooltip, Typography } from 'antd';
 import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined, FolderOpenOutlined } from '@ant-design/icons';
-import { engineService, modelService, backendService } from '../../services/api';
+import { engineService, modelService, backendService, asrStudioService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
@@ -19,7 +19,7 @@ const ASR_LANGUAGES = [
 
 const { Text } = Typography;
 
-function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
+function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [engineInfo, setEngineInfo] = useState(null);
@@ -30,6 +30,30 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [latestEngineVersion, setLatestEngineVersion] = useState(null);
   const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
   const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
+  const [idleInfo, setIdleInfo] = useState(null);
+
+  // 引擎空闲倒计时（每秒轮询）
+  useEffect(() => {
+    if (!visible || !model?.id) return;
+    let timer;
+    const poll = async () => {
+      try {
+        const info = await asrStudioService.getEngineIdleInfo(model.id);
+        setIdleInfo(info);
+      } catch { setIdleInfo(null); }
+    };
+    poll();
+    timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  }, [visible, model]);
+
+  const formatCountdown = (ms) => {
+    if (!ms || ms <= 0) return '即将关闭';
+    const s = Math.ceil(ms / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
+  };
 
   const refreshEngineStatus = useCallback(async () => {
     try {
@@ -47,10 +71,9 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       setEngineInstalled(installedVersions.length > 0);
       setSelectedEngineVersion(model?.engine_version || null);
 
-      // 检测更新（同 TTS）
+      // 检测更新：availableVersions 按 engines.json 顺序排列，index 0 即最新
       if (availableVersions.length > 0 && installedVersions.length > 0) {
-        const sorted = [...availableVersions].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
-        const latest = sorted[0].version;
+        const latest = availableVersions[0].version;
         setLatestAvailableVersion(latest);
         setEngineUpdateAvailable(latest !== latestInstalledVersion);
       }
@@ -194,6 +217,11 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                 </Form.Item>
                 <span>分钟后自动关闭以节约资源</span>
               </div>
+              {idleInfo && idleInfo.status === 'running' && idleInfo.activeTasks === 0 && (
+                <div style={{ marginTop: 6, fontSize: 13, color: idleInfo.remainingMs < 60000 ? '#ff4d4f' : '#52c41a' }}>
+                  {idleInfo.remainingMs <= 0 ? '即将自动关闭...' : `${formatCountdown(idleInfo.remainingMs)} 后自动关闭`}
+                </div>
+              )}
             </Form.Item>
           </Form>
 
@@ -238,4 +266,4 @@ function WhisperSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   );
 }
 
-export default WhisperSettingsDrawer;
+export default AsrSettingsDrawer;

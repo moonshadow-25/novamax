@@ -2,21 +2,19 @@
  * ASR Worker — ASR 模块的总线线程。
  * 管理：DB、文件、引擎、转录编排、日志、闲置超时。
  */
-import { parentPort, Worker } from 'worker_threads';
+import { parentPort, Worker, workerData } from 'worker_threads';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { fileURLToPath } from 'url';
-import { PROJECT_ROOT } from '../config/constants.js';
-
-const ASR_DATA_DIR = path.join(PROJECT_ROOT, 'data', 'asr_services');
-const HISTORY_DB_PATH = path.join(ASR_DATA_DIR, 'transcription_history.db');
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+import { ASR_DEFAULTS } from '../config/constants.js';
 import { normalizeEngineType } from '../utils/engineTypeHelper.js';
+import { migrate as migrateDb } from './db/schema.js';
+
+const PROJECT_ROOT = workerData.PROJECT_ROOT;
+const ASR_ENGINE_DIR = path.join(PROJECT_ROOT, 'external', 'asr');
+const ASR_DATA_DIR = path.join(PROJECT_ROOT, 'data', 'asr_services');
+const ASR_HISTORY_DB = path.join(ASR_DATA_DIR, 'transcription_history.db');
 
 const genId = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 
@@ -24,28 +22,14 @@ const genId = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
  * DB
  * ======================================================================== */
 
-fs.mkdirSync(ASR_DATA_DIR, { recursive: true });
-const db = new Database(HISTORY_DB_PATH);
+const db = new Database(ASR_HISTORY_DB);
 db.pragma('journal_mode = WAL');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS asr_transcription_history (
-    id TEXT PRIMARY KEY, model_id TEXT NOT NULL,
-    original_filename TEXT, audio_path TEXT, result_text TEXT,
-    output_format TEXT DEFAULT 'json', language TEXT, task_type TEXT DEFAULT 'transcribe',
-    duration_seconds REAL, word_count INTEGER DEFAULT 0,
-    output_files TEXT DEFAULT '[]', source_type TEXT DEFAULT 'manual', source_file TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_asr_hist_model ON asr_transcription_history(model_id);
-  CREATE INDEX IF NOT EXISTS idx_asr_hist_created ON asr_transcription_history(created_at);
-`);
+migrateDb(db, ASR_DATA_DIR);
 
 /* ========================================================================
  * 日志
  * ======================================================================== */
 
-const LOG_MAX = 2000;
 const asrLogs = [];
 const ASR_LOGS_DIR = path.join(PROJECT_ROOT, 'data', 'logs');
 let _logStream = null;
@@ -56,7 +40,7 @@ function getLogDate() { const d = new Date(); return `${d.getFullYear()}-${Strin
 function ensureLogStream() {
   const today = getLogDate();
   if (_logDate !== today) {
-    if (_logStream) { try { _logStream.end(); } catch {} _logStream = null; }
+    if (_logStream) { try { _logStream.end(); } catch (e) { addLog('warn', '关闭旧日志流失败: '+e.message); } _logStream = null; }
     fs.mkdirSync(ASR_LOGS_DIR, { recursive: true });
     _logStream = fs.createWriteStream(path.join(ASR_LOGS_DIR, `asr-engine-${today}.log`), { flags: 'a' });
     _logDate = today;
@@ -65,8 +49,8 @@ function ensureLogStream() {
 
 function addLog(level, message) {
   const entry = { timestamp: new Date().toISOString(), level, message };
-  asrLogs.push(entry); if (asrLogs.length > LOG_MAX) asrLogs.shift();
-  try { ensureLogStream(); _logStream.write(`[${entry.timestamp}] [${level}] ${message}\n`); } catch {}
+  asrLogs.push(entry); if (asrLogs.length > ASR_DEFAULTS.LOG_MAX_ENTRIES) asrLogs.shift();
+  try { ensureLogStream(); _logStream.write(`[${entry.timestamp}] [${level}] ${message}\n`); } catch (e) { /* 日志写入失败时静默 — 不能因为日志导致进程崩溃 */ }
 }
 
 addLog('info', 'ASR Worker started');
@@ -96,18 +80,16 @@ function saveUploadsMeta(modelId, meta) {
  * ======================================================================== */
 
 function getInstalledAsrEngine(engineType) {
-  const asrDir = path.join(PROJECT_ROOT, 'external', 'asr');
-  if (!fs.existsSync(asrDir)) return null;
+  if (!fs.existsSync(ASR_ENGINE_DIR)) return null;
 
   const normalizedType = normalizeEngineType(engineType);
   const matches = [];
 
-  // 扫描 external/asr/{variantId}/{versionDir}/ 结构
-  const variantDirs = fs.readdirSync(asrDir, { withFileTypes: true })
+  const variantDirs = fs.readdirSync(ASR_ENGINE_DIR, { withFileTypes: true })
     .filter(x => x.isDirectory() && !x.name.startsWith('_temp_'));
 
   for (const variantDirEntry of variantDirs) {
-    const variantPath = path.join(asrDir, variantDirEntry.name);
+    const variantPath = path.join(ASR_ENGINE_DIR, variantDirEntry.name);
     const versionDirs = fs.readdirSync(variantPath, { withFileTypes: true })
       .filter(x => x.isDirectory() && !x.name.startsWith('_temp_'));
 
@@ -117,18 +99,18 @@ function getInstalledAsrEngine(engineType) {
       const ap = path.join(dir, 'adapter.js');
       if (!fs.existsSync(cp) || !fs.existsSync(ap)) continue;
       if (!fs.existsSync(path.join(dir, '.installed'))) continue;
-      let c; try { c = JSON.parse(fs.readFileSync(cp, 'utf-8')); } catch { continue; }
-      // 用 normalizeEngineType 匹配 contract 中声明的 engine.type
+      let c; try { c = JSON.parse(fs.readFileSync(cp, 'utf-8')); } catch (e) { addLog('warn', `解析 contract.json 失败: ${cp} — ${e.message}`); continue; }
       const contractType = normalizeEngineType(c?.engine?.type);
-      if (contractType !== normalizedType) continue;
-      // 优先级：variant 目录名匹配 > 其他
+      if (!contractType || contractType !== normalizedType) continue;
       const priority = normalizeEngineType(variantDirEntry.name) === normalizedType ? 1 : 0;
       matches.push({ contract: c, adapterPath: ap, dir, enginePath: dir, priority });
     }
   }
 
-  // 按优先级降序排列，取最佳匹配
   matches.sort((a, b) => b.priority - a.priority);
+  if (matches.length > 1) {
+    addLog('warn', `引擎类型 "${engineType}" 发现 ${matches.length} 个已安装版本，使用最高优先级: ${matches[0].dir}`);
+  }
   return matches[0] || null;
 }
 
@@ -142,11 +124,11 @@ function getOrCreateEngine(modelId, engineType) {
   const installed = getInstalledAsrEngine(engineType);
   if (!installed) throw { code: 'ENGINE_UNAVAILABLE', message: 'ASR 引擎未安装' };
 
-  const worker = new Worker(path.join(__dirname, 'asrEngineWorker.js'), {
-    workerData: { engineType: engineType, adapterPath: installed.adapterPath, contract: installed.contract, modelId }
+  const worker = new Worker(path.join(PROJECT_ROOT, 'backend', 'src', 'asr', 'asrEngineWorker.js'), {
+    workerData: { engineType: engineType, adapterPath: installed.adapterPath, contract: installed.contract, modelId, PROJECT_ROOT }
   });
 
-  entry = { worker, status: 'idle', initPromise: null, pending: new Map(), busy: false, activeTasks: 0, lastActiveTime: Date.now() };
+  entry = { worker, engineType, status: 'idle', initPromise: null, pending: new Map(), busy: false, activeTasks: 0, lastActiveTime: Date.now() };
   engines.set(modelId, entry);
 
   worker.on('message', (msg) => {
@@ -166,18 +148,29 @@ function getOrCreateEngine(modelId, engineType) {
   });
 
   worker.on('error', (err) => {
+    addLog('error', `Engine worker 错误: ${err.message}`);
     entry.status = 'error';
     for (const [, cb] of entry.pending) cb({ type: 'error', payload: { code: 'ENGINE_UNAVAILABLE', message: err.message } });
     entry.pending.clear();
+    // 尝试发送 dispose 指令（如果 Worker 还能响应），否则直接终止
+    try { entry.worker.postMessage({ id: genId('disp'), type: 'dispose', payload: {} }); } catch {}
+    try { entry.worker.terminate().catch(() => {}); } catch {}
+    entry.worker = null;
+    entry.initPromise = null;
   });
 
-  worker.on('exit', () => { if (!entry._intentionalStop) engines.delete(modelId); });
+  worker.on('exit', () => {
+    if (!entry._intentionalStop) {
+      addLog('warn', `Engine worker ${modelId} 异常退出（engine 进程可能残留）`);
+      engines.delete(modelId);
+    }
+  });
   return entry;
 }
 
 function sendToEngine(modelId, engineType, type, payload) {
   const entry = getOrCreateEngine(modelId, engineType);
-  entry.lastActiveTime = Date.now();  // 每次请求刷新闲置计时
+  entry.lastActiveTime = Date.now();
   const id = genId('eng');
   return new Promise((resolve, reject) => {
     entry.pending.set(id, (msg) => msg.type === 'result' ? resolve(msg.payload) : reject(msg.payload));
@@ -194,9 +187,9 @@ async function ensureEngineReady(modelId, engineType, config) {
 
   if (entry.initPromise) { await entry.initPromise; return entry.report?.port; }
 
-  entry.initPromise = sendToEngine(modelId, engineType, 'initialize', { ...config, enginePath: installed.enginePath || installed.dir }).then(() => {
+  entry.initPromise = sendToEngine(modelId, engineType, 'initialize', { ...config, enginePath: installed.enginePath }).then(() => {
     entry.status = 'running'; entry.initPromise = null;
-  }).catch(e => { entry.initPromise = null; entry.status = 'idle'; throw e; });
+  }).catch(e => { entry.initPromise = null; entry.status = 'idle'; addLog('error', `引擎初始化失败: ${e.message}`); throw e; });
 
   await entry.initPromise;
   return entry.report?.port;
@@ -211,11 +204,14 @@ async function transcribe(msg) {
     modelFilePath, threads } = msg;
   const taskType = msg.task || 'transcribe';
 
+  if (!modelFilePath) {
+    throw { code: 'MODEL_NOT_FOUND', message: `模型 ${modelId} 未关联模型文件（path 字段为空），请先下载模型文件` };
+  }
+
   await ensureEngineReady(modelId, engineType, { modelFilePath, language, threads });
 
   addLog('info', `Transcribing: ${path.basename(audioPath)} (${modelId})`);
 
-  // 通过 engine worker 调用 adapter.transcribe()（各引擎路径不同，adapter 自行处理）
   const result = await sendToEngine(modelId, engineType, 'transcribe', {
     audioPath,
     params: { language, response_format: outputFormat, temperature, prompt, stream }
@@ -224,29 +220,22 @@ async function transcribe(msg) {
   let parsed = result || {};
   if (typeof parsed === 'string') parsed = { text: parsed };
 
-  // 写历史
   const historyId = genId('asr-hist');
   const outputDir = msg.outputDir || path.join(getModelDir(modelId), 'outputs');
   fs.mkdirSync(outputDir, { recursive: true });
-
-  const baseName = path.basename(audioPath, path.extname(audioPath));
-  const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
-  const outputFiles = [];
-
-  // 输出文件由前端单独调 /asr-studio/save-output 写入，不在转录时自动写
 
   const now = new Date().toISOString();
   db.prepare(`INSERT INTO asr_transcription_history
     (id, model_id, original_filename, audio_path, result_text, output_format, language, task_type, output_files, source_type, source_file, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(historyId, modelId, path.basename(audioPath), audioPath, parsed.text || '', outputFormat || 'json',
-      language || '', taskType, JSON.stringify(outputFiles), msg.sourceType || 'manual', msg.sourceFile || '', now);
+      language || '', taskType, JSON.stringify([]), msg.sourceType || 'manual', msg.sourceFile || '', now);
 
   addLog('info', `Transcription done: historyId=${historyId}`);
-  return { historyId, text: parsed.text || '', outputFiles };
+  return { historyId, text: parsed.text || '', outputFiles: [] };
 }
 
-function formatSrt(result) { /* simplified - returns empty if no segments */
+function formatSrt(result) {
   if (!result.segments?.length) return `1\n00:00:00,000 --> 00:00:01,000\n${result.text || ''}\n`;
   return result.segments.map((s, i) => `${i+1}\n${fmtSrtTime(s.start)} --> ${fmtSrtTime(s.end)}\n${s.text}\n`).join('\n');
 }
@@ -261,7 +250,7 @@ function fmtVttTime(s) { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),se
  * 历史
  * ======================================================================== */
 
-function getHistory(page = 1, pageSize = 20, modelId) {
+function getHistory(page = 1, pageSize = ASR_DEFAULTS.HISTORY_PAGE_SIZE, modelId) {
   let where = '1=1'; const params = [];
   if (modelId) { where += ' AND model_id = ?'; params.push(modelId); }
   const total = db.prepare(`SELECT COUNT(*) as c FROM asr_transcription_history WHERE ${where}`).get(...params)?.c || 0;
@@ -272,7 +261,7 @@ function getHistory(page = 1, pageSize = 20, modelId) {
 }
 
 /* ========================================================================
- * 请求队列（服务端）
+ * 请求队列
  * ======================================================================== */
 
 const taskQueue = [];
@@ -291,10 +280,12 @@ async function processQueue() {
     } catch (e) {
       task.status = 'failed';
       task.error = e.message;
+      addLog('error', `队列任务失败: ${task.filename} — ${e.message}`);
     }
     taskQueue.shift();
   }
   processing = false;
+  if (taskQueue.length > 0) processQueue();
 }
 
 /* ========================================================================
@@ -307,6 +298,7 @@ parentPort.on('message', async (msg) => {
     const result = await dispatch(type, payload);
     parentPort.postMessage({ id, type: 'result', payload: result !== undefined ? result : {} });
   } catch (e) {
+    addLog('error', `dispatch "${type}" 失败: ${e.message}`);
     parentPort.postMessage({ id, type: 'error', payload: { code: e.code || 'INTERNAL_ERROR', message: e.message } });
   }
 });
@@ -334,7 +326,7 @@ async function dispatch(type, payload) {
       const { modelId, filenames } = payload;
       let meta = getUploadsMeta(modelId);
       for (const fn of filenames) {
-        try { fs.unlinkSync(path.join(getModelDir(modelId), 'uploads', fn)); } catch {}
+        try { fs.unlinkSync(path.join(getModelDir(modelId), 'uploads', fn)); } catch (e) { addLog('warn', `删除文件失败: ${fn} — ${e.message}`); }
       }
       meta = meta.filter(f => !filenames.includes(f.filename));
       saveUploadsMeta(modelId, meta);
@@ -351,7 +343,7 @@ async function dispatch(type, payload) {
       const { modelId } = payload;
       let meta = getUploadsMeta(modelId);
       for (const f of meta.filter(x => x.status === 'completed')) {
-        try { fs.unlinkSync(path.join(getModelDir(modelId), 'uploads', f.filename)); } catch {}
+        try { fs.unlinkSync(path.join(getModelDir(modelId), 'uploads', f.filename)); } catch (e) { addLog('warn', `删除已完成文件失败: ${f.filename} — ${e.message}`); }
       }
       meta = meta.filter(x => x.status !== 'completed');
       saveUploadsMeta(modelId, meta);
@@ -359,11 +351,11 @@ async function dispatch(type, payload) {
     }
 
     // 历史
-    case 'getHistory': return getHistory(payload.page || 1, payload.pageSize || 20, payload.modelId);
+    case 'getHistory': return getHistory(payload.page || 1, payload.pageSize || ASR_DEFAULTS.HISTORY_PAGE_SIZE, payload.modelId);
     case 'deleteHistoryItem': {
       const item = db.prepare('SELECT * FROM asr_transcription_history WHERE id = ?').get(payload.id);
       if (item?.output_files) {
-        for (const f of JSON.parse(item.output_files || '[]')) { try { fs.unlinkSync(f); } catch {} }
+        for (const f of JSON.parse(item.output_files || '[]')) { try { fs.unlinkSync(f); } catch (e) { addLog('warn', `删除历史输出文件失败: ${f} — ${e.message}`); } }
       }
       db.prepare('DELETE FROM asr_transcription_history WHERE id = ?').run(payload.id);
       return { success: true };
@@ -372,7 +364,7 @@ async function dispatch(type, payload) {
       if (payload.modelId) {
         const items = db.prepare('SELECT * FROM asr_transcription_history WHERE model_id = ?').all(payload.modelId);
         for (const item of items) {
-          for (const f of JSON.parse(item.output_files || '[]')) { try { fs.unlinkSync(f); } catch {} }
+          for (const f of JSON.parse(item.output_files || '[]')) { try { fs.unlinkSync(f); } catch (e) { addLog('warn', `清除历史文件失败: ${f} — ${e.message}`); } }
         }
         db.prepare('DELETE FROM asr_transcription_history WHERE model_id = ?').run(payload.modelId);
       }
@@ -389,7 +381,7 @@ async function dispatch(type, payload) {
     }
     case 'getQueue': return { items: taskQueue.map(t => ({ id: t.id, filename: t.filename, status: t.status, error: t.error })) };
 
-    // 转录（直接调用，同步返回）
+    // 转录
     case 'transcribe':
     case 'transcribeStream':
       return transcribe(payload);
@@ -404,8 +396,8 @@ async function dispatch(type, payload) {
       const e = engines.get(payload.modelId);
       if (e?.worker) {
         e._intentionalStop = true;
-        try { await sendToEngine(payload.modelId, payload.engineType, 'dispose', {}); } catch {}
-        try { await e.worker.terminate(); } catch {}
+        try { await sendToEngine(payload.modelId, payload.engineType, 'dispose', {}); } catch (err) { addLog('warn', `引擎 dispose 失败: ${err.message}`); }
+        try { await e.worker.terminate(); } catch (err) { addLog('warn', `Worker terminate 失败: ${err.message}`); }
         engines.delete(payload.modelId);
       }
       parentPort.postMessage({ type: 'statusChange', payload: { modelId: payload.modelId, status: 'stopped' } });
@@ -415,6 +407,22 @@ async function dispatch(type, payload) {
       const e = engines.get(payload.modelId);
       return { modelId: payload.modelId, status: e?.status || 'idle', port: e?.report?.port };
     }
+    case 'engineIdleInfo': {
+      const e = engines.get(payload.modelId);
+      if (!e) return null;
+      const timeoutMin = payload.idleTimeoutMin || 5;
+      const timeoutMs = timeoutMin * 60 * 1000;
+      const now = Date.now();
+      const elapsed = now - (e.lastActiveTime || 0);
+      const remainingMs = Math.max(0, timeoutMs - elapsed);
+      return {
+        status: e.status,
+        lastActiveTime: e.lastActiveTime || null,
+        idleTimeoutMs: timeoutMs,
+        remainingMs,
+        activeTasks: e.activeTasks || 0,
+      };
+    }
     case 'isEngineRunning': {
       const statuses = {};
       for (const [mid, e] of engines) statuses[mid] = e.status;
@@ -422,30 +430,51 @@ async function dispatch(type, payload) {
     }
 
     // 日志
-    case 'getAsrLogs': return { logs: asrLogs.slice(-(payload.limit || 500)), _count: asrLogs.length };
+    case 'getAsrLogs': return { logs: asrLogs.slice(-(payload.limit || ASR_DEFAULTS.LOG_FETCH_LIMIT)), _count: asrLogs.length };
     case 'clearAsrLogs': asrLogs.length = 0; return { success: true };
 
     // 输出目录
     case 'getOutputDir': {
       const { modelManager } = await import('../services/modelManager.js');
       const m = modelManager.default.getById(payload.modelId);
-      return { output_dir: m?.asr_config?.output_dir || m?.whisper_config?.output_dir || path.join(getModelDir(payload.modelId), 'outputs') };
+      return { output_dir: m?.asr_config?.output_dir || path.join(getModelDir(payload.modelId), 'outputs') };
     }
     case 'setOutputDir': {
       const { modelManager } = await import('../services/modelManager.js');
       const m = modelManager.default.getById(payload.modelId);
       if (m) {
-        const cfg = m.asr_config || m.whisper_config || {};
+        const cfg = m.asr_config || {};
         cfg.output_dir = payload.outputDir;
         modelManager.default.update(payload.modelId, { asr_config: cfg });
       }
       return { success: true };
     }
     case 'openOutputDir': {
-      const { execSync } = await import('child_process');
       const dir = payload.outputDir || path.join(getModelDir(payload.modelId), 'outputs');
       fs.mkdirSync(dir, { recursive: true });
-      execSync(`start "" "${dir}"`, { shell: true });
+      const { exec } = await import('child_process');
+      exec(`start "" "${dir}"`, { shell: true });
+      return { success: true };
+    }
+
+    // 优雅关闭 — 释放所有引擎后再退出
+    case 'shutdown': {
+      addLog('info', 'Worker shutdown requested, disposing all engines...');
+      for (const [modelId, e] of engines) {
+        if (e.worker) {
+          e._intentionalStop = true;
+          try {
+            await sendToEngine(modelId, e.engineType, 'dispose', {});
+            addLog('info', `Engine ${modelId} disposed`);
+          } catch (err) {
+            addLog('warn', `Engine ${modelId} dispose failed: ${err.message}`);
+          }
+          try { await e.worker.terminate(); } catch {}
+          e.worker = null;
+        }
+      }
+      engines.clear();
+      addLog('info', 'All engines disposed');
       return { success: true };
     }
 
@@ -457,16 +486,22 @@ async function dispatch(type, payload) {
 /* ========================================================================
  * 闲置超时
  * ======================================================================== */
-setInterval(() => {
+setInterval(async () => {
   const now = Date.now();
   for (const [modelId, entry] of engines) {
     if (entry.status !== 'running' || entry.activeTasks > 0 || entry.busy) continue;
-    if (now - entry.lastActiveTime < 5 * 60 * 1000) continue;
+    if (now - entry.lastActiveTime < ASR_DEFAULTS.IDLE_TIMEOUT_MS) continue;
     addLog('info', `Engine ${modelId} idle timeout, disposing`);
     entry._intentionalStop = true;
-    try { entry.worker.postMessage({ id: genId('disp'), type: 'dispose', payload: {} }); } catch {}
-    entry.worker.terminate();
+    // 先发 dispose 指令并等待响应，确保 adapter.dispose() → taskkill 有机会执行
+    try {
+      await sendToEngine(modelId, entry.engineType, 'dispose', {});
+      addLog('info', `Engine ${modelId} disposed cleanly`);
+    } catch (e) {
+      addLog('warn', `Engine ${modelId} dispose via IPC failed, force-terminating: ${e.message}`);
+    }
+    try { await entry.worker.terminate(); } catch (e) { addLog('warn', `Worker terminate 失败: ${e.message}`); }
     entry.worker = null; entry.status = 'idle'; entry.initPromise = null;
     parentPort.postMessage({ type: 'statusChange', payload: { modelId, status: 'stopped' } });
   }
-}, 30000);
+}, ASR_DEFAULTS.IDLE_CHECK_INTERVAL_MS);

@@ -58,87 +58,31 @@ function normalizeParamDefs(params) {
 
 /* ======================== 参考音频（文件操作在主线程） ======================== */
 
-router.get('/reference-audios', (req, res) => {
+router.get('/reference-audios', async (req, res) => {
   const { page, page_size } = req.query;
   const pg = parseInt(page) || 1;
   const ps = parseInt(page_size) || 8;
-  if (!fs.existsSync(REF_AUDIO_DIR)) return res.json({ items: [], total: 0, page: pg, page_size: ps });
-  const all = fs.readdirSync(REF_AUDIO_DIR)
-    .filter(f => /\.(wav|mp3|flac)$/i.test(f))
-    .sort((a, b) => fs.statSync(path.join(REF_AUDIO_DIR, b)).mtimeMs - fs.statSync(path.join(REF_AUDIO_DIR, a)).mtimeMs);
-  const total = all.length;
-  const items = all.slice((pg - 1) * ps, pg * ps).map(f => {
-    const filePath = path.join(REF_AUDIO_DIR, f);
-    const stat = fs.statSync(filePath);
-    const baseName = path.parse(f).name;  // e.g. "3XK7NP_演示音频"
-    const voiceId = baseName.slice(0, 6); // first 6 chars = Voice ID
-    const name = baseName.length > 7 ? baseName.slice(7) : baseName; // rest = display name
-    return { id: voiceId, voice_id: voiceId, name: name || voiceId, file_path: filePath, file_size: stat.size, format: path.extname(f).slice(1).toLowerCase(), uploaded_at: stat.mtime.toISOString() };
-  });
-  res.json({ items, total, page: pg, page_size: ps });
+  try {
+    const result = await ttsWorkerManager.send('listVoices', { page: pg, pageSize: ps });
+    const items = (result.items || []).map(v => ({
+      id: v.id, voice_id: v.id, name: v.name, file_path: v.reference_audio_path,
+      file_size: v.file_size || 0, format: v.format || 'wav', uploaded_at: v.uploaded_at
+    }));
+    res.json({ items, total: result.total || 0, page: pg, page_size: ps });
+  } catch (e) { res.json({ items: [], total: 0, page: pg, page_size: ps }); }
 });
 
 router.post('/reference-audios', upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: '未上传文件' });
-  const originalName = normalizeFilename(req.file.originalname || 'audio.wav');
-  const ext = path.extname(originalName).toLowerCase().slice(1) || 'wav';
-  const displayName = path.basename(originalName, path.extname(originalName)) || originalName;
-
-  // 不支持的格式 → ffmpeg 转码为 wav
-  let fileBuffer = req.file.buffer;
-  let actualExt = ext;
-  if (!REF_AUDIO_FORMATS.includes(ext)) {
-    if (!getFfmpegExe()) {
-      return res.status(400).json({ error: `音频格式 .${ext} 不受支持，且 ffmpeg 未安装。请在引擎管理中下载 ffmpeg 组件。` });
-    }
-    const tmpIn = path.join(REF_AUDIO_DIR, `_tmp_in_${Date.now()}.${ext}`);
-    const tmpOut = path.join(REF_AUDIO_DIR, `_tmp_out_${Date.now()}.wav`);
-    try {
-      fs.writeFileSync(tmpIn, fileBuffer);
-      await new Promise((resolve, reject) => {
-        const proc = spawn(getFfmpegExe(), ['-i', tmpIn, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', tmpOut, '-y'],
-          );
-        proc.on('close', (code) => {
-          if (code !== 0 || !fs.existsSync(tmpOut)) return reject(new Error(`音频转换失败：不支持的格式 ".${ext}"`));
-          resolve();
-        });
-        proc.on('error', (e) => reject(new Error(`音频转换失败：${e.message}`)));
-      });
-      fileBuffer = fs.readFileSync(tmpOut);
-      actualExt = 'wav';
-    } catch (e) {
-      return res.status(400).json({ error: `音频转换失败：${e.message}` });
-    } finally {
-      try { fs.unlinkSync(tmpIn); } catch {}
-      try { fs.unlinkSync(tmpOut); } catch {}
-    }
+  try {
+    if (!req.file) return res.status(400).json({ error: '未上传文件' });
+    const result = await ttsWorkerManager.send('uploadReferenceAudio', {
+      buffer: req.file.buffer,
+      originalName: req.file.originalname || 'audio.wav',
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message || '上传失败' });
   }
-
-  // 基于文件 MD5 生成确定性 Voice ID
-  const md5 = crypto.createHash('md5').update(fileBuffer).digest();
-  const voiceId = idFromMd5Bytes(md5);
-
-  // 同名 Voice 已存在（按前缀匹配）
-  const existing = fs.readdirSync(REF_AUDIO_DIR).find(f => f.startsWith(voiceId) && /\.(wav|mp3|flac)$/i.test(f));
-  if (existing && existing !== `${voiceId}_${displayName}.${actualExt}`) {
-    const existPath = path.join(REF_AUDIO_DIR, existing);
-    const existName = path.parse(existing).name.slice(7) || voiceId;
-    return res.json({ id: voiceId, voice_id: voiceId, name: existName, file_path: existPath, file_size: fs.statSync(existPath).size, format: path.extname(existing).slice(1).toLowerCase(), uploaded_at: fs.statSync(existPath).mtime.toISOString() });
-  }
-
-  const filename = `${voiceId}_${displayName}.${actualExt}`;
-  const filePath = path.join(REF_AUDIO_DIR, filename);
-  fs.mkdirSync(REF_AUDIO_DIR, { recursive: true });
-  fs.writeFileSync(filePath, fileBuffer);
-
-  // 创建 Voice
-  ttsWorkerManager.send('createVoice', {
-    id: voiceId, name: displayName, voice_mode: 'clone',
-    reference_audio_path: filePath, instruction: null,
-    emotion_preset: {}, engine_meta: {}, tags: []
-  }).catch(e => console.warn(`[tts-studio] Voice creation failed:`, e.message));
-
-  res.json({ id: voiceId, voice_id: voiceId, name: displayName, file_path: filePath, file_size: req.file.size, format: ext.slice(1), uploaded_at: new Date().toISOString() });
 });
 
 router.get('/reference-audios/:id/file', (req, res) => {
@@ -502,6 +446,17 @@ router.get('/engine-contracts', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* ======================== 引擎空闲倒计时 ======================== */
+
+router.get('/engine-idle-info', async (req, res) => {
+  try {
+    const { engine_type } = req.query;
+    if (!engine_type) return res.status(400).json({ error: 'engine_type 不能为空' });
+    const info = await ttsWorkerManager.send('getEngineIdleInfo', { engine_type });
+    res.json(info || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ======================== 引擎运行时配置 & 内存 ======================== */
 
 router.get('/engine-runtime-config', async (req, res) => {
@@ -595,6 +550,11 @@ router.post('/workspace-defaults/reset', async (req, res) => {
       const wsId = d.model_id || d.id;
       const folderPath = path.join(TTS_WORKSPACES_DIR, wsId);
       fs.mkdirSync(folderPath, { recursive: true });
+      fs.mkdirSync(path.join(folderPath, 'outputs'), { recursive: true });
+      fs.mkdirSync(path.join(folderPath, 'uploads'), { recursive: true });
+      fs.mkdirSync(path.join(folderPath, 'jobs'), { recursive: true });
+      const config = { name: d.name, engine_type: d.engine_type, voice_mode: d.voice_mode || 'clone', params: d.params || {}, output_dir: path.join(folderPath, 'outputs'), created_at: d.created_at || new Date().toISOString() };
+      fs.writeFileSync(path.join(folderPath, 'config.json'), JSON.stringify(config, null, 2));
       await ttsWorkerManager.send('createWorkspace', {
         id: wsId, name: d.name, engine_type: d.engine_type,
         voice_mode: d.voice_mode || 'clone', voice_id: d.voice_id || null,

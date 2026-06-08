@@ -65,27 +65,53 @@ class EngineDownloader {
       tasks.push({ taskId, engineId: missing.id, version: depVersion });
     }
 
-    // 下载主引擎（install 脚本由 _runInstallScript 的 parent→variant fallback 自动发现）
+    // 下载主引擎
     const taskId = `${engineId}::${version}`;
     downloadStateManager.createState(engineId, version, 'engine');
-    tasks.unshift({ taskId, engineId, version });
+    // 记录恢复所需的版本和运行时 ID
+    const engineState = downloadStateManager.getFullState(engineId, version);
+    if (engineState) {
+      engineState._engineVersion = version;
+      if (runtimeId) engineState._runtimeId = runtimeId;
+    }
 
-    // 下载运行时（若有，并行下载）
+    // 下载运行时（若有）—— 运行时由 engineDownloader 下载（带进度追踪），
+    // 安装脚本收到 --skip-runtime-download 避免重复下载
     let runtimeTask = null;
     if (runtimeId) {
       const runtime = engineManager.getEngineRuntime(effectiveEngineId, runtimeId);
       if (runtime?.modelscope_file) {
         const rtTaskId = `${effectiveEngineId}_runtime_${runtimeId}`;
         downloadStateManager.createState(rtTaskId, null, 'engine');
+        const rtState = downloadStateManager.getFullState(rtTaskId);
+        if (rtState) { rtState._engineVersion = version; rtState._parentEngineId = engineId; }
         const effEng = engineManager.getEngine(effectiveEngineId);
         runtimeTask = { taskId: rtTaskId, engineId: effectiveEngineId, version, isRuntime: true, runtimeFile: runtime.modelscope_file, runtimeRepo: effEng?.modelscope_repo || engine.modelscope_repo };
       }
     }
+    // 标记引擎任务：若有独立的运行时下载任务，安装脚本跳过自己的运行时下载
+    tasks.unshift({ taskId, engineId, version, skipRuntimeDownload: !!runtimeTask });
 
     // 后台执行下载
     this._runDownloadChain(tasks, runtimeId, runtimeTask);
 
     return { tasks: runtimeTask ? [...tasks, runtimeTask] : tasks };
+  }
+
+  /** 暂停引擎下载（终止 Python 进程，状态标记为 paused） */
+  pauseDownload(engineId, version) {
+    const state = downloadStateManager.getFullState(engineId, version);
+    if (!state || state.status !== 'downloading') return;
+    try { state.pythonProcess?.kill(); } catch {}
+    downloadStateManager.setState(engineId, 'paused', null, version);
+  }
+
+  /** 取消引擎下载（终止进程并清理状态） */
+  cancelDownload(engineId, version) {
+    const state = downloadStateManager.getFullState(engineId, version);
+    if (!state) return;
+    try { state.pythonProcess?.kill(); } catch {}
+    downloadStateManager.deleteState(engineId, version);
   }
 
   /**
@@ -156,21 +182,21 @@ class EngineDownloader {
    * 执行下载链（依赖 -> 主引擎）
    */
   async _runDownloadChain(tasks, runtimeId = null, runtimeTask = null) {
-    // 先下载引擎（不传 runtimeId 避免安装脚本重复下载）
+    // 引擎任务：若 runtimeTask 存在则标记跳过安装脚本的运行时下载（避免重复）
     for (const taskInfo of tasks) {
-      await this._runSingleDownload(taskInfo, null);
+      await this._runSingleDownload(taskInfo, null, taskInfo.skipRuntimeDownload);
     }
     // 再下载运行时（引擎已安装完毕，合并不会丢）
     if (runtimeTask) {
       try {
-        await this._runSingleDownload(runtimeTask, null);
+        await this._runSingleDownload(runtimeTask, null, false);
       } catch (err) {
         downloadStateManager.setState(runtimeTask.taskId, 'failed', err.message, null);
       }
     }
   }
 
-  async _runSingleDownload(taskInfo, runtimeId) {
+  async _runSingleDownload(taskInfo, runtimeId, skipRuntimeDownload = false) {
       const lockKey = `${taskInfo.engineId}::${taskInfo.version}`;
 
       // 若另一条链正在下载同一引擎（如 rocm），等待其完成后跳过重复下载
@@ -200,19 +226,23 @@ class EngineDownloader {
         downloadStateManager.setState(stateId, 'downloading', null, stateVer);
         eventBus.broadcast('download-progress', { engineId: stateId, status: 'downloading' });
 
-        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo);
+        await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo, skipRuntimeDownload);
 
         downloadStateManager.setState(stateId, 'completed', null, stateVer);
         downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
         eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
         resolveLock();
       } catch (error) {
-        downloadStateManager.setState(stateId, 'failed', error.message, stateVer);
-        eventBus.broadcast('download-progress', {
-          engineId: taskInfo.engineId,
-          status: 'failed',
-          error: error.message
-        });
+        // 用户主动暂停 → 不覆盖 paused 状态
+        const curState = downloadStateManager.getFullState(stateId, stateVer);
+        if (curState?.status !== 'paused') {
+          downloadStateManager.setState(stateId, 'failed', error.message, stateVer);
+          eventBus.broadcast('download-progress', {
+            engineId: taskInfo.engineId,
+            status: 'failed',
+            error: error.message
+          });
+        }
         rejectLock(error);
         return; // 依赖下载失败，中止整条链
       } finally {
@@ -226,7 +256,7 @@ class EngineDownloader {
    *   - download_url：直接 HTTP 下载（测试版）
    *   - modelscope_repo + modelscope_file：ModelScope 下载（正式版）
    */
-  async _downloadEngine(engineId, version, runtimeId = null, taskInfo = {}) {
+  async _downloadEngine(engineId, version, runtimeId = null, taskInfo = {}, skipRuntimeDownload = false) {
     // 运行时下载
     if (taskInfo.isRuntime) {
       const downloadDir = path.join(PROJECT_ROOT, 'downloads/engines');
@@ -237,6 +267,10 @@ class EngineDownloader {
 
       const repo = taskInfo.runtimeRepo;
       await this._execDownload(taskInfo.taskId, '', repo, taskInfo.runtimeFile, downloadDir);
+
+      // 更新状态：解压中
+      downloadStateManager.setState(taskInfo.taskId, 'unpacking', null, null);
+      eventBus.broadcast('download-progress', { engineId: taskInfo.taskId, status: 'unpacking' });
 
       // 解压到临时目录，解包后合并到引擎目录
       const realEngineId = engineId.split('::')[0];
@@ -250,22 +284,29 @@ class EngineDownloader {
       await fsp.mkdir(tmpExtract, { recursive: true });
       await this._extract(filePath, tmpExtract);
 
-      // 解包单层子目录
-      let sourcePath = tmpExtract;
+      // 运行时 zip 内只有一个顶层文件夹（如 index_tts1.5_engine/），
+      // 该文件夹整体放入引擎目录，不能拆开摊平
       const entries = await fsp.readdir(tmpExtract).catch(() => []);
-      if (entries.length === 1) {
-        const singleDir = path.join(tmpExtract, entries[0]);
-        if ((await fsp.stat(singleDir).catch(() => null))?.isDirectory()) {
-          sourcePath = singleDir;
-        }
+      let runtimeDir = null;
+      for (const e of entries) {
+        try { if ((await fsp.stat(path.join(tmpExtract, e))).isDirectory()) { runtimeDir = e; break; } } catch {}
       }
-
-      // 合并到引擎目录
-      await fsp.mkdir(installPath, { recursive: true });
-      for (const f of await fsp.readdir(sourcePath)) {
-        await fsp.rename(path.join(sourcePath, f), path.join(installPath, f)).catch(async () => {
-          await fsp.cp(path.join(sourcePath, f), path.join(installPath, f), { recursive: true });
+      if (runtimeDir) {
+        const srcDir = path.join(tmpExtract, runtimeDir);
+        const destDir = path.join(installPath, runtimeDir);
+        await fsp.rm(destDir, { recursive: true, force: true }).catch(() => {});
+        await fsp.mkdir(installPath, { recursive: true });
+        await fsp.rename(srcDir, destDir).catch(async () => {
+          await fsp.cp(srcDir, destDir, { recursive: true });
         });
+      } else {
+        // 兼容：zip 内容不是单一文件夹时，合并到引擎目录
+        await fsp.mkdir(installPath, { recursive: true });
+        for (const f of entries) {
+          await fsp.rename(path.join(tmpExtract, f), path.join(installPath, f)).catch(async () => {
+            await fsp.cp(path.join(tmpExtract, f), path.join(installPath, f), { recursive: true });
+          });
+        }
       }
       await fsp.rm(tmpExtract, { recursive: true, force: true }).catch(() => {});
       return;
@@ -378,7 +419,7 @@ class EngineDownloader {
     }
 
     // 普通引擎：运行安装脚本（脚本负责写 .installed）
-    await this._runInstallScript(engineId, version, installPath, runtimeId);
+    await this._runInstallScript(engineId, version, installPath, runtimeId, skipRuntimeDownload);
 
     // 安装脚本可能未写 version，统一补充
     const markerPath = path.join(installPath, '.installed');
@@ -447,6 +488,7 @@ class EngineDownloader {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         stdio: ['pipe', 'pipe', 'pipe']
       });
+      downloadStateManager.setPythonProcess(engineId, proc, version);
 
       // 必须消费 stdout，防止管道缓冲区满导致子进程阻塞
       let stdout = '';
@@ -474,6 +516,9 @@ class EngineDownloader {
         if (code === 0) {
           resolve();
         } else {
+          // 用户主动暂停 → 状态已是 paused，不覆盖
+          const s = downloadStateManager.getFullState(engineId, version);
+          if (s?.status === 'paused') return;
           // 尝试从 stdout JSON 中提取错误信息
           let detail = stderr.trim();
           if (!detail) {
@@ -563,7 +608,7 @@ class EngineDownloader {
    * 运行引擎安装脚本（从 ci/ 目录读取，支持热更新）
    * 优先 .py，回退 .bat；找不到则报错
    */
-  async _runInstallScript(engineId, version, installPath, runtimeId = null) {
+  async _runInstallScript(engineId, version, installPath, runtimeId = null, skipRuntimeDownload = false) {
     const eng = engineManager.getEngine(engineId);
     const parentId = eng?._parentKey;
     const scriptIds = [engineId];
@@ -624,7 +669,9 @@ class EngineDownloader {
       console.log(`Running Python install script: ci/install_${engineId}.py`);
       cmd = python313;
       args = [pyScript, '--install-root', installRoot, '--rocm-path', rocmPath, '--project-root', PROJECT_ROOT];
-      if (runtimeId) {
+      if (skipRuntimeDownload) {
+        args.push('--skip-runtime-download');
+      } else if (runtimeId) {
         args.push('--runtime-id', runtimeId);
       }
       spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' };
@@ -633,7 +680,9 @@ class EngineDownloader {
       cmd = 'cmd.exe';
       args = ['/c', batScript];
       spawnEnv = { ...process.env, INSTALL_ROOT: installRoot, ROCM_PATH: rocmPath, PROJECT_ROOT };
-      if (runtimeId) {
+      if (skipRuntimeDownload) {
+        spawnEnv.NOVAMAX_SKIP_RUNTIME_DOWNLOAD = '1';
+      } else if (runtimeId) {
         spawnEnv.NOVAMAX_RUNTIME_ID = runtimeId;
       }
     }

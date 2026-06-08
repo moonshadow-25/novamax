@@ -42,6 +42,32 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [availableRuntimes, setAvailableRuntimes] = useState([]);
   const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
   const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [idleInfo, setIdleInfo] = useState(null);
+
+  // 引擎空闲倒计时（每秒轮询）
+  useEffect(() => {
+    if (!visible || !model) return;
+    let timer;
+    const poll = async () => {
+      try {
+        const mv = resolveModelVariant(model, []);
+        const info = await ttsStudioService.getEngineIdleInfo(mv);
+        setIdleInfo(info);
+      } catch { setIdleInfo(null); }
+    };
+    poll();
+    timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  }, [visible, model]);
+
+  const formatCountdown = (ms) => {
+    if (!ms || ms <= 0) return '即将关闭';
+    const s = Math.ceil(ms / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
+  };
 
   const refreshEngineStatus = useCallback(async () => {
     try {
@@ -60,10 +86,9 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       setLatestEngineVersion(latestInstalledVersion);
       setEngineInstalled(variantInstalled.length > 0);
 
-      // 检测引擎更新
+      // 检测引擎更新：variantVersions 按 engines.json 顺序排列，index 0 即最新
       if (variantVersions.length > 0 && variantInstalled.length > 0) {
-        const sorted = [...variantVersions].sort((a, b) => b.version.localeCompare(a.version));
-        const latest = sorted[0].version;
+        const latest = variantVersions[0].version;
         setLatestAvailableVersion(latest);
         setEngineUpdateAvailable(latest !== latestInstalledVersion);
       }
@@ -106,9 +131,32 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
     }).catch(() => {});
   }, [visible, refreshEngineStatus]);
 
-  const handleIdleTimeoutChange = async (val) => {
-    setIdleTimeout(val);
-    try { await ttsStudioService.setTtsConfig({ idle_timeout_minutes: val }); } catch {}
+  const handleIdleTimeoutChange = (val) => {
+    setIdleTimeout(val ?? 5);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const et = runtimeEngineTypeRef.current;
+      // 保存运行时配置
+      if (et && runtimeItems.length > 0) {
+        for (const item of runtimeItems) {
+          const val = runtimeValues[item.key];
+          if (val != null) {
+            await ttsStudioService.setEngineRuntimeConfig(et, item.key, val);
+          }
+        }
+      }
+      // 保存闲置超时
+      await ttsStudioService.setTtsConfig({ idle_timeout_minutes: idleTimeout });
+      message.success('设置已保存');
+      onSave?.();
+    } catch (e) {
+      message.error('保存失败: ' + (e?.response?.data?.error || e?.message || '未知错误'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -132,6 +180,12 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
             okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={handleDelete}>
             <Button danger icon={<DeleteOutlined />} size="small">删除卡片</Button>
           </Popconfirm>
+        }
+        footer={
+          <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+            <Button onClick={onClose}>取消</Button>
+            <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+          </Space>
         }
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -185,10 +239,6 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
                   <Slider min={item.min} max={item.max} step={item.step}
                     value={runtimeValues[item.key] ?? item.default}
                     onChange={val => setRuntimeValues(prev => ({ ...prev, [item.key]: val }))}
-                    onAfterChange={val => {
-                      const et = runtimeEngineTypeRef.current;
-                      if (et) ttsStudioService.setEngineRuntimeConfig(et, item.key, val).catch(() => {});
-                    }}
                     marks={{ [item.min]: item.min, [item.default]: item.default, [item.max]: item.max }} />
                 </div>
               ))}
@@ -204,6 +254,11 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
               <InputNumber min={3} max={30} step={1} value={idleTimeout} onChange={handleIdleTimeoutChange} style={{ width: 72 }} />
               <span>分钟后自动关闭以节约资源</span>
             </div>
+            {idleInfo && idleInfo.status === 'running' && idleInfo.activeTasks === 0 && (
+              <div style={{ marginTop: 6, fontSize: 13, color: idleInfo.remainingMs < 60000 ? '#ff4d4f' : '#52c41a' }}>
+                {idleInfo.remainingMs <= 0 ? '⏱ 即将自动关闭...' : `⏱ ${formatCountdown(idleInfo.remainingMs)} 后自动关闭`}
+              </div>
+            )}
           </div>
 
           <Button icon={<FolderOpenOutlined />} onClick={async () => {

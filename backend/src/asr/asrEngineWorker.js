@@ -4,16 +4,13 @@
 import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const { engineType, adapterPath, contract, modelId } = workerData;
+const { engineType, adapterPath, contract, modelId, PROJECT_ROOT } = workerData;
+const ASR_PID_DIR = path.join(PROJECT_ROOT, 'data', 'asr_services');
 let adapter = null;
 let initPromise = null;
 
-const PID_FILE = path.join(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..'),
-  'data', 'asr_services', `.engine-pid-${modelId || engineType}`
-);
+const PID_FILE = path.join(ASR_PID_DIR, `.engine-pid-${modelId || engineType}`);
 
 function log(level, message) {
   parentPort.postMessage({ id: '', type: 'log', payload: { timestamp: Date.now(), level, message: `[asr:${modelId || engineType}] ${message}` } });
@@ -30,8 +27,18 @@ async function getAdapter() {
       log('info', `Loading adapter from ${adapterPath}`);
       const mod = await import(`file://${adapterPath}`);
       const Cls = mod.default || mod.AsrEngineAdapter;
+      if (!Cls) {
+        throw new Error(`在 ${adapterPath} 中未找到适配器类 (expected "default" or "AsrEngineAdapter" export)`);
+      }
       adapter = new Cls(contract);
-      log('info', 'Adapter loaded');
+      // 验证适配器实现了必需的方法
+      const required = ['initialize', 'transcribe', 'dispose', 'health'];
+      for (const method of required) {
+        if (typeof adapter[method] !== 'function') {
+          throw new Error(`适配器缺少必需方法: ${method}()`);
+        }
+      }
+      log('info', 'Adapter loaded and validated');
     })();
   }
   await initPromise;
@@ -91,6 +98,7 @@ async function dispatch(type, payload) {
     case 'dispose':
       log('info', 'Disposing engine');
       await a.dispose();
+      try { fs.unlinkSync(PID_FILE); } catch {}
       adapter = null; initPromise = null;
       pushReport({ event: 'disposed' });
       return { status: 'stopped' };

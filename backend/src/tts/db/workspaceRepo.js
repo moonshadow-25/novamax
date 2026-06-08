@@ -1,11 +1,13 @@
 import path from 'path';
 import fs from 'fs';
-import { PROJECT_ROOT } from '../../config/constants.js';
+let _projectRoot = '';
+
+export function setRoot(r) { _projectRoot = r; }
 
 // DB 存相对路径，避免跨机器绝对路径问题
 function toDbPath(absPath) {
   if (!absPath) return absPath;
-  const root = PROJECT_ROOT.replace(/\\/g, '/') + '/';
+  const root = _projectRoot.replace(/\\/g, '/') + '/';
   const p = absPath.replace(/\\/g, '/');
   return p.startsWith(root) ? p.slice(root.length) : absPath;
 }
@@ -13,7 +15,7 @@ function toDbPath(absPath) {
 function fromDbPath(dbPath) {
   if (!dbPath) return dbPath;
   if (path.isAbsolute(dbPath)) return dbPath; // 兼容旧数据
-  return path.join(PROJECT_ROOT, dbPath);
+  return path.join(_projectRoot, dbPath);
 }
 
 function deserialize(row) {

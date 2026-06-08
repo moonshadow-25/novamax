@@ -322,4 +322,53 @@ router.get('/engines/download/:taskId', async (req, res) => {
   }
 });
 
+/* ── 引擎下载暂停 ── */
+router.post('/engines/download-pause/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+    engineDownloader.pauseDownload(state.id, state.targetQuantization);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 引擎下载恢复 ── */
+router.post('/engines/download-resume/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+
+    // 确定要恢复的引擎和版本
+    let resumeEngineId, resumeVersion, resumeRuntime;
+    if (state._parentEngineId) {
+      // 运行时下载 — 恢复父引擎下载
+      resumeEngineId = state._parentEngineId;
+      resumeVersion = state._engineVersion;
+    } else {
+      resumeEngineId = state.engineId || state.id;
+      resumeVersion = state._engineVersion || state.targetQuantization;
+      resumeRuntime = state._runtimeId || null;
+    }
+    if (!resumeVersion) return res.status(400).json({ error: '无法确定恢复版本' });
+
+    // 清理旧状态，重新开始下载
+    downloadStateManager.deleteState(taskId);
+    const result = await engineDownloader.startDownloadWithDependencies(resumeEngineId, resumeVersion, resumeRuntime);
+    res.json({ success: true, tasks: result.tasks });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 引擎下载取消 ── */
+router.post('/engines/download-cancel/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+    engineDownloader.cancelDownload(state.id, state.targetQuantization);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

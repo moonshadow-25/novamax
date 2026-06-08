@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Space, Typography, message, Spin, Modal, Form, Input, Select, Empty, Collapse } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ApiOutlined } from '@ant-design/icons';
 import WorkspaceCard from '../../components/WorkspaceCard/WorkspaceCard';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import DynamicParamPanel from '../../components/DynamicParamPanel';
@@ -8,11 +9,13 @@ import { ttsStudioService, modelService, engineService } from '../../services/ap
 import { normalizeEngineType } from '../../utils/engineType';
 import FfmpegRequiredModal from '../../components/FfmpegRequiredModal/FfmpegRequiredModal';
 import EngineDownloadModal from '../../components/EngineDownloadModal/EngineDownloadModal';
+import ApiUsageModal from '../../components/ApiUsageModal/ApiUsageModal';
 import './TTS.css';
 
 const { Title } = Typography;
 
 function TTSStudio() {
+  const navigate = useNavigate();
   const [models, setModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [workspaces, setWorkspaces] = useState([]);
@@ -24,6 +27,7 @@ function TTSStudio() {
   const [cloneForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [ffmpegModalOpen, setFfmpegModalOpen] = useState(false);
+  const [apiModalOpen, setApiModalOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [contracts, setContracts] = useState([]);
   const [createEngineParams, setCreateEngineParams] = useState([]);
@@ -84,7 +88,7 @@ function TTSStudio() {
   const handleClone = useCallback(async (values) => {
     setSubmitting(true);
     try { await ttsStudioService.cloneWorkspace(cloneSource.id, values); message.success('克隆成功'); setCloneOpen(false); cloneForm.resetFields(); loadWorkspaces(); }
-    catch (e) { message.error('克隆失败: ' + (e.message || '未知错误')); }
+    catch (e) { message.error('克隆失败: ' + (e?.response?.data?.error || e?.message || '未知错误')); }
     finally { setSubmitting(false); }
   }, [cloneSource, cloneForm, loadWorkspaces]);
 
@@ -127,7 +131,7 @@ function TTSStudio() {
         message.warning(`${ws.engine_type} 引擎未安装，请先下载安装`);
         return;
       }
-      window.open('/tts/workspace/' + ws.id, '_blank');
+      navigate('/tts/workspace/' + ws.id);
     } catch (e) {
       message.error('检查引擎状态失败: ' + (e?.message || '未知错误'));
     }
@@ -138,7 +142,10 @@ function TTSStudio() {
       <div style={{ padding: '16px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Title level={4} style={{ margin: 0 }}>TTS 工作区</Title>
-          <Button icon={<ReloadOutlined />} onClick={handleResetWorkspaces} loading={resetting}>重置工作区</Button>
+          <Space>
+            <Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)}>API 调用</Button>
+            <Button icon={<ReloadOutlined />} onClick={handleResetWorkspaces} loading={resetting}>重置工作区</Button>
+          </Space>
         </div>
         {/* 工作区 */}
         <div style={{ marginBottom: 24 }}>
@@ -228,7 +235,7 @@ function TTSStudio() {
           try {
             const check = await engineService.checkInstalled(engId);
             if (check.installed && pendingOpenWs) {
-              window.open('/tts/workspace/' + pendingOpenWs.id, '_blank');
+              navigate('/tts/workspace/' + pendingOpenWs.id);
               setPendingOpenWs(null);
             } else {
               message.info('引擎已安装，请再次点击打开工作区');
@@ -236,6 +243,12 @@ function TTSStudio() {
           } catch { message.info('请再次点击打开工作区'); }
         }}
         onCancel={() => { setMissingEngineId(''); setMissingEngineInfo(null); setPendingOpenWs(null); }}
+      />
+
+      <ApiUsageModal
+        open={apiModalOpen}
+        onClose={() => setApiModalOpen(false)}
+        type="tts"
       />
     </div>
   );

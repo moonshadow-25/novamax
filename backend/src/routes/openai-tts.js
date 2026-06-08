@@ -104,13 +104,18 @@ router.post('/audio/speech', async (req, res) => {
     const voiceMode = wsParams.voice_mode || ws.voice_mode;
     const isCloneMode = !voiceMode || voiceMode === 'clone';
 
-    // 解析 voice：优先用请求中的 voice，无效则回退到激活的默认 voice
-    const voices = await ttsWorkerManager.send('listVoices', { page: 1, page_size: 500 });
-    const validVoiceIds = new Set((voices.items || []).map(v => v.id));
-    const resolvedVoice = (voice && validVoiceIds.has(voice)) ? voice
-      : ws.active_voice_id && validVoiceIds.has(ws.active_voice_id) ? ws.active_voice_id
-      : ws.voice_id && validVoiceIds.has(ws.voice_id) ? ws.voice_id
-      : '';
+    // 解析 voice：逐个验证
+    const checkVoice = async (vid) => {
+      if (!vid) return null;
+      try {
+        const v = await ttsWorkerManager.send('resolveVoice', { voice_id: vid });
+        return v?.id ? vid : null;
+      } catch (e) { return null; }
+    };
+    const resolvedVoice = (await checkVoice(voice))
+      || (await checkVoice(ws.active_voice_id))
+      || (await checkVoice(ws.voice_id))
+      || '';
 
     if (isCloneMode && !resolvedVoice) {
       return res.status(400).json({

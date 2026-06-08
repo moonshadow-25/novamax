@@ -31,7 +31,6 @@ export const modelService = {
   deleteConfig: (id) => api.delete(`/models/${id}/config`),
   addCustomModel: (data) => api.post('/models/custom', data),
   addAsrModels: (data) => api.post('/models/asr-custom', data),
-  addWhisperModels: (data) => api.post('/models/whisper-custom', data),  // @deprecated 兼容旧调用
   addCloudApiModel: (data) => api.post('/models/cloudapi', data),
   testCloudApiModel: (data) => api.post('/models/cloudapi/test', data),
   generateDescription: (id) => api.post(`/models/${id}/generate-description`)
@@ -127,46 +126,16 @@ export const comfyuiService = {
 };
 
 export const ttsService = {
-  speech: (data) => api.post('/tts/speech', data, { timeout: 0, responseType: 'blob' }),
-  getVoices: () => api.get('/tts/voices'),
-  createVoice: (formData) => api.post('/tts/voices', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  getVoiceAudioUrl: (voiceId) => `/api/tts/voices/${voiceId}/audio`,
-  deleteVoice: (voiceId) => api.delete(`/tts/voices/${voiceId}`),
   getHistory: (workspaceId) => api.get('/tts/history', { params: workspaceId ? { workspace_id: workspaceId } : {} }),
   getHistoryAudioUrl: (itemId) => `/api/tts/history/${itemId}/audio`,
   deleteHistoryItem: (itemId) => api.delete(`/tts/history/${itemId}`),
-  clearHistory: () => api.delete('/tts/history'),
   health: () => api.get('/tts/health'),
-  getEngineContracts: () => api.get('/tts-studio/engine-contracts'),
   getFilesStatus: (modelId) => api.get(`/tts/models/${modelId}/files-status`),
   downloadFile: (modelId, filename) => api.post(`/tts/models/${modelId}/download`, { filename }),
   getDownloadStatus: (taskId) => api.get(`/tts/download-status/${taskId}`),
   pauseDownload: (taskId) => api.post(`/tts/download-pause/${taskId}`),
   resumeDownload: (taskId) => api.post(`/tts/download-resume/${taskId}`),
   cancelDownload: (taskId) => api.post(`/tts/download-cancel/${taskId}`)
-};
-
-/** @deprecated 旧版 whisper 服务，使用 asrModelsService 替代 */
-export const whisperService = {
-  transcribe: (file, language) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    if (language) fd.append('language', language);
-    return api.post('/whisper/transcribe', fd, { timeout: 7200000 });
-  },
-  translate: (file, language) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    if (language) fd.append('language', language);
-    return api.post('/whisper/translate', fd, { timeout: 7200000 });
-  },
-  health: () => api.get('/whisper/health'),
-  getFilesStatus: (modelId) => api.get(`/whisper/models/${modelId}/files-status`),
-  downloadFile: (modelId, filename) => api.post(`/whisper/models/${modelId}/download`, { filename }),
-  getDownloadStatus: (taskId) => api.get(`/whisper/download-status/${taskId}`),
-  pauseDownload: (taskId) => api.post(`/whisper/download-pause/${taskId}`),
-  resumeDownload: (taskId) => api.post(`/whisper/download-resume/${taskId}`),
-  cancelDownload: (taskId) => api.post(`/whisper/download-cancel/${taskId}`)
 };
 
 export const asrModelsService = {
@@ -204,6 +173,7 @@ export const asrStudioService = {
   startEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/start`),
   stopEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/stop`),
   getEngineStatus: () => api.get('/asr-studio/engines/status'),
+  getEngineIdleInfo: (modelId) => api.get('/asr-studio/engine-idle-info', { params: { model_id: modelId } }),
   // Logs
   getLogs: (limit) => api.get(`/asr-studio/logs?limit=${limit || 500}`),
   clearLogs: () => api.delete('/asr-studio/logs'),
@@ -260,6 +230,9 @@ export const engineService = {
   validate: (id, version) => api.post(`/engines/${id}/validate`, { version }),
   download: (id, version, runtimeId) => api.post(`/engines/${id}/download`, { version, runtime: runtimeId }),
   getDownloadStatus: (taskId) => api.get(`/engines/download/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/engines/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/engines/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/engines/download-cancel/${taskId}`),
   uninstall: (id, version) => api.delete(`/engines/${id}/versions/${version}`),
   reinstall: (id, version) => api.post(`/engines/${id}/versions/${version}/reinstall`)
 };
@@ -339,6 +312,7 @@ export const ttsStudioService = {
   getEngineRuntimeConfig: (engineType) => api.get('/tts-studio/engine-runtime-config', { params: { engine_type: engineType } }),
   setEngineRuntimeConfig: (engineType, key, value) => api.put('/tts-studio/engine-runtime-config', { engine_type: engineType, key, value }),
   getEngineMemory: (engineType) => api.get('/tts-studio/engine-memory', { params: { engine_type: engineType } }),
+  getEngineIdleInfo: (engineType) => api.get('/tts-studio/engine-idle-info', { params: { engine_type: engineType } }),
   getTtsConfig: () => api.get('/tts-studio/config'),
   setTtsConfig: (config) => api.put('/tts-studio/config', config),
   startEngine: (engineType) => api.post(`/tts-studio/engines/${encodeURIComponent(engineType)}/start`),

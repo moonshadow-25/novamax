@@ -1,19 +1,22 @@
 import path from 'path';
 import crypto from 'crypto';
-import { PROJECT_ROOT } from '../../config/constants.js';
 import { genId } from '../../utils/idGen.js';
 
+let _projectRoot = '';
+
+export function setRoot(r) { _projectRoot = r; }
+
 function toDbPath(absPath) {
-  if (!absPath) return absPath;
-  const root = PROJECT_ROOT.replace(/\\/g, '/') + '/';
+  if (!absPath || !_projectRoot) return absPath;
+  const root = _projectRoot.replace(/\\/g, '/') + '/';
   const p = absPath.replace(/\\/g, '/');
   return p.startsWith(root) ? p.slice(root.length) : absPath;
 }
 
 function fromDbPath(dbPath) {
-  if (!dbPath) return dbPath;
+  if (!dbPath || !_projectRoot) return dbPath;
   if (path.isAbsolute(dbPath)) return dbPath;
-  return path.join(PROJECT_ROOT, dbPath);
+  return path.join(_projectRoot, dbPath);
 }
 
 function deserialize(row) {

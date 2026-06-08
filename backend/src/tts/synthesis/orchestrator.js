@@ -1,29 +1,31 @@
 import path from 'path';
 import fs from 'fs';
-import { TTS_HISTORY_DIR, TTS_DEFAULTS } from '../../config/constants.js';
 import { genId } from '../../utils/idGen.js';
 import { normalizeEngineType } from '../../utils/engineTypeHelper.js';
 import { sendToEngine } from '../engine/lifecycle.js';
 import { segmentText } from './segmenter.js';
 import { ffmpegConcat, ffmpegConvert } from '../audio/ffmpeg.js';
 
-const { MAX_TEXT_LENGTH_FALLBACK } = TTS_DEFAULTS;
+const MAX_TEXT_LENGTH_FALLBACK = 4000;
 
 export async function synthesize({
   text, voiceRef, engineType, outputFormat, outputDir, params, workspaceId,
   sourceFile, sourceType, modelDir, llmPort, log,
-  engines, historyRepo,
+  engines, historyRepo, ffmpegDir, defaultOutputDir,
 }) {
   const engineEntry = engines.get(normalizeEngineType(engineType));
   engineEntry.lastActiveTime = Date.now();
   log.info(`Synthesis start: ${text.length} chars, voice=${voiceRef.id || '-'}, engine=${engineType}`);
 
-  const resolvedDir = outputDir || TTS_HISTORY_DIR;
+  const resolvedDir = outputDir || defaultOutputDir;
+  fs.mkdirSync(resolvedDir, { recursive: true });
+
+  // no_concat 参数：跳过文本分段，整段直接给引擎
+  const noSegment = params?.no_concat;
   const maxLen = engineEntry?.report?.runtimeConfig?.max_text_length
     || engineEntry?.contract?.capabilities?.max_text_length
     || MAX_TEXT_LENGTH_FALLBACK;
-
-  const segs = await segmentText(text, maxLen, llmPort || 0);
+  const segs = noSegment ? [text] : await segmentText(text, maxLen, llmPort || 0);
   if (segs.length > 1) log.info(`Text segmented: ${segs.length} parts (max=${maxLen}/segment)`);
 
   const results = await enqueueEngineTask(engineEntry, async () => {
@@ -49,19 +51,18 @@ export async function synthesize({
   let audio, actualFormat = outputFormat;
 
   if (results.length === 1) {
-    audio = results[0].audio;
+    audio = Buffer.from(results[0].audio);
   } else {
-    audio = await ffmpegConcat(results, outputFormat, resolvedDir);
+    audio = await ffmpegConcat(results, outputFormat, resolvedDir, ffmpegDir);
   }
 
   if (outputFormat !== 'wav') {
     const tmpWavPath = path.join(resolvedDir, `${genId('tmpwav')}.wav`);
     fs.writeFileSync(tmpWavPath, audio);
     try {
-      audio = await ffmpegConvert(tmpWavPath, outputFormat);
+      audio = await ffmpegConvert(tmpWavPath, outputFormat, ffmpegDir);
     } finally {
-      try { fs.unlinkSync(tmpWavPath); } catch {}
-    }
+      try { fs.unlinkSync(tmpWavPath); } catch {} }
   }
 
   const totalDuration = results.reduce((s, r) => s + (r?.duration_seconds || 0), 0);
@@ -70,7 +71,7 @@ export async function synthesize({
   log.info(`Synthesis complete: ${totalDuration.toFixed(1)}s, RTF=${avgRtf.toFixed(2)}, segments=${segs.length}`);
 
   fs.mkdirSync(resolvedDir, { recursive: true });
-  const outFile = path.join(resolvedDir, buildOutputFilename(voiceRef, text, actualFormat));
+  const outFile = path.join(resolvedDir, buildOutputFilename(voiceRef, text, outputFormat));
   fs.writeFileSync(outFile, audio);
 
   for (const r of results) {
@@ -81,7 +82,7 @@ export async function synthesize({
 
   const historyId = historyRepo.createHistory({
     workspaceId, voiceId: voiceRef.id || null, text, outputFile: outFile,
-    outputFormat: actualFormat, duration: totalDuration, rtf: avgRtf,
+    outputFormat, duration: totalDuration, rtf: avgRtf,
     engineType, params, sourceFile, sourceType
   });
 

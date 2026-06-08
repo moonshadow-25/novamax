@@ -30,8 +30,6 @@ class DownloadStateManager {
   _persist() {
     const records = {};
     for (const [key, state] of this.states.entries()) {
-      // 引擎不持久化：下载不支持断点续传，重启后直接重头下载即可，不需要恢复暂停状态
-      if (state.type === 'engine') continue;
       if (state.status === 'downloading' || state.status === 'paused') {
         records[key] = {
           id: state.id,
@@ -44,7 +42,11 @@ class DownloadStateManager {
           sourceModelId: state.sourceModelId || null,
           sourceModelType: state.sourceModelType || null,
           // ComfyUI 下载需要 modelInfo 才能重建任务
-          modelInfo: state.type === 'comfyui' ? (state._modelInfo || null) : undefined
+          modelInfo: state.type === 'comfyui' ? (state._modelInfo || null) : undefined,
+          // 引擎下载恢复所需
+          _engineVersion: state.type === 'engine' ? state._engineVersion : undefined,
+          _parentEngineId: state.type === 'engine' ? state._parentEngineId : undefined,
+          _runtimeId: state.type === 'engine' ? state._runtimeId : undefined,
         };
       }
     }
@@ -86,6 +88,10 @@ class DownloadStateManager {
           sourceModelId: record.sourceModelId || null,
           sourceModelType: record.sourceModelType || null,
           _modelInfo: record.modelInfo || null,  // ComfyUI 重建任务所需
+          // 引擎下载恢复所需
+          _engineVersion: record._engineVersion || null,
+          _parentEngineId: record._parentEngineId || null,
+          _runtimeId: record._runtimeId || null,
           _restoredFromDisk: true    // 标记为磁盘恢复，路由层据此补算进度
         };
         this.states.set(key, state);

@@ -2,7 +2,6 @@ import { spawn, execSync } from 'child_process';
 import axios from 'axios';
 import net from 'net';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import { getAuxiliaryScriptPath } from '../utils/pathHelper.js';
@@ -20,8 +19,6 @@ import { registerChatCompletionService, registerEmbeddingsService, stopServiceRe
 import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
 import multiConnectService from './multiConnectService.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
 
 const isEmbeddingModel = isEmbeddingModelData;
@@ -801,7 +798,7 @@ class ProcessManager {
     if (model.type === 'asr') {
       // ASR 引擎通过 asrWorkerManager 管理（动态端口，Worker 架构）
       const { default: asrWorkerManager } = await import('../asr/asrWorkerManager.js');
-      const cfg = model.asr_config || model.whisper_config || {};
+      const cfg = model.asr_config || model.asr_config || model.whisper_config || {};
       return asrWorkerManager.send('startEngine', {
         modelId: model.id,
         engineType: model.engine_id || model.engine_type,
@@ -838,7 +835,7 @@ class ProcessManager {
 
   /** @deprecated ASR 引擎已迁移到 asrWorkerManager + asrEngineWorker（Worker 架构，动态端口），此方法仅用于旧版兼容 */
   async _startWhisperLegacyBackend(modelId, model) {
-    const cfg = model.whisper_config || {};
+    const cfg = model.asr_config || model.whisper_config || {};
     // 动态端口：优先使用配置的端口，否则自动分配
     const fixedPort = Number(cfg.flask_port) || 0;
     let port;
@@ -1056,7 +1053,7 @@ class ProcessManager {
           throw new Error('Whisper 模型文件未配置，请先在“管理模型”中下载 ASR 模型');
         }
 
-        const cfg = model.whisper_config || {};
+        const cfg = model.asr_config || model.whisper_config || {};
         const threadValue = Number(cfg.threads);
         const threads = Number.isFinite(threadValue) ? Math.max(1, Math.min(8, threadValue)) : 8;
         const language = String(cfg.language || 'auto');

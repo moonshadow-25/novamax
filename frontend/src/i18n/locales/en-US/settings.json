@@ -1,4 +1,3 @@
 {
-  "modelSettings": "Model Settings",
-  "settingsInProgress": "Settings page is under development... (Model ID: {{modelId}})"
+  "modelSettings": "Model Settings"
 }

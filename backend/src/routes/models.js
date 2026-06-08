@@ -248,11 +248,6 @@ router.post('/models/custom', async (req, res) => {
 router.post('/models/asr-custom', async (req, res) => {
   return handleAddAsrCustom(req, res);
 });
-router.post('/models/whisper-custom', async (req, res) => {
-  res.set('Deprecation', 'true');
-  return handleAddAsrCustom(req, res);
-});
-
 async function handleAddAsrCustom(req, res) {
 
   try {

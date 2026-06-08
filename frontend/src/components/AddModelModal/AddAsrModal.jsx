@@ -3,7 +3,7 @@ import { Modal, Form, Input, Button, Space, Alert, Divider } from 'antd';
 import { FolderOpenOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { systemService, modelService } from '../../services/api';
 
-function AddWhisperModal({ visible, onClose, onSuccess }) {
+function AddAsrModal({ visible, onClose, onSuccess }) {
   const [enginePath, setEnginePath] = useState('');
   const [models, setModels] = useState([{ name: '', path: '' }]);
   const [error, setError] = useState('');
@@ -112,7 +112,7 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
 
   return (
     <Modal
-      title="添加 Whisper 模型"
+      title="添加 ASR 模型"
       open={visible}
       onCancel={handleClose}
       footer={null}
@@ -207,4 +207,4 @@ function AddWhisperModal({ visible, onClose, onSuccess }) {
   );
 }
 
-export default AddWhisperModal;
+export default AddAsrModal;

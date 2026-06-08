@@ -1810,7 +1810,14 @@ const GlobalSettings = () => {
 
     const renderAvailableVersionItem = (version) => {
       const isInstalled = selectedEngine.installed_versions?.some(
-        v => v.version === version.version
+        v => {
+          if (v.version !== version.version) return false;
+          // 多 variant 引擎：版本号相同但 variant 不同不算已安装
+          if (version.variant_id && v.variant_id) {
+            return v.variant_id === version.variant_id;
+          }
+          return true;
+        }
       );
       const ds = allDownloadStates.find(s => s.targetQuantization === version.version);
       const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);

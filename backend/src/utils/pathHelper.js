@@ -1,10 +1,6 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const isProduction = process.env.NODE_ENV === 'production';
+import { fileURLToPath } from 'url';
 
 // ============ 外部配置管理 ============
 
@@ -47,34 +43,24 @@ export function reloadExternalConfig() {
 // ============ 路径获取函数 ============
 
 /**
- * 获取项目根目录
- * - 开发环境: 项目根目录 (novamax_dev/)
- * - 便携版: release 目录
+ * 获取项目根目录 — sentinel 向上遍历，寻找同时存在 backend/ 和 external/ 的目录。
+ * 不依赖 __dirname 层级假设，在开发版、发行版（打包/非打包）所有上下文中行为一致。
  */
 export function getProjectRoot() {
-  // 自动检测：如果 __dirname 包含 /dist 则是 bundle 模式
-  const bundled = __dirname.replace(/\\/g, '/').includes('/dist');
-  let backendDir;
-  if (isProduction || bundled) {
-    backendDir = path.resolve(__dirname, '..');
-  } else {
-    backendDir = path.resolve(__dirname, '../..');
+  const startDir = path.dirname(fileURLToPath(import.meta.url));
+  let d = startDir;
+  const root = path.parse(d).root;
+  while (d !== root && d !== path.dirname(d)) {
+    if (fs.existsSync(path.join(d, 'backend')) && fs.existsSync(path.join(d, 'external'))) {
+      return d;
+    }
+    d = path.dirname(d);
   }
-  const possibleReleaseDir = path.resolve(backendDir, '..');
-
-  // 如果 ../frontend/dist 存在，说明是便携版
-  if (fs.existsSync(path.join(possibleReleaseDir, 'frontend/dist'))) {
-    return possibleReleaseDir;
-  }
-
-  // 否则是开发环境，继续向上一层到项目根目录
-  return path.resolve(backendDir, '..');
+  throw new Error('找不到项目根目录（未检测到 backend/ + external/ 目录）');
 }
 
 /**
  * 获取资源文件路径
- * - 开发环境: 相对于项目根目录
- * - 便携版: 相对于 release 目录
  */
 export function getResourcePath(...parts) {
   const root = getProjectRoot();
@@ -88,12 +74,12 @@ export function getResourcePath(...parts) {
 export function getNodePath() {
   const bundledPath = getResourcePath('external', 'node', 'node.exe');
   const config = loadExternalConfig();
-  
+
   if (config.node && typeof config.node === 'string') {
-    const configPath = path.isAbsolute(config.node) 
-      ? config.node 
+    const configPath = path.isAbsolute(config.node)
+      ? config.node
       : path.resolve(process.cwd(), config.node);
-    
+
     if (fs.existsSync(configPath)) {
       console.log(`  → 使用 Node.js: ${configPath}`);
       return configPath;
@@ -101,7 +87,7 @@ export function getNodePath() {
       console.warn(`  ⚠ 配置的 Node.js 不存在: ${configPath}, 使用默认路径`);
     }
   }
-  
+
   return bundledPath;
 }
 
@@ -112,12 +98,12 @@ export function getNodePath() {
 export function getPythonPath() {
   const bundledPath = getResourcePath('external', 'python313', 'python.exe');
   const config = loadExternalConfig();
-  
+
   if (config.python && typeof config.python === 'string') {
-    const configPath = path.isAbsolute(config.python) 
-      ? config.python 
+    const configPath = path.isAbsolute(config.python)
+      ? config.python
       : path.resolve(process.cwd(), config.python);
-    
+
     if (fs.existsSync(configPath)) {
       console.log(`  → 使用 Python: ${configPath}`);
       return configPath;
@@ -125,7 +111,7 @@ export function getPythonPath() {
       console.warn(`  ⚠ 配置的 Python 不存在: ${configPath}, 使用默认路径`);
     }
   }
-  
+
   return bundledPath;
 }
 
@@ -136,12 +122,12 @@ export function getPythonPath() {
 export function getLlamaCppPath() {
   const bundledPath = getResourcePath('external', 'llamacpp');
   const config = loadExternalConfig();
-  
+
   if (config.llamacpp && typeof config.llamacpp === 'string') {
     const configPath = path.isAbsolute(config.llamacpp)
       ? config.llamacpp
       : path.resolve(process.cwd(), config.llamacpp);
-    
+
     if (fs.existsSync(configPath)) {
       console.log(`  → 使用 llama.cpp: ${configPath}`);
       return configPath;
@@ -149,32 +135,27 @@ export function getLlamaCppPath() {
       console.warn(`  ⚠ 配置的 llama.cpp 不存在: ${configPath}, 使用默认路径`);
     }
   }
-  
+
   return bundledPath;
 }
 
 /**
  * 获取 Python 脚本路径
- * - 所有环境: backend/src/services/ 目录下的脚本
+ * 开发环境：backend/src/services/
+ * 便携版发布：backend/dist/scripts/
  */
 export function getPythonScriptPath(scriptName) {
-  if (isProduction) {
-    // 生产环境: backend/dist/scripts/
-    return path.join(__dirname, 'scripts', scriptName);
-  }
-  // 开发环境: backend/src/services/
-  return path.join(__dirname, '..', 'services', scriptName);
+  const devPath = path.join(getProjectRoot(), 'backend', 'src', 'services', scriptName);
+  if (fs.existsSync(devPath)) return devPath;
+  const releasePath = path.join(getProjectRoot(), 'backend', 'dist', 'scripts', scriptName);
+  if (fs.existsSync(releasePath)) return releasePath;
+  return devPath; // 返回默认路径，让后续调用者处理文件不存在的情况
 }
 
 /**
  * 获取辅助脚本路径
- * - 开发环境: backend/src/<relativePath>
- * - 生产环境: backend/dist/<relativePath>
  */
 export function getAuxiliaryScriptPath(relativePath) {
-  if (isProduction) {
-    return path.join(getProjectRoot(), 'backend', 'dist', relativePath);
-  }
   return path.join(getProjectRoot(), 'backend', 'src', relativePath);
 }
 

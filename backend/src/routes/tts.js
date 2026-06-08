@@ -7,110 +7,16 @@
  * 保持在主线程的：文件读取（音频服务）、模型文件管理。
  */
 import express from 'express';
-import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import ttsWorkerManager from '../tts/ttsWorkerManager.js';
 import modelManager from '../services/modelManager.js';
 import commonDownloader from '../services/commonDownloader.js';
-import { DATA_DIR, MODELS_RUN_DIR, TTS_VOICES_DIR, TTS_DEFAULTS } from '../config/constants.js';
+import { MODELS_RUN_DIR } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
-import { resolveModelDir, findLlmPort } from './ttsRouteHelpers.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: TTS_DEFAULTS.MAX_UPLOAD_SIZE_BYTES } });
 
-/* ────────────────────────────────────────────────────────────────────────
- * 语音合成（通过 TTS Worker）
- * ──────────────────────────────────────────────────────────────────────── */
-router.post('/tts/speech', async (req, res) => {
-  try {
-    const { text, voice: voiceId, engine_type, engine_version, output_format, workspace_id, source_file, ...params } = req.body;
-    if (!text?.trim()) return res.status(400).json({ error: 'text 不能为空' });
-    if (!voiceId) return res.status(400).json({ error: 'voice 不能为空' });
-
-    const result = await ttsWorkerManager.send('synthesize', {
-      text: text.trim(),
-      voiceId,
-      engineType: engine_type || '',
-      engineVersion: engine_version,
-      outputFormat: output_format || 'wav',
-      params,
-      workspaceId: workspace_id,
-      outputDir: '',
-      sourceFile: source_file || '',
-      modelDir: resolveModelDir(engine_type || ''),
-      llmPort: findLlmPort()
-    });
-
-    res.set('Content-Type', `audio/${output_format || 'wav'}`);
-    res.set('X-Audio-Duration', String(result.duration || 0));
-    res.set('X-Segment-Count', String(result.segment_count || 1));
-    res.send(Buffer.from(result.audio?.data || result.audio || []));
-  } catch (e) {
-    const status = e.code === 'INVALID_TEXT' || e.code === 'INVALID_VOICE' ? 400
-      : e.code === 'MODEL_NOT_READY' ? 503
-      : e.code === 'TEXT_TOO_LONG' ? 413
-      : e.code === 'GPU_OOM' ? 507
-      : 500;
-    res.status(status).json({ error: e.message, code: e.code, retryable: e.retryable });
-  }
-});
-
-/* ────────────────────────────────────────────────────────────────────────
- * 音色（通过 TTS Worker）
- * ──────────────────────────────────────────────────────────────────────── */
-router.get('/tts/voices', async (req, res) => {
-  try {
-    const { page, page_size, search } = req.query;
-    const result = await ttsWorkerManager.send('listVoices', {
-      page: parseInt(page) || 1,
-      page_size: parseInt(page_size) || 100,
-      search
-    });
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-router.post('/tts/voices', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file && !req.body.reference_audio_id && req.body.voice_mode !== 'random') {
-      return res.status(400).json({ error: 'clone 模式需要上传参考音频或指定 reference_audio_id' });
-    }
-    // Voice 创建涉及文件写入，仍在主线程处理
-    // 但 DB 写入需要通过 Worker
-    const voice = await createVoiceLocally(req);
-    res.json(voice);
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// 音频文件服务（主线程直接读文件）
-router.get('/tts/voices/:voiceId/audio', (req, res) => {
-  const voicesDir = TTS_VOICES_DIR;
-  if (!fs.existsSync(voicesDir)) return res.status(404).json({ error: '音频不存在' });
-  const prefix = `${req.params.voiceId}_`;
-  const file = fs.readdirSync(voicesDir).find(f => f.startsWith(prefix));
-  if (!file) return res.status(404).json({ error: '音频不存在' });
-  const ext = path.extname(file).slice(1) || 'wav';
-  res.set('Content-Type', `audio/${ext}`);
-  res.send(fs.readFileSync(path.join(voicesDir, file)));
-});
-
-router.delete('/tts/voices/:voiceId', async (req, res) => {
-  try {
-    if (!fs.existsSync(TTS_VOICES_DIR)) return res.json({ success: true });
-    const prefix = `${req.params.voiceId}_`;
-    const file = fs.readdirSync(TTS_VOICES_DIR).find(f => f.startsWith(prefix));
-    if (file) fs.unlinkSync(path.join(TTS_VOICES_DIR, file));
-    res.json({ success: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
 
 /* ────────────────────────────────────────────────────────────────────────
  * 历史（通过 TTS Worker 查 DB，音频文件主线程直接读）
@@ -154,18 +60,6 @@ router.delete('/tts/history/:itemId', async (req, res) => {
   }
 });
 
-router.delete('/tts/history', async (req, res) => {
-  try {
-    const { page_size } = req.query;
-    const history = await ttsWorkerManager.send('getHistory', { page: 1, page_size: parseInt(page_size) || 100 });
-    for (const item of history.items) {
-      await ttsWorkerManager.send('deleteHistoryItem', { id: item.id });
-    }
-    res.json({ success: true, deleted: history.items.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 /* ────────────────────────────────────────────────────────────────────────
  * 健康检查
@@ -244,47 +138,5 @@ router.post('/tts/download-cancel/:taskId', async (req, res) => {
   try { await commonDownloader.cancelDownload(req.params.taskId); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-/* ────────────────────────────────────────────────────────────────────────
- * Voice 创建辅助（主线程写文件 + Worker DB 未直接暴露，临时直接写 DB）
- * ──────────────────────────────────────────────────────────────────────── */
-import crypto from 'crypto';
-const genVid = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
-
-async function createVoiceLocally(req) {
-  const id = genVid('voice');
-  const now = new Date().toISOString();
-  let refPath = null;
-  const mode = req.body.voice_mode || 'clone';
-  const voicesDir = TTS_VOICES_DIR;
-
-  if (mode === 'clone') {
-    if (req.file) {
-      const ext = path.extname(req.file.originalname || '.wav');
-      refPath = path.join(voicesDir, `${id}${ext}`);
-      fs.writeFileSync(refPath, req.file.buffer);
-    } else if (req.body.reference_audio_id) {
-      // 从参考音频复制
-      const refDir = path.join(DATA_DIR, 'tts_services', 'reference_audio');
-      const refs = fs.readdirSync(refDir);
-      const match = refs.find(f => f.startsWith(req.body.reference_audio_id));
-      if (match) {
-        const ext = path.extname(match);
-        refPath = path.join(voicesDir, `${id}${ext}`);
-        fs.copyFileSync(path.join(refDir, match), refPath);
-      }
-    }
-  }
-
-  return ttsWorkerManager.send('createVoice', {
-    id, name: req.body.name || req.file?.originalname || '未命名',
-    voice_mode: mode,
-    reference_audio_path: refPath,
-    instruction: req.body.instruction || null,
-    emotion_preset: req.body.emotion_preset ? (typeof req.body.emotion_preset === 'string' ? JSON.parse(req.body.emotion_preset) : req.body.emotion_preset) : {},
-    engine_meta: {},
-    tags: req.body.tags || []
-  });
-}
 
 export default router;

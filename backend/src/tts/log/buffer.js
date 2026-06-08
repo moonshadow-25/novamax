@@ -1,10 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { TTS_LOGS_DIR, TTS_DEFAULTS } from '../../config/constants.js';
 
-const { LOG_MAX_ENTRIES, LOG_RETENTION_DAYS } = TTS_DEFAULTS;
+const LOG_MAX_ENTRIES = 2000;
+const LOG_RETENTION_DAYS = 7;
 
-export function createLogBuffer() {
+export function createLogBuffer(logsDir) {
   const logs = [];
   let stream = null;
   let streamDate = null;
@@ -16,15 +16,15 @@ export function createLogBuffer() {
 
   function cleanOldLogs() {
     try {
-      if (!fs.existsSync(TTS_LOGS_DIR)) return;
+      if (!fs.existsSync(logsDir)) return;
       const now = Date.now();
-      for (const file of fs.readdirSync(TTS_LOGS_DIR)) {
+      for (const file of fs.readdirSync(logsDir)) {
         const match = /^tts-engine-(\d{4}-\d{2}-\d{2})\.log$/.exec(file);
         if (!match) continue;
         const logDate = new Date(`${match[1]}T00:00:00`).getTime();
         if (Number.isNaN(logDate)) continue;
         if ((now - logDate) / 86400000 > LOG_RETENTION_DAYS) {
-          fs.unlinkSync(path.join(TTS_LOGS_DIR, file));
+          fs.unlinkSync(path.join(logsDir, file));
         }
       }
     } catch {}
@@ -34,9 +34,9 @@ export function createLogBuffer() {
     const today = getDateStr();
     if (today === streamDate) return;
     if (stream) stream.end();
-    fs.mkdirSync(TTS_LOGS_DIR, { recursive: true });
+    fs.mkdirSync(logsDir, { recursive: true });
     cleanOldLogs();
-    stream = fs.createWriteStream(path.join(TTS_LOGS_DIR, `tts-engine-${today}.log`), { flags: 'a' });
+    stream = fs.createWriteStream(path.join(logsDir, `tts-engine-${today}.log`), { flags: 'a' });
     streamDate = today;
   }
 

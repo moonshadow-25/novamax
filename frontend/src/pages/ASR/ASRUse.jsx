@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Select, Input, Card, message, Upload, Tag, Table, Typography, Switch, Space, Badge, Empty, Modal } from 'antd';
-import { SoundOutlined, CopyOutlined, DeleteOutlined, InboxOutlined, ArrowLeftOutlined, FolderOpenOutlined, ClearOutlined } from '@ant-design/icons';
+import { SoundOutlined, CopyOutlined, DeleteOutlined, InboxOutlined, ArrowLeftOutlined, FolderOpenOutlined, ClearOutlined, ApiOutlined } from '@ant-design/icons';
 import { asrService, modelService, asrStudioService } from '../../services/api';
+import ApiUsageModal from '../../components/ApiUsageModal/ApiUsageModal';
 import './ASRUse.css';
 
 const { TextArea } = Input; const { Text } = Typography; const { Dragger } = Upload;
@@ -20,6 +21,7 @@ export default function ASRUse() {
   const [outputMode, setOutputMode] = useState(ls('asr_mode', 'inline'));
   const [prompt, setPrompt] = useState(''); const [streaming, setStreaming] = useState(ls('asr_stream', 'true') !== 'false');
   const [transcribing, setTranscribing] = useState(false); const [resultText, setResultText] = useState('');
+  const [apiModalOpen, setApiModalOpen] = useState(false);
   const [files, setFiles] = useState([]); const [history, setHistory] = useState([]);
   const [outputDir, setOutputDir] = useState(ls('asr_odir', ''));
   const [taskQueue, setTaskQueue] = useState([]); const queueIdRef = useRef(0); const abortRef = useRef(null);
@@ -90,7 +92,7 @@ export default function ASRUse() {
 
   return (
     <div className="asr-use-page">
-      <div className="asr-use-header"><Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>返回</Button><h2>ASR 语音识别</h2></div>
+      <div className="asr-use-header"><Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>返回</Button><h2>ASR 语音识别</h2><Button icon={<ApiOutlined />} onClick={() => setApiModalOpen(true)} style={{ marginLeft: 'auto' }}>API 调用</Button></div>
       <div className="asr-use-content">
         <div className="asr-use-config">
           <Card size="small" title="模型选择">
@@ -126,6 +128,13 @@ export default function ASRUse() {
           <Card size="small" title="输出目录" style={{ marginTop: 12 }}><Space.Compact style={{ width: '100%' }}><Input value={outputDir} onChange={e => setOutputDir(e.target.value)} size="small" /><Button size="small" icon={<FolderOpenOutlined />} onClick={() => asrStudioService.openOutputDir(outputDir)} /><Button size="small" type="primary" onClick={async () => { await asrStudioService.setOutputDir(outputDir); message.success('已保存'); }}>保存</Button></Space.Compact></Card>
         </div>
       </div>
+
+      <ApiUsageModal
+        open={apiModalOpen}
+        onClose={() => setApiModalOpen(false)}
+        type="asr"
+        context={{ modelName: selectedModel?.name }}
+      />
     </div>
   );
 }

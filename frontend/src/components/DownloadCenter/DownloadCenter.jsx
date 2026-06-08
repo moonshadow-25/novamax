@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Drawer, Progress, Button, Space, Tag, Empty, Typography, message } from 'antd';
 import { PauseCircleOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { downloadService, comfyuiService, asrModelsService, ttsService } from '../../services/api';
+import { downloadService, comfyuiService, asrModelsService, ttsService, engineService } from '../../services/api';
 
 const { Text } = Typography;
 
@@ -12,7 +12,7 @@ const formatSpeed = (bytesPerSec) => {
   return `${bytesPerSec} B/s`;
 };
 
-const formatSize = (bytes) => {
+const formatBytes = (bytes) => {
   if (!bytes) return '0 B';
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -20,7 +20,7 @@ const formatSize = (bytes) => {
 };
 
 const summarizeDownloadError = (raw = '') => {
-  const text = String(raw || '').replace(/\uFFFD+/g, '').replace(/\r/g, '').trim();
+  const text = String(raw || '').replace(/�+/g, '').replace(/\r/g, '').trim();
   if (!text) return '下载失败';
   const lower = text.toLowerCase();
   if (lower.includes('chunkedencodingerror') || lower.includes('incompleteread') || lower.includes('connection broken')) {
@@ -35,6 +35,7 @@ const summarizeDownloadError = (raw = '') => {
   const firstLine = text.split('\n').map(s => s.trim()).find(Boolean) || text;
   return firstLine.length > 100 ? `${firstLine.slice(0, 100)}...` : firstLine;
 };
+
 
 const statusMap = {
   downloading: { color: 'processing', label: '下载中' },
@@ -74,7 +75,9 @@ function DownloadCenter({ visible, onClose }) {
 
   const handlePause = async (dl) => {
     try {
-      if (dl.type === 'comfyui') {
+      if (dl.type === 'engine') {
+        await engineService.pauseDownload(dl.id);
+      } else if (dl.type === 'comfyui') {
         await comfyuiService.pauseDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {
         await asrModelsService.pauseDownload(dl.comfyuiTaskId);
@@ -91,7 +94,9 @@ function DownloadCenter({ visible, onClose }) {
 
   const handleResume = async (dl) => {
     try {
-      if (dl.type === 'comfyui') {
+      if (dl.type === 'engine') {
+        await engineService.resumeDownload(dl.id);
+      } else if (dl.type === 'comfyui') {
         await comfyuiService.resumeDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {
         await asrModelsService.resumeDownload(dl.comfyuiTaskId);
@@ -108,7 +113,9 @@ function DownloadCenter({ visible, onClose }) {
 
   const handleCancel = async (dl) => {
     try {
-      if (dl.type === 'comfyui') {
+      if (dl.type === 'engine') {
+        await engineService.cancelDownload(dl.id);
+      } else if (dl.type === 'comfyui') {
         await comfyuiService.cancelDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {
         await asrModelsService.cancelDownload(dl.comfyuiTaskId);
@@ -182,7 +189,7 @@ function DownloadCenter({ visible, onClose }) {
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {dl.status === 'downloading' && (
                       <>
-                        {formatSize(dl.downloadedBytes)} / {formatSize(dl.totalBytes)}
+                        {formatBytes(dl.downloadedBytes)} / {formatBytes(dl.totalBytes)}
                         {dl.speed > 0 && ` - ${formatSpeed(dl.speed)}`}
                       </>
                     )}

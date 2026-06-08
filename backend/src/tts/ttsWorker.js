@@ -10,6 +10,9 @@ import { parentPort, workerData } from 'worker_threads';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { spawn } from 'child_process';
+import { getFfmpegExe } from './audio/ffmpeg.js';
+import { idFromMd5Bytes } from '../utils/voiceIdHelper.js';
 import { TTS_DEFAULTS } from '../config/constants.js';
 import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 
@@ -17,6 +20,10 @@ import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 const PROJECT_ROOT = workerData.PROJECT_ROOT;
 const TTS_CONFIG_PATH = path.join(PROJECT_ROOT, 'data', 'tts_services', 'config.json');
 const TTS_WORKSPACES_DIR = path.join(PROJECT_ROOT, 'data', 'tts_services', 'workspaces');
+const TTS_REF_AUDIO_DIR = path.join(PROJECT_ROOT, 'data', 'tts_services', 'reference_audio');
+const TTS_DB_PATH = path.join(PROJECT_ROOT, 'data', 'tts_services', 'tts.db');
+const TTS_HISTORY_DIR = path.join(PROJECT_ROOT, 'data', 'tts_services', 'history');
+const TTS_LOGS_DIR = path.join(PROJECT_ROOT, 'data', 'logs');
 
 import { openDb } from './db/connection.js';
 import { migrate } from './db/schema.js';
@@ -24,11 +31,15 @@ import * as voiceRepo from './db/voiceRepo.js';
 import * as workspaceRepo from './db/workspaceRepo.js';
 import * as historyRepo from './db/historyRepo.js';
 
+workspaceRepo.setRoot(PROJECT_ROOT);
+historyRepo.setRoot(PROJECT_ROOT);
+
 import { discoverEngines } from './engine/discovery.js';
 import { createRegistry } from './engine/registry.js';
 import { ensureInitialized, disposeEngine, sendToEngine, getStatus } from './engine/lifecycle.js';
 
 const ENGINES_DIR = path.join(PROJECT_ROOT, 'external', 'tts');
+const FFMPEG_DIR = path.join(PROJECT_ROOT, 'external', 'ffmpeg');
 const ENGINE_WORKER_PATH = path.join(PROJECT_ROOT, 'backend', 'src', 'tts', 'engineWorker.js');
 
 // 读取 engines.json 获取版本顺序
@@ -48,8 +59,9 @@ import { createLogBuffer } from './log/buffer.js';
  * 初始化
  * ======================================================================== */
 
-const db = openDb();
-migrate(db);
+const db = openDb(TTS_DB_PATH);
+const dirs = { voices: TTS_WORKSPACES_DIR, workspaces: TTS_WORKSPACES_DIR, refAudio: TTS_REF_AUDIO_DIR, history: TTS_HISTORY_DIR };
+migrate(db, dirs);
 
 // 启动时扫描工作区目录，自动注册不在 DB 中的工作区
 function syncWorkspaces() {
@@ -94,7 +106,48 @@ function syncWorkspaces() {
   }
 }
 const registry = createRegistry();
-const log = createLogBuffer();
+const log = createLogBuffer(TTS_LOGS_DIR);
+const pendingRuntimeConfigs = new Map(); // engineType → { key: value, ... }  引擎未初始化时的暂存配置
+
+function loadRuntimeConfigs() {
+  const rows = db.prepare('SELECT engine_type, key, value FROM tts_engine_runtime_config').all();
+  const configs = {};
+  for (const { engine_type, key, value } of rows) {
+    if (!configs[engine_type]) configs[engine_type] = {};
+    // 尝试还原数字/布尔类型，JSON 解析失败则保留字符串
+    try { configs[engine_type][key] = JSON.parse(value); } catch { configs[engine_type][key] = value; }
+  }
+  return configs;
+}
+
+function saveRuntimeConfigs(configs) {
+  const upsert = db.prepare('INSERT OR REPLACE INTO tts_engine_runtime_config (engine_type, key, value) VALUES (?, ?, ?)');
+  for (const [engineType, cfg] of Object.entries(configs)) {
+    for (const [key, value] of Object.entries(cfg)) {
+      upsert.run(engineType, key, JSON.stringify(value));
+    }
+  }
+}
+
+async function applyPendingRuntimeConfigs(engineType) {
+  const pending = pendingRuntimeConfigs.get(engineType);
+  if (!pending || Object.keys(pending).length === 0) return;
+  const entry = registry.get(engineType);
+  if (!entry) return;
+  for (const [key, value] of Object.entries(pending)) {
+    try { await sendToEngine(entry, 'setRuntimeConfig', { key, value }); } catch {}
+  }
+  pendingRuntimeConfigs.delete(engineType);
+  log.info(`Applied ${Object.keys(pending).length} pending runtime configs for ${engineType}`);
+}
+// 启动时从文件恢复持久化的运行时配置
+const persistedConfigs = loadRuntimeConfigs();
+for (const [engineType, cfg] of Object.entries(persistedConfigs)) {
+  if (cfg && Object.keys(cfg).length > 0) {
+    pendingRuntimeConfigs.set(engineType, { ...cfg });
+  }
+}
+
 try {
   syncWorkspaces();
 } catch (e) {
@@ -126,6 +179,7 @@ parentPort.on('message', async (msg) => {
     const result = await dispatch(type, payload);
     parentPort.postMessage({ id, type: 'result', payload: result !== undefined ? result : {} });
   } catch (e) {
+    log.error(type + ' failed: ' + e.message);
     parentPort.postMessage({
       id, type: 'error',
       payload: { code: e.code || 'INTERNAL_ERROR', message: e.message, retryable: e.retryable !== false }
@@ -136,15 +190,54 @@ parentPort.on('message', async (msg) => {
 async function dispatch(type, payload) {
   switch (type) {
     // Voice
+    case 'uploadReferenceAudio': {
+      const { buffer, originalName } = payload;
+      const ext = path.extname(originalName).toLowerCase().slice(1) || 'wav';
+      const displayName = path.basename(originalName, path.extname(originalName)) || originalName;
+      let audioBuffer = Buffer.from(buffer);
+      let actualExt = ext;
+
+      // ffmpeg 转码非 wav/mp3 格式
+      if (!['wav', 'mp3'].includes(ext)) {
+        const ffExe = getFfmpegExe(FFMPEG_DIR);
+        if (!ffExe) throw new Error('ffmpeg 未安装，无法处理 .' + ext + ' 格式');
+        const tmpIn = path.join(TTS_REF_AUDIO_DIR, '_tmp_in_' + Date.now() + '.' + ext);
+        const tmpOut = path.join(TTS_REF_AUDIO_DIR, '_tmp_out_' + Date.now() + '.wav');
+        fs.writeFileSync(tmpIn, audioBuffer);
+        try {
+          await new Promise((resolve, reject) => {
+            const p = spawn(ffExe, ['-i', tmpIn, '-acodec', 'pcm_s16le', '-ar', '24000', '-ac', '1', tmpOut, '-y']);
+            p.on('close', code => { code !== 0 || !fs.existsSync(tmpOut) ? reject(new Error('转码失败')) : resolve(); });
+            p.on('error', e => reject(e));
+          });
+          audioBuffer = fs.readFileSync(tmpOut);
+          actualExt = 'wav';
+        } finally {
+          try { fs.unlinkSync(tmpIn); } catch {}
+          try { fs.unlinkSync(tmpOut); } catch {}
+        }
+      }
+
+      const md5 = crypto.createHash('md5').update(audioBuffer).digest();
+      const voiceId = idFromMd5Bytes(md5);
+      const filename = voiceId + '_' + displayName + '.' + actualExt;
+      const filePath = path.join(TTS_REF_AUDIO_DIR, filename);
+      fs.mkdirSync(TTS_REF_AUDIO_DIR, { recursive: true });
+      fs.writeFileSync(filePath, audioBuffer);
+
+      return {
+        id: voiceId, voice_id: voiceId, name: displayName,
+        file_path: filePath, file_size: audioBuffer.length,
+        format: actualExt, uploaded_at: new Date().toISOString()
+      };
+    }
     case 'listVoices':
-      return voiceRepo.listVoices(db, payload);
-    case 'createVoice':
-      return voiceRepo.createVoice(db, payload);
+      return voiceRepo.listVoices(payload, TTS_REF_AUDIO_DIR);
     case 'cleanupVoice':
-      voiceRepo.deleteVoice(db, payload.voice_id);
+      voiceRepo.deleteVoice(payload.voice_id, TTS_REF_AUDIO_DIR);
       return { success: true };
     case 'resolveVoice':
-      return resolveVoice(db, payload.voice_id);
+      return resolveVoice(db, payload.voice_id, TTS_REF_AUDIO_DIR);
 
     // Workspace
     case 'getWorkspace':
@@ -172,7 +265,7 @@ async function dispatch(type, payload) {
       return { success: true };
     case 'activateVoice':
       workspaceRepo.activateVoice(db, payload.workspace_id, payload.voice_id);
-      const voice = voiceRepo.getVoice(db, payload.voice_id);
+      const voice = voiceRepo.getVoice(payload.voice_id, TTS_REF_AUDIO_DIR);
       return { workspace_id: payload.workspace_id, active_voice_id: payload.voice_id, voice };
 
     // History
@@ -194,21 +287,24 @@ async function dispatch(type, payload) {
     case 'synthesize': {
       const { text, voiceId, engineType, outputFormat = 'wav', outputDir = '', params = {},
         workspaceId, sourceFile, sourceType, modelDir = '', skipVoiceResolve = false, llmPort } = payload;
-      const voiceRef = skipVoiceResolve ? { skip: true } : resolveVoice(db, voiceId);
-      await ensureInitialized(registry, engineType, modelDir, log, ENGINES_DIR, ENGINE_WORKER_PATH, getVersionOrder(engineType));
+      const voiceRef = skipVoiceResolve ? { skip: true } : resolveVoice(db, voiceId, TTS_REF_AUDIO_DIR);
+      await ensureInitialized(registry, engineType, modelDir, log, ENGINES_DIR, ENGINE_WORKER_PATH, getVersionOrder(engineType), PROJECT_ROOT);
+      await applyPendingRuntimeConfigs(engineType);
 
-      return synthesize({
+      const result = await synthesize({
         text, voiceRef, engineType, outputFormat, outputDir, params, workspaceId,
         sourceFile, sourceType, modelDir, llmPort, log,
-        engines: registry, historyRepo: {
+        engines: registry, ffmpegDir: FFMPEG_DIR, defaultOutputDir: TTS_HISTORY_DIR, historyRepo: {
           createHistory: (opts) => historyRepo.createHistory(db, opts)
         }
       });
+      return result;
     }
 
     // Engine lifecycle
     case 'startEngine':
-      await ensureInitialized(registry, payload.engine_type, payload.model_dir, log, ENGINES_DIR, ENGINE_WORKER_PATH, getVersionOrder(payload.engine_type));
+      await ensureInitialized(registry, payload.engine_type, payload.model_dir, log, ENGINES_DIR, ENGINE_WORKER_PATH, getVersionOrder(payload.engine_type), PROJECT_ROOT);
+      await applyPendingRuntimeConfigs(payload.engine_type);
       return { engine_type: payload.engine_type, status: 'running' };
     case 'stopEngine':
       disposeEngine(registry, payload.engine_type);
@@ -259,13 +355,58 @@ async function dispatch(type, payload) {
     // Engine runtime
     case 'getEngineRuntimeConfig': {
       let cfg = registry.get(payload.engine_type)?.report?.runtimeConfig;
-      if (!cfg) {
-        try { cfg = await sendToEngine(registry.get(payload.engine_type), 'getRuntimeConfig', {}); } catch { cfg = {}; }
+      if (!cfg || Object.keys(cfg).length === 0) {
+        const pending = pendingRuntimeConfigs.get(payload.engine_type);
+        if (pending && Object.keys(pending).length > 0) {
+          cfg = { ...pending };
+        } else {
+          const entry = registry.get(payload.engine_type);
+          if (entry) {
+            try { cfg = await sendToEngine(entry, 'getRuntimeConfig', {}); } catch { cfg = {}; }
+          }
+        }
+      }
+      // 内存中没有则从持久化文件加载
+      if (!cfg || Object.keys(cfg).length === 0) {
+        const persisted = loadRuntimeConfigs();
+        cfg = persisted[payload.engine_type] || {};
       }
       return cfg || {};
     }
-    case 'setEngineRuntimeConfig':
-      return sendToEngine(registry.get(payload.engine_type), 'setRuntimeConfig', { key: payload.key, value: payload.value });
+    case 'setEngineRuntimeConfig': {
+      const entry = registry.get(payload.engine_type);
+
+      // 持久化到文件
+      const persisted = loadRuntimeConfigs();
+      if (!persisted[payload.engine_type]) persisted[payload.engine_type] = {};
+      persisted[payload.engine_type][payload.key] = payload.value;
+      saveRuntimeConfigs(persisted);
+
+      if (entry) {
+        return sendToEngine(entry, 'setRuntimeConfig', { key: payload.key, value: payload.value });
+      }
+      // 引擎未初始化：暂存配置，等引擎启动后应用
+      if (!pendingRuntimeConfigs.has(payload.engine_type)) {
+        pendingRuntimeConfigs.set(payload.engine_type, {});
+      }
+      pendingRuntimeConfigs.get(payload.engine_type)[payload.key] = payload.value;
+      log.info(`Runtime config pending for ${payload.engine_type}: ${payload.key}=${payload.value}`);
+      return { key: payload.key, value: payload.value };
+    }
+    case 'getEngineIdleInfo': {
+      const e = registry.get(payload.engine_type);
+      if (!e) return null;
+      const timeoutMs = registry.getIdleTimeoutMs();
+      const elapsed = Date.now() - (e.lastActiveTime || 0);
+      const remainingMs = Math.max(0, timeoutMs - elapsed);
+      return {
+        status: e.status,
+        lastActiveTime: e.lastActiveTime || null,
+        idleTimeoutMs: timeoutMs,
+        remainingMs,
+        activeTasks: e.activeTasks || 0,
+      };
+    }
     case 'getEnginePid':
       return registry.get(payload.engine_type)?.report?.pid ?? null;
     case 'getEnginePort':

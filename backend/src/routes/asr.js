@@ -5,9 +5,9 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
 import modelManager from '../services/modelManager.js';
 import { PROJECT_ROOT } from '../config/constants.js';
+import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 
 const router = Router();
 const ASR_ENGINE_DIR = path.join(PROJECT_ROOT, 'external', 'asr');
@@ -18,18 +18,23 @@ router.get('/engine-contracts', (req, res) => {
   try {
     if (!fs.existsSync(ASR_ENGINE_DIR)) return res.json([]);
     const contracts = [];
-    for (const d of fs.readdirSync(ASR_ENGINE_DIR, { withFileTypes: true }).filter(x => x.isDirectory())) {
-      if (d.name.startsWith('_temp_')) continue;
-      const cp = path.join(ASR_ENGINE_DIR, d.name, 'contract.json');
-      if (fs.existsSync(cp)) {
-        try {
-          const c = JSON.parse(fs.readFileSync(cp, 'utf-8'));
-          contracts.push({
-            engine_type: c.engine?.type || d.name,
-            engine_name: c.engine?.name || d.name,
-            contract: c,
-          });
-        } catch {}
+    // 扫描 external/asr/{variantId}/{versionDir}/contract.json（两级目录结构）
+    for (const variantEntry of fs.readdirSync(ASR_ENGINE_DIR, { withFileTypes: true }).filter(x => x.isDirectory())) {
+      if (variantEntry.name.startsWith('_temp_')) continue;
+      const variantPath = path.join(ASR_ENGINE_DIR, variantEntry.name);
+      for (const verEntry of fs.readdirSync(variantPath, { withFileTypes: true }).filter(x => x.isDirectory())) {
+        if (verEntry.name.startsWith('_temp_')) continue;
+        const cp = path.join(variantPath, verEntry.name, 'contract.json');
+        if (fs.existsSync(cp)) {
+          try {
+            const c = JSON.parse(fs.readFileSync(cp, 'utf-8'));
+            contracts.push({
+              engine_type: c.engine?.type,
+              engine_name: c.engine?.name,
+              contract: c,
+            });
+          } catch {}
+        }
       }
     }
     res.json(contracts);
@@ -45,10 +50,10 @@ router.get('/models/:modelId/capabilities', (req, res) => {
     const model = modelManager.getById(req.params.modelId);
     if (!model) return res.status(404).json({ error: '模型不存在' });
 
-    // 从已安装的 ASR 引擎 contract 动态读取能力（扫描 external/asr/{variant}/{version}/contract.json）
-    const engineType = model.engine_id || model.engine_type;
+    const engineType = model.engine_id;
+    const normalizedModelType = normalizeEngineType(engineType);
     let supportedLanguages = ['auto', 'zh', 'en'], outputFormats = ['json'], supportsStreaming = false, supportsTranslation = false;
-    if (fs.existsSync(ASR_ENGINE_DIR)) {
+    if (fs.existsSync(ASR_ENGINE_DIR) && engineType) {
       for (const variantDir of fs.readdirSync(ASR_ENGINE_DIR, { withFileTypes: true }).filter(x => x.isDirectory() && !x.name.startsWith('_temp_'))) {
         const variantPath = path.join(ASR_ENGINE_DIR, variantDir.name);
         for (const verDir of fs.readdirSync(variantPath, { withFileTypes: true }).filter(x => x.isDirectory() && !x.name.startsWith('_temp_'))) {
@@ -56,6 +61,8 @@ router.get('/models/:modelId/capabilities', (req, res) => {
           if (!fs.existsSync(cp) || !fs.existsSync(path.join(variantPath, verDir.name, '.installed'))) continue;
           try {
             const c = JSON.parse(fs.readFileSync(cp, 'utf-8'));
+            // 只匹配与模型 engine_type 对应的引擎
+            if (normalizeEngineType(c.engine?.type) !== normalizedModelType) continue;
             if (c.capabilities?.supported_languages) supportedLanguages = c.capabilities.supported_languages;
             if (c.capabilities?.output_formats) outputFormats = c.capabilities.output_formats;
             supportsStreaming = c.capabilities?.supports_streaming || false;
@@ -107,18 +114,18 @@ router.post('/migrate-legacy', async (req, res) => {
           continue;
         }
 
-        fs.mkdirSync(targetV, { recursive: true });
+        await fs.promises.mkdir(targetV, { recursive: true });
         let copied = 0;
-        for (const f of fs.readdirSync(legacyV)) {
+        for (const f of await fs.promises.readdir(legacyV)) {
           const src = path.join(legacyV, f);
           const dest = path.join(targetV, f);
-          if (!fs.existsSync(dest)) { fs.cpSync(src, dest, { recursive: true }); copied++; }
+          if (!fs.existsSync(dest)) { await fs.promises.cp(src, dest, { recursive: true }); copied++; }
         }
         result.engine.push({ version: v.name, status: 'merged', copied });
       }
 
       if (result.engine.length > 0) {
-        try { execSync(`cmd /c "rmdir /s /q "${legacyEngineDir}""`, { timeout: 10000 }); }
+        try { await fs.promises.rm(legacyEngineDir, { recursive: true, force: true }); }
         catch (e) { result.engineDeleteError = e.message; }
       }
     } else {
@@ -129,8 +136,8 @@ router.post('/migrate-legacy', async (req, res) => {
     const asrModelDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'asr');
 
     if (fs.existsSync(legacyModelDir)) {
-      fs.mkdirSync(asrModelDir, { recursive: true });
-      const modelDirs = fs.readdirSync(legacyModelDir, { withFileTypes: true }).filter(d => d.isDirectory());
+      await fs.promises.mkdir(asrModelDir, { recursive: true });
+      const modelDirs = await fs.promises.readdir(legacyModelDir, { withFileTypes: true }).then(dirs => dirs.filter(d => d.isDirectory()));
 
       for (const md of modelDirs) {
         const legacyM = path.join(legacyModelDir, md.name);
@@ -139,7 +146,7 @@ router.post('/migrate-legacy', async (req, res) => {
           result.models.push({ name: md.name, status: 'skipped' });
           continue;
         }
-        fs.cpSync(legacyM, targetM, { recursive: true });
+        await fs.promises.cp(legacyM, targetM, { recursive: true });
         result.models.push({ name: md.name, status: 'migrated' });
       }
 
@@ -147,7 +154,7 @@ router.post('/migrate-legacy', async (req, res) => {
       for (const md of modelDirs) {
         const asrModels = modelManager.getByType('asr') || [];
         for (const m of asrModels) {
-          if (m.path && (m.path.includes(`models_dir\\whisper\\`) || m.path.includes(`models_dir/whisper/`))) {
+          if (m.path && (m.path.includes('models_dir\\whisper\\') || m.path.includes('models_dir/whisper/'))) {
             const newPath = m.path.replace(/models_dir[\\/]whisper[\\/]/, 'models_dir/asr/');
             if (fs.existsSync(newPath)) {
               try { modelManager.update(m.id, { path: newPath }); result.pathUpdated = result.pathUpdated || []; result.pathUpdated.push(m.id); } catch {}
@@ -157,7 +164,7 @@ router.post('/migrate-legacy', async (req, res) => {
       }
 
       if (result.models.length > 0) {
-        try { execSync(`cmd /c "rmdir /s /q "${legacyModelDir}""`, { timeout: 10000 }); }
+        try { await fs.promises.rm(legacyModelDir, { recursive: true, force: true }); }
         catch (e) { result.modelDeleteError = e.message; }
       }
     } else {

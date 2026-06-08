@@ -1,28 +1,27 @@
 import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
-import { FFMPEG_DIR, TTS_HISTORY_DIR } from '../../config/constants.js';
 
-function getFfmpegExe() {
-  if (!fs.existsSync(FFMPEG_DIR)) return null;
+function getFfmpegExe(ffmpegDir) {
+  if (!ffmpegDir || !fs.existsSync(ffmpegDir)) return null;
   let dirs;
-  try { dirs = fs.readdirSync(FFMPEG_DIR, { withFileTypes: true }).filter(d => d.isDirectory()); } catch { return null; }
+  try { dirs = fs.readdirSync(ffmpegDir, { withFileTypes: true }).filter(d => d.isDirectory()); } catch { return null; }
   for (const d of dirs) {
-    const exe = path.join(FFMPEG_DIR, d.name, 'ffmpeg.exe');
-    if (fs.existsSync(path.join(FFMPEG_DIR, d.name, '.installed')) && fs.existsSync(exe)) return exe;
+    const exe = path.join(ffmpegDir, d.name, 'ffmpeg.exe');
+    if (fs.existsSync(path.join(ffmpegDir, d.name, '.installed')) && fs.existsSync(exe)) return exe;
   }
   return null;
 }
 
 export { getFfmpegExe };
 
-export function ffmpegConcat(segments, format, outputDir) {
-  const ffExe = getFfmpegExe();
+export function ffmpegConcat(segments, format, outputDir, ffmpegDir) {
+  const ffExe = getFfmpegExe(ffmpegDir);
   if (!ffExe) throw new Error('ffmpeg 未安装');
 
   const inputFiles = [];
   const tempFiles = [];
-  const outDir = outputDir || TTS_HISTORY_DIR;
+  const outDir = outputDir;
 
   for (const seg of segments) {
     if (seg.output_path && fs.existsSync(seg.output_path)) {
@@ -70,8 +69,8 @@ export function ffmpegConcat(segments, format, outputDir) {
   });
 }
 
-export function ffmpegConvert(inputPath, targetFormat) {
-  const ffExe = getFfmpegExe();
+export function ffmpegConvert(inputPath, targetFormat, ffmpegDir) {
+  const ffExe = getFfmpegExe(ffmpegDir);
   if (!ffExe) throw new Error('ffmpeg 未安装');
 
   const outPath = inputPath.replace(/\.[^.]+$/, `.${targetFormat}`);

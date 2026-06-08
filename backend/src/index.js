@@ -30,7 +30,7 @@ import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
 import enginesRouter from './routes/engines.js';
 import systemRouter from './routes/system.js';
-import whisperRouter from './routes/whisper.js';
+import asrModelsRouter from './routes/asr-models.js';
 import ttsRouter from './routes/tts.js';
 import ttsStudioRouter from './routes/tts-studio.js';
 import openaiTtsRouter from './routes/openai-tts.js';
@@ -176,13 +176,7 @@ app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
 app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
-app.use('/api', whisperRouter);  // /api/whisper/* (旧路径兼容)
-// 新 ASR 路径：/api/asr-models/* → 内部委托到 /api/whisper/*
-app.use('/api/asr-models', (req, res, next) => {
-  res.set('Deprecation', 'false');
-  req.url = '/whisper' + req.url;
-  next();
-}, whisperRouter);
+app.use('/api/asr-models', asrModelsRouter);
 app.use('/api/asr', asrRouter);
 app.use('/api/asr-studio', asrStudioRouter);
 app.use('/api', ttsRouter);

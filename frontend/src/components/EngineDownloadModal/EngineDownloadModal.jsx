@@ -48,7 +48,14 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   const runtimes = latestVariant?.runtimes || engineInfo?.runtimes || [];
 
   const isLatestInstalled = latestVersion
-    ? engineInfo?.installed_versions?.some(v => v.version === latestVersion.version)
+    ? engineInfo?.installed_versions?.some(v => {
+        if (v.version !== latestVersion.version) return false;
+        // 多 variant 引擎（如 ASR 含 whisper+qwen3-asr）：必须 variant_id 也匹配
+        if (latestVersion.variant_id && v.variant_id) {
+          return v.variant_id === latestVersion.variant_id;
+        }
+        return true;
+      })
     : false;
 
   useEffect(() => {
@@ -81,7 +88,7 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   };
 
   const startDownload = async () => {
-    if (!selectedVersion) return;
+    if (!selectedVersion || downloading) return;
 
     setDownloading(true);
 
@@ -98,8 +105,9 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
 
   const pollProgress = (taskList) => {
     let finished = false;
+    let onCompleteCalled = false;  // double guard: 防止异步竞态导致多次回调
     const interval = setInterval(async () => {
-      if (finished) return;
+      if (finished) { clearInterval(interval); return; }
       try {
         const updatedTasks = await Promise.all(
           taskList.map(async (task) => {
@@ -117,7 +125,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
           finished = true;
           clearInterval(interval);
           setDownloading(false);
-          if (allCompleted) onComplete?.();
+          if (allCompleted && !onCompleteCalled) {
+            onCompleteCalled = true;
+            onComplete?.();
+          }
         }
       } catch (error) {
         console.error('Failed to poll progress:', error);
