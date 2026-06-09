@@ -1,11 +1,13 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { encrypt } from '../utils/crypto.js';
 import modelManager from '../services/modelManager.js';
 import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import parameterService from '../services/parameterService.js';
+import engineManager from '../services/engineManager.js';
 import { MODELS_RUN_DIR, DOWNLOADS_DIR, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
@@ -173,6 +175,7 @@ router.get('/models/type/:type', async (req, res) => {
         active_file_ok: checkActiveFileIntegrity(m)
       };
     }));
+
     res.json({ models: modelsWithStatus });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -242,7 +245,11 @@ router.post('/models/custom', async (req, res) => {
   }
 });
 
-router.post('/models/whisper-custom', async (req, res) => {
+router.post('/models/asr-custom', async (req, res) => {
+  return handleAddAsrCustom(req, res);
+});
+async function handleAddAsrCustom(req, res) {
+
   try {
     const { engine_path, models } = req.body;
 
@@ -272,16 +279,16 @@ router.post('/models/whisper-custom', async (req, res) => {
         return res.status(400).json({ error: `模型文件不存在: ${modelPath}` });
       }
 
-      const duplicate = modelManager.getAll().find(m => m.name === name && m.type === 'whisper');
+      const duplicate = modelManager.getAll().find(m => m.name === name && m.type === 'asr');
       if (duplicate) {
-        return res.status(409).json({ error: `已存在同名 Whisper 模型"${name}"，请使用其他名称` });
+        return res.status(409).json({ error: `已存在同名 ASR 模型"${name}"，请使用其他名称` });
       }
 
       const size = fs.statSync(modelPath).size;
       const fileName = path.basename(modelPath);
 
-      const model = await modelManager.create('whisper', {
-        id: `whisper_custom_${name.replace(/[^a-zA-Z0-9一-龥_\-]/g, '_')}`,
+      const model = await modelManager.create('asr', {
+        id: `asr_custom_${name.replace(/[^a-zA-Z0-9一-龥_\-]/g, '_')}`,
         name,
         description: name,
         source: 'custom',
@@ -320,7 +327,7 @@ router.post('/models/whisper-custom', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
+}
 
 router.post('/models/cloudapi', async (req, res) => {
   try {
@@ -499,23 +506,23 @@ router.put('/models/:id', async (req, res) => {
       }
     }
 
-    // Whisper 字段归一化
-    if (currentModel.type === 'whisper') {
+    // ASR 字段归一化（兼容旧 whisper type 和旧 whisper_config key）
+    if (currentModel.type === 'whisper' || currentModel.type === 'asr') {
       if (Object.prototype.hasOwnProperty.call(updates, 'engine_version')) {
         updates.engine_version = updates.engine_version ? String(updates.engine_version).trim() : null;
       }
       if (Object.prototype.hasOwnProperty.call(updates, 'engine_path')) {
         updates.engine_path = updates.engine_path ? String(updates.engine_path).trim() : null;
       }
-      if (Object.prototype.hasOwnProperty.call(updates, 'whisper_config')) {
-        const cfg = updates.whisper_config && typeof updates.whisper_config === 'object' ? updates.whisper_config : {};
+      // 归一化：whisper_config → asr_config
+      const configUpdate = updates.asr_config || updates.whisper_config;
+      if (configUpdate && typeof configUpdate === 'object') {
         const normalized = {};
-        if (cfg.threads !== undefined) normalized.threads = Number(cfg.threads) || 8;
-        if (cfg.language !== undefined) normalized.language = String(cfg.language || 'auto');
-        if (cfg.enable_vad !== undefined) normalized.enable_vad = cfg.enable_vad === true;
-        if (cfg.whisper_port !== undefined) normalized.whisper_port = Number(cfg.whisper_port) || 18181;
-        if (cfg.flask_port !== undefined) normalized.flask_port = Number(cfg.flask_port) || 8281;
-        updates.whisper_config = normalized;
+        if (configUpdate.threads !== undefined) normalized.threads = Number(configUpdate.threads) || 8;
+        if (configUpdate.language !== undefined) normalized.language = String(configUpdate.language || 'auto');
+        // 端口由引擎动态分配，不再存储
+        updates.asr_config = normalized;
+        delete updates.whisper_config;
       }
     }
 

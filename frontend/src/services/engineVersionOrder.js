@@ -13,6 +13,7 @@ export function orderInstalledVersionsByAvailable(availableVersions = [], instal
 
 export function getLatestInstalledVersion(availableVersions = [], installedVersions = []) {
   const installedSet = new Set((installedVersions || []).map(v => v?.version));
+  // 按 engines.json 中的顺序（index 越小越新），找第一个已安装的版本
   return (availableVersions || []).find(v => installedSet.has(v?.version))?.version || null;
 }
 

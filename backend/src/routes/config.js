@@ -74,8 +74,7 @@ router.get('/config/ports', async (req, res) => {
         end: ports.llm_range?.end || ports.llamacpp_range?.[1] || 8089
       },
       comfyui: ports.comfyui || 8188,
-      tts: ports.tts || 5000,
-      whisper: ports.whisper || 5001
+      tts: ports.tts || 5000
     };
 
     res.json({ ports: result });

@@ -14,7 +14,10 @@ import engineManager from './services/engineManager.js';
 import engineDownloader from './services/engineDownloader.js';
 import processManager from './services/processManager.js';
 import comfyuiInstanceManager from './services/comfyuiInstanceManager.js';
+import ttsWorkerManager from './tts/ttsWorkerManager.js';
+import asrWorkerManager from './asr/asrWorkerManager.js';
 import remoteConfigService from './services/remoteConfigService.js';
+import novaAirouterRegistrar from './services/novaAirouterRegistrar.js';
 import { PROJECT_ROOT } from './config/constants.js';
 
 import modelsRouter from './routes/models.js';
@@ -27,8 +30,13 @@ import downloadRouter from './routes/download.js';
 import parametersRouter from './routes/parameters.js';
 import enginesRouter from './routes/engines.js';
 import systemRouter from './routes/system.js';
-import whisperRouter from './routes/whisper.js';
+import asrModelsRouter from './routes/asr-models.js';
 import ttsRouter from './routes/tts.js';
+import ttsStudioRouter from './routes/tts-studio.js';
+import openaiTtsRouter from './routes/openai-tts.js';
+import openaiAsrRouter from './routes/openai-asr.js';
+import asrRouter from './routes/asr.js';
+import asrStudioRouter from './routes/asr-studio.js';
 import multiconnectRouter from './routes/multiconnect.js';
 import chatRouter from './routes/chat.js';
 import eventBus from './services/eventBus.js';
@@ -44,7 +52,23 @@ async function init() {
   await configManager.init();
   await modelManager.init();
   await engineManager.init();
-  comfyuiInstanceManager.init(); // 初始化 ComfyUI 实例管理器
+
+  // 启动时清理残留的 TTS 引擎 Python 进程
+  const ttsModels = modelManager.getByType('tts');
+  for (const m of ttsModels) {
+    try {
+      const info = processManager.getStatus(m.id);
+      if (info.running) {
+        console.log(`[init] 停止残留 TTS 引擎进程: ${m.id}`);
+        await processManager.stopBackend(m.id);
+      }
+    } catch {}
+  }
+
+  ttsWorkerManager.start();
+  asrWorkerManager.start();
+  novaAirouterRegistrar.init();
+  comfyuiInstanceManager.init();
 
   // 一次性清理所有临时状态字段（重构后不再需要持久化这些字段）
   console.log('清理旧的临时状态字段...');
@@ -152,8 +176,13 @@ app.use('/api', downloadRouter);
 app.use('/api', parametersRouter);
 app.use('/api', enginesRouter);
 app.use('/api', systemRouter);
-app.use('/api', whisperRouter);
+app.use('/api/asr-models', asrModelsRouter);
+app.use('/api/asr', asrRouter);
+app.use('/api/asr-studio', asrStudioRouter);
 app.use('/api', ttsRouter);
+app.use('/api/tts-studio', ttsStudioRouter);
+app.use('/v1', openaiTtsRouter);
+app.use('/v1', openaiAsrRouter);
 app.use('/api', multiconnectRouter);
 app.use('/api', chatRouter);
 
@@ -194,6 +223,16 @@ console.log("=".repeat(50));
 async function gracefulShutdown(signal) {
   console.log(`\n[${signal}] Shutting down, deregistering services...`);
   try {
+    await novaAirouterRegistrar.dispose();
+  } catch (err) {
+    console.warn('[shutdown] Error during airouter deregistration:', err.message);
+  }
+  try {
+    await asrWorkerManager.stop();
+  } catch (err) {
+    console.warn('[shutdown] Error during ASR worker stop:', err.message);
+  }
+  try {
     await processManager.shutdown();
   } catch (err) {
     console.warn('[shutdown] Error during deregistration:', err.message);
@@ -231,6 +270,12 @@ init().then(() => {
   // 设为 0 表示不限制，由各路由自己的 AbortSignal 控制超时
   server.requestTimeout = 0;
   server.timeout = 0;
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 70000;
+
+  server.on("error", (err) => {
+    console.error("[server] Server error:", err.message);
+  });
 }).catch(error => {
   console.error('Failed to initialize:', error);
   process.exit(1);

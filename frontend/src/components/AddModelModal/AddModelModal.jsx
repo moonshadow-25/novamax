@@ -5,7 +5,7 @@ import { modelscopeService, modelService, systemService } from '../../services/a
 import { useTranslation } from 'react-i18next';
 import ModelPreviewDialog from './ModelPreviewDialog';
 import AddWorkflowTab from './AddWorkflowTab';
-import AddWhisperModal from './AddWhisperModal';
+import AddAsrModal from './AddAsrModal';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -337,8 +337,8 @@ function AddModelModal({ visible, type, onClose, onSuccess }) {
 
   return (
     <>
-      {type === 'whisper' ? (
-        <AddWhisperModal
+      {type === 'asr' ? (
+        <AddAsrModal
           visible={visible}
           onClose={handleClose}
           onSuccess={onSuccess}

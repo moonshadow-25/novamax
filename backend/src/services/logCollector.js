@@ -118,6 +118,18 @@ class LogCollector {
     return result.slice(-limit);
   }
 
+  /**
+   * 供外部模块（如引擎 adapter）注入日志。
+   * 写入内存缓冲区并持久化到日志文件。
+   * @param {'info'|'warn'|'error'} level
+   * @param {string} message
+   */
+  write(level, message) {
+    this.logs.push({ timestamp: Date.now(), level, message });
+    if (this.logs.length > this.maxSize) this.logs.shift();
+    this._writeToFile(level, message);
+  }
+
   clear() {
     this.logs = [];
   }

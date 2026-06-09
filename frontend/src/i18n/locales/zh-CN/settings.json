@@ -1,4 +1,3 @@
 {
-  "modelSettings": "模型设置",
-  "settingsInProgress": "设置界面开发中... (Model ID: {{modelId}})"
+  "modelSettings": "模型设置"
 }

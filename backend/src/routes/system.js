@@ -8,19 +8,17 @@ import { createHash } from 'crypto';
 import { PassThrough } from 'stream';
 import processManager from '../services/processManager.js';
 import modelManager from '../services/modelManager.js';
+import ttsWorkerManager from '../tts/ttsWorkerManager.js';
 import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
 import logCollector from '../services/logCollector.js';
 import configManager from '../services/configManager.js';
-import { PROJECT_ROOT, MODELS_RUN_DIR, DATA_DIR } from '../config/constants.js';
+import { PROJECT_ROOT, MODELS_RUN_DIR, DATA_DIR, GPUINFO_PATH } from '../config/constants.js';
 
 const execAsync = promisify(exec);
 const router = express.Router();
 
 // CPU 利用率计算：存储上次采样值
 let _prevCpuInfo = null;
-
-// GPU 探测能力缓存：避免 AMD 机器每次都先尝试 nvidia-smi
-let _nvidiaSmiAvailable = null;
 
 function getCpuUsagePercent() {
   const cpus = os.cpus();
@@ -41,8 +39,8 @@ function getCpuUsagePercent() {
 }
 
 /**
- * 获取 GPU / VRAM 信息
- * 优先 nvidia-smi，Windows 下用 PowerShell（过滤虚拟适配器 + 注册表读 64 位 VRAM）
+ * 调用 gpuinfo.exe 获取 GPU 信息（名称、显存、逐进程占用）
+ * 输出 JSON 数组，每个元素对应一块物理 GPU
  */
 async function getAmdSoftwareVersion() {
   if (os.platform() !== 'win32') return null;
@@ -95,6 +93,8 @@ async function getAmdSoftwareVersion() {
   }
 }
 
+let _nvidiaSmiAvailable = true;
+
 export async function getGpuInfo(options = {}) {
   const { namesOnly = false } = options;
 
@@ -135,7 +135,53 @@ export async function getGpuInfo(options = {}) {
     }
   }
 
-  // 2. Windows: 只取 PCI 真实 GPU
+  // 2. gpuinfo.exe
+  try {
+    const { stdout } = await execAsync(`"${GPUINFO_PATH}"`, {
+      encoding: 'utf-8',
+      timeout: 10000
+    });
+
+    const raw = JSON.parse(stdout.trim());
+    const gpuList = Array.isArray(raw) ? raw : [raw];
+
+    if (namesOnly) {
+      return gpuList.map(g => ({ name: g.name }));
+    }
+
+    return gpuList.map(g => {
+      const total = g.memory_sizes?.dedicated_video_memory_bytes || 0;
+      const dedUsed = g.memory_usage?.dedicated_usage_bytes || 0;
+      const shrUsed = g.memory_usage?.shared_usage_bytes || 0;
+      const shrTotal = g.memory_sizes?.shared_system_memory_bytes || 0;
+      const totalUsed = dedUsed + shrUsed;
+      const totalAvail = total + shrTotal;
+
+      return {
+        name: g.name,
+        luid: g.luid || null,
+        total,
+        used: dedUsed,
+        free: total > 0 ? Math.max(0, total - dedUsed) : null,
+        usagePercent: total > 0 ? Math.round((dedUsed / total) * 100) : 0,
+        shared_used: shrUsed,
+        shared_total: shrTotal,
+        total_used: totalUsed,
+        total_avail: totalAvail,
+        processes: (g.processes || []).map(p => ({
+          pid: p.pid,
+          name: p.name,
+          dedicated_bytes: p.dedicated_usage_bytes || 0,
+          shared_bytes: p.shared_usage_bytes || 0,
+          total_bytes: p.total_committed_bytes || 0
+        }))
+      };
+    });
+  } catch (e) {
+    console.warn('[gpuinfo] 获取 GPU 信息失败:', e.message);
+  }
+
+  // 3. Windows: 只取 PCI 真实 GPU
   //   - 直接遍历注册表 0000-000F（避免 Get-ChildItem 在 Properties 子键上权限报错）
   //   - 用 DriverDesc 匹配 WMI GPU 名称，读 qwMemorySize (64 位 QWORD)
   //   - 性能计数器只保留 _phys_0 后缀（物理 GPU，过滤虚拟适配器 LUID）
@@ -335,12 +381,30 @@ router.get('/system/info', async (req, res) => {
       };
     }) : gpus;
 
+    // 构建 GPU 进程 VRAM 查找表（PID → vram_bytes）
+    const gpuProcessMap = new Map();
+    const allGpuProcesses = [];
+    if (gpus) {
+      for (const gpu of gpus) {
+        for (const p of (gpu.processes || [])) {
+          if (p.pid && !gpuProcessMap.has(p.pid)) {
+            gpuProcessMap.set(p.pid, p.total_bytes || 0);
+          }
+          allGpuProcesses.push({ ...p, gpu_name: gpu.name });
+        }
+      }
+    }
+    // 按显存占用降序排列
+    allGpuProcesses.sort((a, b) => b.total_bytes - a.total_bytes);
+
+    const memMap = await getProcessMemoryMap();
 
     const running = processManager.getAllRunning().map(p => {
       const memory = p.pid ? (memMap.get(p.pid) || 0) : 0;
+      const vram = p.pid ? (gpuProcessMap.get(p.pid) || 0) : 0;
       if (p.category === 'model') {
         const model = modelManager.getById(p.id);
-        return { ...p, name: model?.name || p.id, memory };
+        return { ...p, name: model?.name || p.id, memory, vram };
       }
       if (p.category === 'router') {
         const names = p.modelIds.map(id => {
@@ -351,16 +415,18 @@ router.get('/system/info', async (req, res) => {
           ...p,
           name: `${p.type.toUpperCase()} Router`,
           modelNames: names,
-          memory
+          memory,
+          vram
         };
       }
-      return { ...p, memory };
+      return { ...p, memory, vram };
     });
 
     // ComfyUI 实例进程
     const comfyuiProcesses = comfyuiInstanceManager.getRunningProcesses().map(p => {
       const memory = p.pid ? (memMap.get(p.pid) || 0) : 0;
-      return { ...p, memory };
+      const vram = p.pid ? (gpuProcessMap.get(p.pid) || 0) : 0;
+      return { ...p, memory, vram };
     });
     running.push(...comfyuiProcesses);
 
@@ -375,8 +441,60 @@ router.get('/system/info', async (req, res) => {
       port: 3001,
       category: 'system',
       memory: selfMem.rss,
+      vram: gpuProcessMap.get(process.pid) || 0,
       startTime: Date.now() - (process.uptime() * 1000)
     });
+
+    // TTS 引擎（逻辑进程，运行在 Node.js 主进程中）
+    try {
+      const ttsStatus = await ttsWorkerManager.send('isEngineRunning', {});
+      const ttsContracts = await ttsWorkerManager.send('listEngineContracts');
+      const contractMap = new Map();
+      for (const c of ttsContracts) {
+        contractMap.set(c.engine_type, c.contract?.engine?.name || c.engine_type);
+      }
+
+      if (ttsStatus?.engines) {
+        for (const [engineType, info] of Object.entries(ttsStatus.engines)) {
+          let enginePid = null;
+          let engineVram = 0;
+          let vramDetail = null;
+          try {
+            enginePid = await ttsWorkerManager.send('getEnginePid', { engine_type: engineType });
+          } catch (_) {}
+          let enginePort = null;
+          try {
+            enginePort = await ttsWorkerManager.send('getEnginePort', { engine_type: engineType });
+          } catch (_) {}
+          try {
+            const mem = await ttsWorkerManager.send('getEngineMemoryInfo', { engine_type: engineType });
+            if (mem) {
+              engineVram = ((mem.vram_used_mb || 0) + (mem.shared_used_mb || 0)) * 1024 * 1024;
+              vramDetail = {
+                vram_used_mb: mem.vram_used_mb || 0,
+                vram_total_mb: mem.vram_total_mb || 0,
+                shared_used_mb: mem.shared_used_mb || 0,
+                shared_total_mb: mem.shared_total_mb || 0,
+              };
+            }
+          } catch {}
+
+          running.unshift({
+            id: `tts-engine-${engineType}`,
+            pid: enginePid,
+            name: contractMap.get(engineType) || `TTS / ${engineType}`,
+            type: 'tts',
+            mode: info.status || 'stopped',
+            port: enginePort,
+            category: 'system',
+            memory: 0, // 与主进程共享，不计入
+            vram: engineVram,
+            vram_detail: vramDetail,
+            startTime: info.startedAt || null,
+          });
+        }
+      }
+    } catch {}
 
     res.json({
       hardware: {
@@ -400,7 +518,8 @@ router.get('/system/info', async (req, res) => {
         hostname: os.hostname(),
         uptime: os.uptime()
       },
-      processes: running
+      processes: running,
+      gpu_processes: allGpuProcesses
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -418,6 +537,111 @@ router.get('/system/logs', (req, res) => {
 router.delete('/system/logs', (req, res) => {
   logCollector.clear();
   res.json({ success: true });
+});
+
+// ========== 引擎日志 ==========
+
+// 引擎日志文件缓存（2 秒内不重复读盘）
+let _fileLogCache = { ts: 0, entries: [] };
+
+router.get('/system/logs/tts', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 500;
+    const level = req.query.level || 'all';
+
+    // 1. 从 Worker 内存缓冲区获取日志
+    const workerResult = await ttsWorkerManager.send('getTtsLogs', { limit: 9999, level: 'all' });
+    const workerLogs = (workerResult?.logs || []);
+
+    // 2. 读取引擎日志文件（2 秒缓存，只读最后 200 行/文件）
+    const now = Date.now();
+    let fileLogs;
+    if (_fileLogCache.entries.length && (now - _fileLogCache.ts) < 2000) {
+      fileLogs = _fileLogCache.entries;
+    } else {
+      const logsDir = path.join(DATA_DIR, 'logs');
+      fileLogs = [];
+      if (fs.existsSync(logsDir)) {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const engineLogFiles = fs.readdirSync(logsDir)
+          .filter(f => f.startsWith('tts-engine-') && f.endsWith('.log') && f.includes(today));
+        for (const f of engineLogFiles) {
+          try {
+            const content = fs.readFileSync(path.join(logsDir, f), 'utf-8');
+            const lines = content.split('\n').filter(Boolean).slice(-200);
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.t && typeof entry.t === 'number') {
+                  fileLogs.push({ timestamp: entry.t, level: entry.l || 'info', message: entry.m || '' });
+                }
+              } catch {
+                // 兼容旧格式：[ISO_TS] message
+                const match = line.match(/^\[([^\]]+)\]\s+(.*)/);
+                if (match) {
+                  const ts = new Date(match[1]).getTime();
+                  if (!Number.isNaN(ts)) {
+                    const msg = match[2];
+                    const lvl = msg.toLowerCase().includes('error') || msg.toLowerCase().includes('fail') ? 'error'
+                      : msg.toLowerCase().includes('warn') ? 'warn' : 'info';
+                    fileLogs.push({ timestamp: ts, level: lvl, message: msg });
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+      _fileLogCache = { ts: now, entries: fileLogs };
+    }
+
+    // 3. 合并、去重、排序、过滤
+    const allLogs = [...workerLogs, ...fileLogs]
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    const seen = new Set();
+    const deduped = allLogs.filter(l => {
+      const key = `${l.timestamp}|${l.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const filtered = level === 'all' ? deduped : deduped.filter(l => l.level === level);
+    res.json({ logs: filtered.slice(-limit), _diag: { workerCount: workerResult?._count ?? -1, fileCount: fileLogs.length, total: deduped.length } });
+  } catch {
+    res.json({ logs: [] });
+  }
+});
+
+router.delete('/system/logs/tts', async (req, res) => {
+  try {
+    await ttsWorkerManager.send('clearTtsLogs');
+    res.json({ success: true });
+  } catch {
+    res.json({ success: true });
+  }
+});
+
+router.get('/system/logs/engines', (req, res) => {
+  const logsDir = path.join(DATA_DIR, 'logs');
+  if (!fs.existsSync(logsDir)) return res.json({ files: [] });
+
+  const files = fs.readdirSync(logsDir)
+    .filter(f => f.startsWith('tts-engine-') && f.endsWith('.log'))
+    .map(f => ({ name: f, path: path.join(logsDir, f) }));
+  res.json({ files });
+});
+
+router.get('/system/logs/engines/:filename', (req, res) => {
+  const filePath = path.join(DATA_DIR, 'logs', req.params.filename);
+  if (!filePath.startsWith(path.join(DATA_DIR, 'logs')) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: '日志不存在' });
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter(Boolean).slice(-500);
+  res.json({ filename: req.params.filename, lines });
 });
 
 // ========== 关闭NovaMax服务器 ==========
@@ -656,7 +880,7 @@ const STORAGE_TYPES = {
   llm: { label: 'LLM 模型', dir: 'llm' },
   comfyui: { label: 'ComfyUI 模型', dir: 'comfyui' },
   tts: { label: 'TTS 模型', dir: 'tts' },
-  whisper: { label: 'Whisper 模型', dir: 'whisper' }
+  asr: { label: 'ASR 模型', dir: 'asr' }
 };
 
 /** 递归计算目录大小 */

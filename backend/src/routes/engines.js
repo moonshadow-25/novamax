@@ -1,11 +1,70 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import engineManager from '../services/engineManager.js';
 import engineDownloader from '../services/engineDownloader.js';
+import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import processManager from '../services/processManager.js';
 import { getGpuInfo } from './system.js';
 
 const router = express.Router();
+
+function injectLocalTtsVariants(ttsEngine, installedVersions) {
+  if (!ttsEngine) return ttsEngine;
+
+  const variants = Array.isArray(ttsEngine.variants) ? [...ttsEngine.variants] : [];
+  const knownIds = new Set(variants.map(v => String(v?.id || '').toLowerCase()));
+
+  for (const ver of installedVersions || []) {
+    const contractPath = path.join(ver.path, 'contract.json');
+    if (!fs.existsSync(contractPath)) continue;
+
+    let contract;
+    try {
+      contract = JSON.parse(fs.readFileSync(contractPath, 'utf-8'));
+    } catch {
+      continue;
+    }
+
+    const type = contract?.engine?.type;
+    const name = contract?.engine?.name;
+    if (!type || knownIds.has(String(type).toLowerCase())) continue;
+
+    variants.push({
+      id: type,
+      name: name || type,
+      source: 'local',
+      versions: [{ version: ver.version, local_only: true }]
+    });
+    knownIds.add(String(type).toLowerCase());
+  }
+
+  return { ...ttsEngine, variants };
+}
+
+// TTS 各 variant 的默认运行时环境（当远程配置未提供 runtimes 时兜底）
+const TTS_DEFAULT_RUNTIMES = {
+  indextts2: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts2_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ],
+  indextts15: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts1.5_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ],
+  omnivoice: [
+    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/omnivoice_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
+  ]
+};
+
+function ensureTtsRuntimes(ttsEngine) {
+  if (!ttsEngine || !Array.isArray(ttsEngine.variants)) return ttsEngine;
+  const variants = ttsEngine.variants.map(v => {
+    if (Array.isArray(v.runtimes) && v.runtimes.length > 0) return v;
+    const defaults = TTS_DEFAULT_RUNTIMES[v.id] || [];
+    return { ...v, runtimes: defaults };
+  });
+  return { ...ttsEngine, variants };
+}
 
 function getLlamacppVariantPriority(gpus) {
   const gpuNames = Array.isArray(gpus)
@@ -58,8 +117,17 @@ router.get('/engines', async (req, res) => {
         s => s.type === 'engine' && (s.engineId === id || s.id === id)
       );
 
+      let engineWithLocalVariants = id === 'tts'
+        ? injectLocalTtsVariants(engine, installed)
+        : engine;
+
+      // TTS 兜底：远程配置缺少 runtimes 时注入默认值
+      if (id === 'tts') {
+        engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
+      }
+
       result[id] = {
-        ...engine,
+        ...engineWithLocalVariants,
         installed: installed.length > 0,
         installed_versions: installed,
         broken_versions: broken,
@@ -93,8 +161,16 @@ router.get('/engines/:id', async (req, res) => {
     const installedSet = new Set(installed.map(v => v.version));
     const defaultVersion = (engineManager.getEngineVersions(id).find(v => installedSet.has(v.version))?.version) || null;
 
+    let engineWithLocalVariants = id === 'tts'
+      ? injectLocalTtsVariants(engine, installed)
+      : engine;
+
+    if (id === 'tts') {
+      engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
+    }
+
     res.json({
-      ...engine,
+      ...engineWithLocalVariants,
       installed: installed.length > 0,
       installed_versions: installed,
       broken_versions: broken,
@@ -111,7 +187,12 @@ router.get('/engines/:id', async (req, res) => {
 router.get('/engines/:id/check', async (req, res) => {
   try {
     const { id } = req.params;
-    const engine = engineManager.getEngine(id);
+    let engine = engineManager.getEngine(id);
+
+    if (!engine) {
+      const engines = engineManager.getEngines();
+      engine = (engines.tts?.variants || []).find(e => normalizeEngineType(e.id) === normalizeEngineType(id));
+    }
 
     if (!engine) {
       return res.status(404).json({ error: 'Engine not found' });
@@ -183,7 +264,7 @@ router.delete('/engines/:id/versions/:version', async (req, res) => {
       llamacpp: ['llm'],
       comfyui:  ['comfyui'],
       tts:      ['tts'],
-      whisper:  ['whisper'],
+      asr:      ['whisper'],
       rocm:     ['llm', 'comfyui']   // rocm 是 llamacpp/comfyui 的依赖
     };
 
@@ -211,9 +292,9 @@ router.delete('/engines/:id/versions/:version', async (req, res) => {
 router.post('/engines/:id/download', async (req, res) => {
   try {
     const { id } = req.params;
-    const { version } = req.body;
+    const { version, runtime } = req.body;
 
-    const result = await engineDownloader.startDownloadWithDependencies(id, version);
+    const result = await engineDownloader.startDownloadWithDependencies(id, version, runtime || null);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -239,6 +320,55 @@ router.get('/engines/download/:taskId', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+/* ── 引擎下载暂停 ── */
+router.post('/engines/download-pause/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+    engineDownloader.pauseDownload(state.id, state.targetQuantization);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 引擎下载恢复 ── */
+router.post('/engines/download-resume/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+
+    // 确定要恢复的引擎和版本
+    let resumeEngineId, resumeVersion, resumeRuntime;
+    if (state._parentEngineId) {
+      // 运行时下载 — 恢复父引擎下载
+      resumeEngineId = state._parentEngineId;
+      resumeVersion = state._engineVersion;
+    } else {
+      resumeEngineId = state.engineId || state.id;
+      resumeVersion = state._engineVersion || state.targetQuantization;
+      resumeRuntime = state._runtimeId || null;
+    }
+    if (!resumeVersion) return res.status(400).json({ error: '无法确定恢复版本' });
+
+    // 清理旧状态，重新开始下载
+    downloadStateManager.deleteState(taskId);
+    const result = await engineDownloader.startDownloadWithDependencies(resumeEngineId, resumeVersion, resumeRuntime);
+    res.json({ success: true, tasks: result.tasks });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 引擎下载取消 ── */
+router.post('/engines/download-cancel/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const state = downloadStateManager.getFullState(taskId);
+    if (!state || state.type !== 'engine') return res.status(404).json({ error: 'Task not found' });
+    engineDownloader.cancelDownload(state.id, state.targetQuantization);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

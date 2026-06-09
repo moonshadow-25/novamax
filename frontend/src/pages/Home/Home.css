@@ -206,3 +206,20 @@
 .engine-update-banner {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
+
+/* 深色主题 */
+[data-theme='dark'] .home-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .add-model-card {
+  border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+}
+
+[data-theme='dark'] .add-model-content {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+[data-theme='dark'] .add-icon {
+  color: rgba(255, 255, 255, 0.65) !important;
+}

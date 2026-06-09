@@ -341,8 +341,8 @@ class LlmDownloader extends EventEmitter {
           modelName: engine?.name || state.engineId || state.id,
           type: 'engine'
         };
-      } else if (state.type === 'comfyui' || state.type === 'whisper' || state.type === 'tts') {
-        // ComfyUI / Whisper / TTS 文件下载
+      } else if (state.type === 'comfyui' || state.type === 'asr' || state.type === 'tts') {
+        // ComfyUI / ASR / TTS 文件下载
         return {
           ...state,
           modelId: state.id,

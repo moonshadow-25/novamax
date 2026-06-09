@@ -2,7 +2,6 @@ import { spawn, execSync } from 'child_process';
 import axios from 'axios';
 import net from 'net';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import { getAuxiliaryScriptPath } from '../utils/pathHelper.js';
@@ -20,8 +19,6 @@ import { registerChatCompletionService, registerEmbeddingsService, stopServiceRe
 import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
 import multiConnectService from './multiConnectService.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
 
 const isEmbeddingModel = isEmbeddingModelData;
@@ -29,7 +26,7 @@ const isEmbeddingModel = isEmbeddingModelData;
 class ProcessManager {
   constructor() {
     this.processes = new Map(); // modelId -> process info
-    this.routers = new Map(); // type -> router info (llm, tts, whisper)
+    this.routers = new Map(); // type -> router info (llm, tts)
     this.allocatedPorts = new Set();
     this.mode = 'router'; // 'router' or 'single'
   }
@@ -63,8 +60,7 @@ class ProcessManager {
     const configPorts = configManager.get('ports') || {};
     const portMap = {
       comfyui: configPorts.comfyui || DEFAULT_PORTS.COMFYUI,
-      tts: configPorts.tts || DEFAULT_PORTS.TTS,
-      whisper: configPorts.whisper || DEFAULT_PORTS.WHISPER
+      tts: configPorts.tts || DEFAULT_PORTS.TTS
     };
 
     const basePort = portMap[type];
@@ -213,7 +209,8 @@ class ProcessManager {
         eventBus.broadcast('model-updated', { modelId });
         const embedding = isEmbeddingModel(model);
         const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-        register(port).catch((err) =>
+        const maxConc = effectiveParams.parallel || 1;
+        register(port, maxConc).catch((err) =>
           console.warn(`[service-registrar] CloudAPI registration failed: ${err.message}`)
         );
       }
@@ -456,7 +453,8 @@ class ProcessManager {
       await startupResult;
       const embedding = isEmbeddingModel(model);
       const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-      register(port).catch((err) =>
+      const maxConc = effectiveParams.parallel || 1;
+      register(port, maxConc).catch((err) =>
         console.warn(`[service-registrar] Single model registration failed: ${err.message}`)
       );
 
@@ -527,13 +525,18 @@ class ProcessManager {
 
     const hasEmbedding = downloadedModels.some(isEmbeddingModel);
     const hasChat = downloadedModels.some((model) => !isEmbeddingModel(model));
+    // 路由并发 = 所有已加载模型的 parallel 之和
+    const routerMaxConc = downloadedModels.reduce((sum, m) => {
+      const params = parameterService.getEffectiveParameters(m);
+      return sum + (params.parallel || 1);
+    }, 0);
     if (hasEmbedding) {
-      registerEmbeddingsService(router.port).catch((err) =>
+      registerEmbeddingsService(router.port, routerMaxConc).catch((err) =>
         console.warn(`[service-registrar] Router embeddings registration failed: ${err.message}`)
       );
     }
     if (hasChat) {
-      registerChatCompletionService(router.port).catch((err) =>
+      registerChatCompletionService(router.port, routerMaxConc).catch((err) =>
         console.warn(`[service-registrar] Router chat registration failed: ${err.message}`)
       );
     }
@@ -576,7 +579,8 @@ class ProcessManager {
       if (loadedModel?.status?.value === 'loaded') {
         const embedding = isEmbeddingModel(model);
         const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
-        register(router.port).catch((err) =>
+        const params = parameterService.getEffectiveParameters(model);
+        register(router.port, params.parallel || 1).catch((err) =>
           console.warn(`[service-registrar] Router model registration failed: ${err.message}`)
         );
         return { port: router.port, status: MODEL_STATUS.RUNNING, mode: 'router' };
@@ -791,8 +795,17 @@ class ProcessManager {
       throw new Error('Backend already running');
     }
 
-    if (model.type === 'whisper') {
-      return this._startWhisperLegacyBackend(modelId, model);
+    if (model.type === 'asr') {
+      // ASR 引擎通过 asrWorkerManager 管理（动态端口，Worker 架构）
+      const { default: asrWorkerManager } = await import('../asr/asrWorkerManager.js');
+      const cfg = model.asr_config || model.asr_config || model.whisper_config || {};
+      return asrWorkerManager.send('startEngine', {
+        modelId: model.id,
+        engineType: model.engine_id || model.engine_type,
+        modelFilePath: model.path,
+        language: cfg.language,
+        threads: cfg.threads || 8,
+      });
     }
 
     if (model.type === 'tts') {
@@ -820,14 +833,21 @@ class ProcessManager {
     }
   }
 
+  /** @deprecated ASR 引擎已迁移到 asrWorkerManager + asrEngineWorker（Worker 架构，动态端口），此方法仅用于旧版兼容 */
   async _startWhisperLegacyBackend(modelId, model) {
-    const cfg = model.whisper_config || {};
-    const port = Number(cfg.flask_port) || 8281;
-
-    if (!(await this.isPortAvailable(port))) {
-      throw new Error(`端口 ${port} 已被占用，请在 Whisper 配置中修改 Flask 端口后重试`);
+    const cfg = model.asr_config || model.whisper_config || {};
+    // 动态端口：优先使用配置的端口，否则自动分配
+    const fixedPort = Number(cfg.flask_port) || 0;
+    let port;
+    if (fixedPort > 0) {
+      if (!(await this.isPortAvailable(fixedPort))) {
+        throw new Error(`端口 ${fixedPort} 已被占用`);
+      }
+      port = fixedPort;
+      this.allocatedPorts.add(port);
+    } else {
+      port = await this.allocatePort('whisper');
     }
-    this.allocatedPorts.add(port);
 
     try {
       const process = await this.spawnBackend(model, port);
@@ -848,7 +868,8 @@ class ProcessManager {
         type: model.type,
         logs: [],
         ready: false,
-        logStream
+        logStream,
+        lastActivity: Date.now()
       });
 
       this._attachLegacyProcessListeners(modelId, process, (log) => {
@@ -1027,27 +1048,28 @@ class ProcessManager {
         );
       }
 
-      case 'whisper': {
+      case 'asr': {
         if (!model.path) {
           throw new Error('Whisper 模型文件未配置，请先在“管理模型”中下载 ASR 模型');
         }
 
-        const cfg = model.whisper_config || {};
+        const cfg = model.asr_config || model.whisper_config || {};
         const threadValue = Number(cfg.threads);
         const threads = Number.isFinite(threadValue) ? Math.max(1, Math.min(8, threadValue)) : 8;
         const language = String(cfg.language || 'auto');
         const enableVad = cfg.enable_vad === true;
-        const whisperPort = Number(cfg.whisper_port) || 18181;
-        const flaskPort = Number(cfg.flask_port) || port || 8281;
+        const fixedWhisperPort = Number(cfg.whisper_port) || 0;
+        const whisperPort = fixedWhisperPort > 0 ? fixedWhisperPort : await this.allocatePort('whisper');
+        const flaskPort = port;
 
-        const defaultVersion = model.engine_version || engineManager.getDefaultVersion('whisper');
+        const defaultVersion = model.engine_version || engineManager.getDefaultVersion('asr');
         if (!defaultVersion) {
-          throw new Error('请先安装 whisper 引擎');
+          throw new Error('请先安装 ASR 引擎');
         }
 
-        const whisperEnginePath = engineManager.getEnginePath('whisper', defaultVersion);
+        const whisperEnginePath = engineManager.getEnginePath('asr', defaultVersion);
         if (!whisperEnginePath) {
-          throw new Error(`whisper 引擎版本 ${defaultVersion} 未找到`);
+          throw new Error(`ASR 引擎版本 ${defaultVersion} 未找到`);
         }
 
         const whisperPython = path.join(whisperEnginePath, 'venv', 'Scripts', 'python.exe');
@@ -1092,7 +1114,8 @@ class ProcessManager {
 
         return spawn(whisperPython, args, {
           cwd: whisperEnginePath,
-          shell: false
+          shell: false,
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
         });
       }
 
@@ -1273,6 +1296,7 @@ class ProcessManager {
     return processInfo.logs;
   }
 
+  /** @deprecated ASR 就绪检测已由 asrEngineWorker 的 report 机制替代 */
   async _monitorWhisperReadiness(modelId, port, maxAttempts = 60) {
     const processInfo = this.processes.get(modelId);
     if (!processInfo || processInfo.ready || processInfo._whisperReadyChecking) return;
@@ -1302,6 +1326,7 @@ class ProcessManager {
     }
   }
 
+  /** @deprecated ASR 就绪检测已由 asrEngineWorker 的 report 机制替代 */
   _isWhisperReadyLog(log = '') {
     return log.includes('Running on http://') || log.includes('服务地址:') || log.includes('Serving on http://');
   }
@@ -1352,3 +1377,4 @@ class ProcessManager {
 }
 
 export default new ProcessManager();
+

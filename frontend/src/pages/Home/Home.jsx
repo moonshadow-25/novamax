@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse } from 'antd';
-import { SearchOutlined, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined } from '@ant-design/icons';
+import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse, Alert, Card } from 'antd';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined, SoundOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { setLocale } from '../../i18n';
+import { useTheme } from '../../contexts/ThemeContext';
+import { normalizeEngineType } from '../../utils/engineType';
 import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
@@ -11,6 +13,7 @@ import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
 import ComfyUIInstanceCard from '../../components/ComfyUIInstanceCard/ComfyUIInstanceCard';
 import ComfyUIInstanceSettings from '../../components/ComfyUIInstanceSettings/ComfyUIInstanceSettings';
 import MultiConnectModal from '../../components/MultiConnectModal/MultiConnectModal';
+import TTSStudio from '../TTS/TTSStudio';
 import './Home.css';
 
 const { Header, Content } = Layout;
@@ -20,7 +23,7 @@ const MODEL_TYPES = [
   { key: 'llm', label: 'LLM' },
   { key: 'comfyui', label: 'ComfyUI' },
   { key: 'tts', label: 'TTS' },
-  { key: 'whisper', label: 'Whisper' }
+  { key: 'asr', label: 'ASR' }
 ];
 
 const DEFAULT_FILTER_OPTIONS = (t, favorites, downloadedModels, customModels, cloudApiModels) => [
@@ -41,7 +44,7 @@ const COMFYUI_FILTER_OPTIONS = (t) => [
 
 // 其他类型暂时使用空选项，后续可以根据需要调整
 const TTS_FILTER_OPTIONS = () => [];
-const WHISPER_FILTER_OPTIONS = () => [];
+const ASR_FILTER_OPTIONS = () => [];
 
 function Home() {
   const { t, i18n } = useTranslation(['home', 'common']);
@@ -49,9 +52,9 @@ function Home() {
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
-    return ['llm', 'comfyui', 'tts', 'whisper'].includes(tab) ? tab : 'llm';
+    return ['llm', 'comfyui', 'tts', 'asr'].includes(tab) ? tab : 'llm';
   });
-  const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', whisper: 'all' });
+  const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', asr: 'all' });
   const filterTab = filterTabs[activeTab] || 'all';
   const setFilterTab = (val) => setFilterTabs(prev => ({ ...prev, [activeTab]: val }));
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,6 +65,26 @@ function Home() {
   const [downloadCenterVisible, setDownloadCenterVisible] = useState(false);
   const [downloadingCount, setDownloadingCount] = useState(0);
   const [favorites, setFavorites] = useState([]);
+
+  // ASR 遗留迁移 + 旧模型导入
+  const [migrateStatus, setMigrateStatus] = useState(null);
+  const [migrating, setMigrating] = useState(false);
+  useEffect(() => {
+    // 检查遗留目录
+    fetch('/api/asr/migrate-legacy')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && (d.has_legacy_engine || d.has_legacy_models) ? setMigrateStatus(d) : null)
+      .catch(() => {});
+  }, []);
+  const handleMigrateLegacy = async () => {
+    setMigrating(true);
+    try {
+      const r = await fetch('/api/asr/migrate-legacy', { method: 'POST' });
+      if (r.ok) { message.success('遗留文件已迁移到 ASR 目录'); setMigrateStatus(null); }
+      else { message.error('迁移失败'); }
+    } catch { message.error('迁移请求失败'); }
+    finally { setMigrating(false); }
+  };
 
   // ComfyUI 实例管理
   const [comfyuiInstances, setComfyuiInstances] = useState([]);
@@ -102,13 +125,13 @@ function Home() {
           const latestVersion = variantVersions[0]?.version;
           if (!latestVersion) continue;
 
-          const matchKey = variantId.replace('indextts', 'index-tts');
+          const variantNorm = normalizeEngineType(variantId);
           const variantInstalled = (engine.installed_versions || []).filter(v =>
-            String(v.version || '').toLowerCase().includes(matchKey)
+            normalizeEngineType(v.version).includes(variantNorm)
           );
           const variantDownloading = (engine.download_states || []).some(s => {
-            const stateKey = String(s.targetQuantization || '').toLowerCase();
-            return stateKey.includes(matchKey) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
+            const stateKey = normalizeEngineType(s.targetQuantization || '');
+            return stateKey.includes(variantNorm) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
           });
           if (variantDownloading) continue;
 
@@ -178,10 +201,14 @@ function Home() {
     const loadEngines = () => engineService.getAll().then(engines => setAllEngines(engines)).catch(() => {});
     loadEngines();
 
-    // SSE 监听引擎下载状态变化，实时更新 banner
+    // SSE 监听引擎下载状态变化，实时更新 banner（500ms 去抖，避免事件风暴）
+    let engineDebounce;
     const es = new EventSource('/api/events');
-    es.addEventListener('download-progress', () => loadEngines());
-    return () => es.close();
+    es.addEventListener('download-progress', () => {
+      clearTimeout(engineDebounce);
+      engineDebounce = setTimeout(loadEngines, 500);
+    });
+    return () => { clearTimeout(engineDebounce); es.close(); };
   }, []);
 
   // 加载 ComfyUI 实例列表
@@ -489,7 +516,7 @@ function Home() {
                 options={
                   activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS(t)
                     : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                    : activeTab === 'whisper' ? WHISPER_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                    : activeTab === 'asr' ? ASR_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
                     : DEFAULT_FILTER_OPTIONS(t, favorites, downloadedModels, customModels, cloudApiModels)
                 }
               />
@@ -540,6 +567,57 @@ function Home() {
           />
         )}
 
+        {/* TTS Tab: 直接渲染统一工作室 */}
+        {activeTab === 'tts' ? (
+          <TTSStudio />
+        ) : (
+          <>
+
+        {/* ASR 遗留迁移提示 */}
+        {activeTab === 'asr' && migrateStatus && (
+          <Alert
+            type="warning"
+            showIcon
+            message="检测到旧版 Whisper 遗留文件，可一键迁移至 ASR（此迁移操作仅访问旧目录完成迁移后删除）"
+            description={
+              <div style={{ fontSize: 12 }}>
+                {migrateStatus.has_legacy_engine && <div>引擎: external/asr/ → external/asr/</div>}
+                {migrateStatus.has_legacy_models && <div>模型: data/models_dir/asr/ → data/models_dir/asr/</div>}
+                <Button type="primary" size="small" icon={<ToolOutlined />} loading={migrating} onClick={handleMigrateLegacy} style={{ marginTop: 6 }}>
+                  一键迁移
+                </Button>
+              </div>
+            }
+            style={{ marginBottom: 12 }}
+          />
+        )}
+
+        {/* ASR 功能入口卡片 */}
+        {activeTab === 'asr' && (
+          <Card
+            hoverable
+            style={{ background: '#e6f4ff', borderColor: '#91caff', marginBottom: 20, gridColumn: '1 / -1' }}
+            bodyStyle={{ padding: 24 }}
+            onClick={() => navigate('/asr/use')}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 14, background: '#1677ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <SoundOutlined style={{ fontSize: 28, color: '#fff' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>语音转文本</div>
+                <div style={{ fontSize: 13, color: '#666', lineHeight: 1.8 }}>
+                  上传音频文件（支持 MP3 / WAV / FLAC / M4A 等格式），AI 引擎将自动识别语言并输出文字结果。
+                  支持 JSON、纯文本、SRT/VTT 字幕等多种输出格式，适配会议记录、字幕制作、语音笔记等场景。
+                  上传的音频文件可批量管理，转录历史自动保存，输出文件可自定义目录。
+                </div>
+                <div style={{ marginTop: 10, fontSize: 12, color: '#1677ff' }}>点击进入 → 开始使用语音转文本功能</div>
+              </div>
+              <div style={{ fontSize: 36, color: '#1677ff', opacity: 0.3 }}>→</div>
+            </div>
+          </Card>
+        )}
+
         <div className="model-grid">
           {filteredModels.map(model => (
             <ModelCard
@@ -559,6 +637,8 @@ function Home() {
               </div>
             )}
         </div>
+          </>
+        )}
           </div>
         </div>
       </Content>

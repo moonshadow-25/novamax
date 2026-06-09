@@ -140,7 +140,7 @@ router.post('/modelscope/parse-url', async (req, res) => {
     }
 
     // 验证类型
-    const validTypes = ['llm', 'comfyui', 'tts', 'whisper'];
+    const validTypes = ['llm', 'comfyui', 'tts', 'asr'];
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: `无效的模型类型: ${type}` });
     }
@@ -244,7 +244,7 @@ router.post('/modelscope/confirm', async (req, res) => {
     }
 
     // 验证类型
-    const validTypes = ['llm', 'comfyui', 'tts', 'whisper'];
+    const validTypes = ['llm', 'comfyui', 'tts', 'asr'];
     if (!validTypes.includes(config.type)) {
       return res.status(400).json({ error: `无效的模型类型: ${config.type}` });
     }

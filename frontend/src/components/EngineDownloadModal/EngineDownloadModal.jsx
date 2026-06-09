@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Alert, Progress, Space, Typography, Button, Select, Spin } from 'antd';
-import { DownloadOutlined, CloseOutlined } from '@ant-design/icons';
+import { Modal, Alert, Progress, Space, Typography, Button, Select, Spin, Tag } from 'antd';
+import { DownloadOutlined, CloseOutlined, CheckCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { engineService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 
@@ -10,12 +10,14 @@ const { Option } = Select;
 /**
  * 引擎下载 Modal 组件
  * 支持依赖提示和多进度条显示
+ * TTS 引擎支持运行时环境选择
  */
 const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCancel }) => {
   const { t } = useTranslation('home');
   const [downloading, setDownloading] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [selectedVersion, setSelectedVersion] = useState(null);
+  const [selectedRuntime, setSelectedRuntime] = useState(null);
   const [dependencies, setDependencies] = useState([]);
 
   const versionGroups = React.useMemo(() => {
@@ -29,10 +31,11 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
           modelscope_repo: ver.modelscope_repo || v.modelscope_repo || engineInfo.modelscope_repo,
           variant_id: v.id,
           variant_name: v.name
-        })) : []
+        })) : [],
+        runtimes: Array.isArray(v.runtimes) ? v.runtimes : []
       }));
     }
-    return [{ id: 'default', name: '', versions: engineInfo.versions || [] }];
+    return [{ id: 'default', name: '', versions: engineInfo.versions || [], runtimes: [] }];
   }, [engineInfo]);
 
   const flatVersions = React.useMemo(
@@ -40,13 +43,35 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
     [versionGroups]
   );
 
+  const latestVersion = flatVersions[0];
+  const latestVariant = latestVersion
+    ? versionGroups.find(g => g.id === latestVersion.variant_id)
+    : null;
+  const runtimes = latestVariant?.runtimes || engineInfo?.runtimes || [];
+
+  const isLatestInstalled = latestVersion
+    ? engineInfo?.installed_versions?.some(v => {
+        if (v.version !== latestVersion.version) return false;
+        // 多 variant 引擎（如 ASR 含 whisper+qwen3-asr）：必须 variant_id 也匹配
+        if (latestVersion.variant_id && v.variant_id) {
+          return v.variant_id === latestVersion.variant_id;
+        }
+        return true;
+      })
+    : false;
+
   useEffect(() => {
     if (visible && engineInfo) {
-      const latestVersion = flatVersions[0]?.version;
-      setSelectedVersion(latestVersion);
+      setSelectedVersion(latestVersion?.version || null);
+      // 自动选择第一个运行时
+      if (runtimes.length > 0) {
+        setSelectedRuntime(runtimes[0].id);
+      } else {
+        setSelectedRuntime(null);
+      }
 
-      if (latestVersion) {
-        checkDependencies(latestVersion);
+      if (latestVersion?.version) {
+        checkDependencies(latestVersion.version);
       }
     }
   }, [visible, engineInfo, flatVersions]);
@@ -65,15 +90,14 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   };
 
   const startDownload = async () => {
-    if (!selectedVersion) return;
+    if (!selectedVersion || downloading) return;
 
     setDownloading(true);
 
     try {
-      const result = await engineService.download(engineId, selectedVersion);
+      const result = await engineService.download(engineId, selectedVersion, selectedRuntime);
       setTasks(result.tasks);
 
-      // 轮询下载进度
       pollProgress(result.tasks);
     } catch (error) {
       console.error('Failed to start download:', error);
@@ -82,7 +106,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   };
 
   const pollProgress = (taskList) => {
+    let finished = false;
+    let onCompleteCalled = false;  // double guard: 防止异步竞态导致多次回调
     const interval = setInterval(async () => {
+      if (finished) { clearInterval(interval); return; }
       try {
         const updatedTasks = await Promise.all(
           taskList.map(async (task) => {
@@ -93,17 +120,17 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
 
         setTasks(updatedTasks);
 
-        // 检查是否全部完成
         const allCompleted = updatedTasks.every(t => t.status === 'completed');
         const anyFailed = updatedTasks.some(t => t.status === 'failed');
 
-        if (allCompleted) {
+        if (allCompleted || anyFailed) {
+          finished = true;
           clearInterval(interval);
           setDownloading(false);
-          onComplete?.();
-        } else if (anyFailed) {
-          clearInterval(interval);
-          setDownloading(false);
+          if (allCompleted && !onCompleteCalled) {
+            onCompleteCalled = true;
+            onComplete?.();
+          }
         }
       } catch (error) {
         console.error('Failed to poll progress:', error);
@@ -143,9 +170,11 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
     );
   }
 
+  const downloadButtonText = isLatestInstalled ? '重新安装最新版本' : '安装';
+
   return (
     <Modal
-      title={t('engineDownloadModal.needDownloadTitle', { name: engineInfo.name || '' })}
+      title={`${isLatestInstalled ? '引擎管理' : '安装引擎'} — ${engineInfo.name || ''}`}
       open={visible}
       onCancel={onCancel}
       footer={
@@ -159,12 +188,12 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
           </Button>,
           <Button
             key="download"
-            type="primary"
+            type={isLatestInstalled ? 'default' : 'primary'}
+            icon={isLatestInstalled ? <SyncOutlined /> : <DownloadOutlined />}
             onClick={startDownload}
-            icon={<DownloadOutlined />}
             disabled={!selectedVersion}
           >
-            {t('engineDownloadModal.startDownload')}
+            {downloadButtonText}
           </Button>
         ]
       }
@@ -172,42 +201,39 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
       maskClosable={true}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="large">
-        {!downloading && flatVersions.length > 1 && (
-          <div>
-            <Text strong>{t('engineDownloadModal.selectVersion')}</Text>
-            <Select
-              value={selectedVersion}
-              onChange={(value) => {
-                setSelectedVersion(value);
-                checkDependencies(value);
-              }}
-              style={{ width: '100%', marginTop: 8 }}
-            >
-              {versionGroups.map(group => (
-                group.versions.map(v => (
-                  <Option key={`${group.id}:${v.version}`} value={v.version}>
-                    {group.name ? `${group.name} / ` : ''}{v.version} ({formatBytes(v.size)})
-                  </Option>
-                ))
-              ))}
-            </Select>
-          </div>
-        )}
-
         {/* 引擎信息 */}
         <div>
           <Text type="secondary">{engineInfo?.description}</Text>
           <div style={{ marginTop: 8 }}>
-            <Text strong>{t('engineDownloadModal.versionLabel')}</Text>
-            <Text>{selectedVersion}</Text>
-          </div>
-          <div style={{ marginTop: 4 }}>
-            <Text strong>{t('engineDownloadModal.sizeLabel')}</Text>
-            <Text>
-              {formatBytes(flatVersions.find(v => v.version === selectedVersion)?.size)}
-            </Text>
+            <Text strong>最新版本：</Text>
+            {isLatestInstalled ? (
+              <Tag icon={<CheckCircleOutlined />} color="success" style={{ marginLeft: 8 }}>已安装</Tag>
+            ) : (
+              <Text>{latestVersion?.version}</Text>
+            )}
+            {latestVersion?.size > 0 && (
+              <Text type="secondary" style={{ marginLeft: 8 }}>{formatBytes(latestVersion.size)}</Text>
+            )}
           </div>
         </div>
+
+        {/* 运行时环境选择 */}
+        {!downloading && runtimes.length > 0 && (
+          <div>
+            <Text strong>选择运行时环境：</Text>
+            <Select
+              value={selectedRuntime}
+              onChange={setSelectedRuntime}
+              style={{ width: '100%', marginTop: 8 }}
+            >
+              {runtimes.map(rt => (
+                <Option key={rt.id} value={rt.id}>
+                  {rt.name}{rt.size > 0 ? ` (${formatBytes(rt.size)})` : ''}{rt.description ? ` — ${rt.description}` : ''}
+                </Option>
+              ))}
+            </Select>
+          </div>
+        )}
 
         {/* 依赖提示 */}
         {dependencies.length > 0 && !downloading && (

@@ -26,15 +26,18 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, whisperService } from '../../services/api';
+import { normalizeEngineType } from '../../utils/engineType';
+import { resolveVersionOrder } from '../../services/engineVersionOrder';
+import { ENGINE_STATUS_MAP } from '../../utils/engineStatus';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, asrModelsService, ttsStudioService, asrStudioService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
 import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
-import WhisperModelsPanel from '../WhisperModelsPanel/WhisperModelsPanel';
+import AsrModelsPanel from '../AsrModelsPanel/AsrModelsPanel';
 import TtsModelsPanel from '../TtsModelsPanel/TtsModelsPanel';
-import WhisperSettingsDrawer from '../WhisperSettingsDrawer/WhisperSettingsDrawer';
+import AsrSettingsDrawer from '../AsrSettingsDrawer/AsrSettingsDrawer';
 import TtsSettingsDrawer from '../TtsSettingsDrawer/TtsSettingsDrawer';
 import './ModelCard.css';
 
@@ -97,6 +100,62 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // whisper / tts 管理弹窗
   const [whisperModelsVisible, setWhisperModelsVisible] = useState(false);
   const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
+  const [ttsStatus, setTtsStatus] = useState('idle');
+  const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
+  const [ttsModelMissing, setTtsModelMissing] = useState(false);
+  const [ttsModelDownloading, setTtsModelDownloading] = useState(false);
+  const ttsInstallModeRef = useRef(false); // true = 首次安装引擎+模型，false = 更新引擎
+
+  useEffect(() => {
+    if (model.type !== 'tts') return;
+    const variantNorm = normalizeEngineType(
+      model?.engine_version || model?.id || ''
+    );
+    const variantMatch = (v) => normalizeEngineType(v).includes(variantNorm);
+
+    const poll = async () => {
+      try {
+        const engData = await engineService.getById('tts');
+        const variantInstalled = (engData.installed_versions || [])
+          .filter(v => variantMatch(v.version));
+        if (variantInstalled.length === 0) { setTtsStatus('error'); return; }
+
+        // 检测引擎更新
+        const variantVersions = (engData.variants || [])
+          .filter(v => normalizeEngineType(v.id) === variantNorm)
+          .flatMap(v => v.versions || []);
+        if (variantVersions.length > 0 && variantInstalled.length > 0) {
+          const { orderedInstalledVersions } = resolveVersionOrder(variantVersions, variantInstalled);
+          setTtsEngineUpdate(variantVersions[0]?.version !== orderedInstalledVersions[0]?.version);
+        }
+
+        // 检测模型文件是否已下载
+        try {
+          const fs = await ttsService.getFilesStatus(model.id);
+          const files = fs?.files || [];
+          if (files.length > 0 && files.some(f => !f.downloaded)) {
+            setTtsModelMissing(true);
+            setTtsStatus('error');
+            return;
+          }
+        } catch {}
+        setTtsModelMissing(false);
+
+        const h = await ttsService.health();
+        const engines = h?.engines || {};
+        const match = Object.entries(engines).find(([key]) =>
+          normalizeEngineType(key).includes(variantNorm)
+        );
+        const engStatus = match?.[1]?.status;
+        if (engStatus === 'running' || engStatus === 'busy') setTtsStatus('running');
+        else if (engStatus === 'starting') setTtsStatus('starting');
+        else setTtsStatus('idle');
+      } catch { /* 保持当前状态 */ }
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => clearInterval(t);
+  }, [model.type, model.id, model.engine_version]);
 
   // ComfyUI 启动相关
   const [comfyuiLaunchVisible, setComfyuiLaunchVisible] = useState(false);
@@ -243,18 +302,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const buildTtsVariantEngineInfo = (rawEngineInfo) => {
     if (!rawEngineInfo || !Array.isArray(rawEngineInfo.variants)) return rawEngineInfo;
 
-    const candidate = String(
+    const candidateNorm = normalizeEngineType(
       model?.engine_version ||
       model?.remote_snapshot?.engine_version ||
       model?.id || ''
-    ).toLowerCase();
+    );
 
-    let marker = null;
-    if (candidate.includes('1.5') || candidate.includes('tts1.5')) marker = 'indextts1.5';
-    if (candidate.includes('tts2') || candidate.includes('index_tts2') || candidate.includes('index-tts2')) marker = 'indextts2';
-    if (!marker) return rawEngineInfo;
+    // 从 variants 中动态匹配：归一化后完全相等或 variant id 包含 candidateNorm
+    const matched = rawEngineInfo.variants.filter(v => {
+      const vNorm = normalizeEngineType(v.id);
+      return vNorm === candidateNorm || vNorm.includes(candidateNorm) || candidateNorm.includes(vNorm);
+    });
 
-    const matched = rawEngineInfo.variants.filter(v => String(v.id || '').toLowerCase() === marker);
     if (matched.length === 0) return rawEngineInfo;
 
     return {
@@ -299,18 +358,18 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         }
       }
 
-      // Whisper 模型启动前检查 whisper 引擎
-      if (model.type === 'whisper') {
-        const engineResult = await engineService.checkInstalled('whisper');
+      // ASR 模型启动前检查引擎
+      if (model.type === 'asr') {
+        const engineResult = await engineService.checkInstalled(model.engine_id || model.engine_type);
         if (!engineResult.installed) {
           setEngineInfo(engineResult.engineInfo);
-          setEngineTarget('whisper');
+          setEngineTarget(model.engine_id || model.engine_type || '');
           setShowEngineModal(true);
           setLoading(false);
           return;
         }
-        // Whisper 模型启动前检查模型文件是否已下载
-        const filesStatus = await whisperService.getFilesStatus(model.id);
+        // ASR 模型启动前检查模型文件是否已下载
+        const filesStatus = await asrModelsService.getFilesStatus(model.id);
         if (filesStatus.summary && filesStatus.summary.missing > 0) {
           message.warning(t('modelCard.downloadWhisperFilesFirst'));
           setWhisperModelsVisible(true);
@@ -339,7 +398,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
     if (loading || isStarting || isRunning) return;
     setLoading(true);
     try {
-      await backendService.start(model.id, 'single');
+      if (model.type === 'asr') {
+        await asrStudioService.startEngine(model.id);
+      } else {
+        await backendService.start(model.id, 'single');
+      }
       message.info(t('modelCard.modelStartingPleaseWait'));
       onUpdate();
     } catch (error) {
@@ -355,7 +418,11 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleStop = async () => {
     setLoading(true);
     try {
-      await backendService.stop(model.id);
+      if (model.type === 'asr') {
+        await asrStudioService.stopEngine(model.id);
+      } else {
+        await backendService.stop(model.id);
+      }
       message.success(t('modelCard.modelStopped'));
       onUpdate();
     } catch (error) {
@@ -682,7 +749,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       llm: `/llm/${model.id}`,
       comfyui: `/comfyui/${model.id}`,
       // tts: `/tts/${model.id}`,  // 已改为直接打开 WebUI，如需恢复 React 页面取消此注释并删除上方 tts 块
-      whisper: `/whisper/${model.id}`
+      asr: `/asr/use`
     };
     navigate(routes[model.type]);
   };
@@ -690,7 +757,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const handleSettings = () => {
     if (model.type === 'comfyui') {
       setComfyuiSettingsVisible(true);
-    } else if (model.type === 'whisper') {
+    } else if (model.type === 'asr') {
       setWhisperSettingsVisible(true);
     } else if (model.type === 'tts') {
       setTtsSettingsVisible(true);
@@ -796,7 +863,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 判断是否可以启动：
   // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'whisper' && !!model.path);
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'asr' && !!model.path);
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
@@ -899,6 +966,19 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
                 : <StarOutlined />}
               onClick={() => onToggleFavorite?.(model.id)}
               title={isFavorited ? t('modelCard.unfavorite') : t('modelCard.favorite')}
+            />
+          )}
+          {model.type === 'asr' && (
+            <Button
+              size="small"
+              icon={(model.asr_config?.is_default || model.whisper_config?.is_default) ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />}
+              onClick={async (e) => { e.stopPropagation();
+                const asrModels = (await modelService.getByType('asr'))?.models || [];
+                for (const m of asrModels) { if (m.id !== model.id && (m.asr_config?.is_default || m.whisper_config?.is_default)) await modelService.update(m.id, { asr_config: { ...(m.asr_config || m.whisper_config), is_default: false } }); }
+                const cfg = model.asr_config || model.whisper_config || {};
+                await modelService.update(model.id, { asr_config: { ...cfg, is_default: !cfg.is_default } });
+                message.success(cfg.is_default ? '已取消默认' : '已设为默认 ASR 模型'); onUpdate?.(); }}
+              title={model.whisper_config?.is_default ? '取消默认' : '设为默认'}
             />
           )}
           {!!model.modelscope_id && model.type !== 'tts' && (
@@ -1127,22 +1207,115 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
-      {/* Whisper / TTS 专属按钮 */}
-      {(model.type === 'whisper' && model.source !== 'custom') && (
+      {/* TTS 专属按钮 — 样式对齐 ASR */}
+      {model.type === 'tts' && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          {ttsStatus === 'error' ? (
+            <Button type="primary" icon={<DownloadOutlined />} block color="blue" variant="solid"
+              loading={ttsModelDownloading}
+              disabled={ttsModelDownloading}
+              onClick={async () => {
+                if (ttsModelMissing) {
+                  setTtsModelDownloading(true);
+                  try {
+                    const filesStatus = await ttsService.getFilesStatus(model.id);
+                    const files = filesStatus?.files || [];
+                    const missing = files.filter(f => !f.downloaded);
+                    if (missing.length > 0) {
+                      message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                      for (const f of missing) {
+                        const result = await ttsService.downloadFile(model.id, f.filename || f.name);
+                        const taskId = result?.taskId;
+                        if (taskId) {
+                          await new Promise((resolve) => {
+                            const check = setInterval(async () => {
+                              try {
+                                const s = await ttsService.getDownloadStatus(taskId);
+                                if (s?.task?.status === 'completed' || s?.task?.status === 'failed') { clearInterval(check); resolve(); }
+                              } catch { clearInterval(check); resolve(); }
+                            }, 2000);
+                          });
+                        }
+                      }
+                      message.success({ content: '模型下载完成', key: 'tts-model-dl' });
+                    }
+                    setTtsModelMissing(false);
+                    setTtsStatus('idle');
+                    onUpdate();
+                  } catch (e) { message.error('模型下载失败，请重试'); }
+                  finally { setTtsModelDownloading(false); }
+                  return;
+                }
+                try {
+                  const engData = await engineService.getById('tts');
+                  setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                  setEngineTarget('tts');
+                  ttsInstallModeRef.current = true;
+                  setShowEngineModal(true);
+                } catch { message.error('无法获取引擎信息'); }
+              }}>
+              安装引擎
+            </Button>
+          ) : ttsEngineUpdate ? (
+            <Button type="primary" icon={<CloudSyncOutlined />} block color="blue" variant="solid"
+              onClick={async () => {
+                try {
+                  const engData = await engineService.getById('tts');
+                  setEngineInfo(buildTtsVariantEngineInfo(engData, model));
+                  setEngineTarget('tts');
+                  ttsInstallModeRef.current = false;
+                  setShowEngineModal(true);
+                } catch { message.error('无法获取引擎信息'); }
+              }}>
+              升级引擎
+            </Button>
+          ) : ttsStatus === 'starting' ? (
+            <Button icon={<LoadingOutlined />} block disabled>启动中...</Button>
+          ) : ttsStatus === 'running' ? (
+            <Button danger icon={<StopOutlined />} block color="red" variant="solid"
+              onClick={async () => {
+                setTtsStatus('idle');
+                try {
+                  const engineType = model.engine_version || model.engine_type || model.id;
+                  await ttsStudioService.stopEngine(engineType);
+                  message.success('引擎已停止');
+                  onUpdate();
+                } catch { message.error('停止失败'); }
+              }}>
+              停止引擎
+            </Button>
+          ) : (
+            <Button type="primary" icon={<PlayCircleOutlined />} block color="blue" variant="solid"
+              loading={ttsStatus === 'starting'}
+              onClick={async () => {
+                setTtsStatus('starting');
+                try {
+                  const engineType = model.engine_version || model.engine_type || model.id;
+                  await ttsStudioService.startEngine(engineType);
+                  message.success('引擎启动中');
+                  onUpdate();
+                } catch { setTtsStatus('idle'); message.error('启动失败'); }
+              }}>
+              启动引擎
+            </Button>
+          )}
+          <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
+            管理模型文件
+          </Button>
+        </Space>
+      )}
+
+      {/* ASR 专属按钮 */}
+      {(model.type === 'asr' && model.source !== 'custom') && (
         <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
               {t('modelCard.abortStart')}
             </Button>
           ) : isRunning ? (
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                {t('modelCard.stop')}
-              </Button>
-              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                {t('modelCard.use')}
-              </Button>
-            </div>
+            <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} block color="red" variant="solid">
+              {t('modelCard.stop')}
+            </Button>
           ) : (
             <Button
               type="primary"
@@ -1161,40 +1334,6 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             onClick={() => setWhisperModelsVisible(true)}
             block
           >
-            {t('modelCard.manageWorkflow')}
-          </Button>
-        </Space>
-      )}
-
-      {model.type === 'tts' && (
-        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
-          {isStarting ? (
-            <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
-              {t('modelCard.abortStart')}
-            </Button>
-          ) : isRunning ? (
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading} color="red" variant="solid" style={{ flex: 1 }}>
-                {t('modelCard.stop')}
-              </Button>
-              <Button type="primary" icon={<MessageOutlined />} onClick={handleUse} color="green" variant="solid" style={{ flex: 1 }}>
-                {t('modelCard.use')}
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleStart}
-              loading={loading}
-              block
-              color="blue"
-              variant="solid"
-            >
-              {t('modelCard.run')}
-            </Button>
-          )}
-          <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
             {t('modelCard.manageWorkflow')}
           </Button>
         </Space>
@@ -1335,7 +1474,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         />
       </Modal>
 
-      {/* Whisper 模型管理 Modal */}
+      {/* ASR 模型管理 Modal */}
       <Modal
         title={
           <Space>
@@ -1355,7 +1494,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
           </Descriptions.Item>
         </Descriptions>
         <Divider style={{ margin: '12px 0' }} />
-        <WhisperModelsPanel
+        <AsrModelsPanel
           modelId={model.id}
           onPathReady={(asrPath) => {
             if (asrPath && !model.path) onUpdate();
@@ -1389,7 +1528,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
 
 
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote、非TTS） */}
-      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'whisper' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'asr' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger
@@ -1540,7 +1679,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         }}
       />
 
-      <WhisperSettingsDrawer
+      <AsrSettingsDrawer
         visible={whisperSettingsVisible}
         model={model}
         onClose={() => setWhisperSettingsVisible(false)}
@@ -1588,9 +1727,44 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         visible={showEngineModal}
         engineId={engineTarget}
         engineInfo={engineInfo}
-        onComplete={() => {
+        onComplete={async () => {
+          console.log('[ModelCard] onComplete triggered', { engineTarget, installMode: ttsInstallModeRef.current, modelId: model.id });
           setShowEngineModal(false);
-          if (engineTarget === 'comfyui') {
+          if (engineTarget === 'tts') {
+            setTtsEngineUpdate(false);
+            onUpdate();
+            if (ttsInstallModeRef.current) {
+              console.log('[ModelCard] 首次安装模式，开始下载模型文件...');
+              ttsInstallModeRef.current = false;
+              try {
+                const filesStatus = await ttsService.getFilesStatus(model.id);
+                console.log('[ModelCard] getFilesStatus 返回:', filesStatus);
+                const files = filesStatus?.files || [];
+                const missing = files.filter(f => !f.downloaded);
+                console.log('[ModelCard] 模型文件:', { total: files.length, missing: missing.length });
+                if (files.length === 0) {
+                  message.success('引擎安装完成，该模型无需额外模型文件');
+                } else if (missing.length > 0) {
+                  message.loading({ content: `正在下载 ${missing.length} 个模型文件...`, key: 'tts-model-dl', duration: 0 });
+                  for (const f of missing) {
+                    console.log('[ModelCard] 下载模型文件:', f.filename || f.name);
+                    await ttsService.downloadFile(model.id, f.filename || f.name);
+                  }
+                  message.success({ content: '引擎与模型安装完成', key: 'tts-model-dl' });
+                } else {
+                  message.success('引擎安装完成，模型文件已就绪');
+                }
+                onUpdate();
+              } catch (e) {
+                console.error('[ModelCard] 模型下载失败:', e);
+                message.warning('引擎安装完成，但部分模型下载失败，请手动检查');
+                onUpdate();
+              }
+            } else {
+              console.log('[ModelCard] 更新模式，不下载模型');
+              message.success('引擎更新完成，请手动启动引擎');
+            }
+          } else if (engineTarget === 'comfyui') {
             handleComfyUILaunch();
           } else {
             doStartModel();

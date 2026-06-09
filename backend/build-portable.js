@@ -116,6 +116,33 @@ try {
   process.exit(1);
 }
 
+// 复制 Worker 源文件（动态 Worker 线程和引擎 adapter 需要从磁盘加载）
+console.log('📋 复制 TTS/ASR 源文件...');
+const srcBase = path.join(PROJECT_ROOT, 'backend/src');
+const destBase = path.join(backendDest, 'src');
+fs.mkdirSync(destBase, { recursive: true });
+// tts/ 完整目录树
+copyDirectory(path.join(srcBase, 'tts'), path.join(destBase, 'tts'));
+// asr/ — 引擎 adapter 通过 findProjectRoot() + 动态 import 加载 baseAsrAdapter.js
+//   不再需要 external/asr/baseAsrAdapter.js 副本
+copyDirectory(path.join(srcBase, 'asr'), path.join(destBase, 'asr'));
+// contracts/
+const destContractsDir = path.join(destBase, 'contracts');
+fs.mkdirSync(destContractsDir, { recursive: true });
+fs.copyFileSync(path.join(srcBase, 'contracts', 'tts-engine-contract.ts'), path.join(destContractsDir, 'tts-engine-contract.ts'));
+fs.copyFileSync(path.join(srcBase, 'contracts', 'asr-engine-contract.ts'), path.join(destContractsDir, 'asr-engine-contract.ts'));
+// utils/
+const destUtilsDir = path.join(destBase, 'utils');
+fs.mkdirSync(destUtilsDir, { recursive: true });
+for (const f of fs.readdirSync(path.join(srcBase, 'utils')).filter(f => f.endsWith('.js'))) {
+  fs.copyFileSync(path.join(srcBase, 'utils', f), path.join(destUtilsDir, f));
+}
+// config/constants.js
+const destConfigDir = path.join(destBase, 'config');
+fs.mkdirSync(destConfigDir, { recursive: true });
+fs.copyFileSync(path.join(srcBase, 'config', 'constants.js'), path.join(destConfigDir, 'constants.js'));
+console.log('✅ TTS/ASR 源文件已复制');
+
 // 复制 Python 脚本到 dist/scripts/
 console.log('📋 复制 Python 脚本...');
 const scriptsDest = path.join(distDest, 'scripts');
@@ -261,19 +288,107 @@ if (fs.existsSync(dataSrc)) {
   const defaultFiles = ['models.json', 'config.json', 'presets.json', 'parameters.json', 'engines.json', 'update.json'];
   defaultFiles.forEach(file => {
     const srcFile = path.join(dataSrc, file);
+    const rootFile = path.join(PROJECT_ROOT, file);
     if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, path.join(dataDest, file));
+    } else if (fs.existsSync(rootFile)) {
+      // data/ 下没有，尝试项目根目录
+      fs.copyFileSync(rootFile, path.join(dataDest, file));
     } else {
       // 创建空的 JSON 文件
       fs.writeFileSync(path.join(dataDest, file), '[]');
     }
   });
 }
-console.log('✅ 数据目录已创建');
 
-// 8. 复制启动脚本（源文件在 scripts/ 目录下独立维护）
-console.log('📄 复制启动脚本...');
+// 创建运行时必需的子目录
+const runtimeDirs = [
+  'logs',
+  'updates',
+  'downloads',
+  'models',
+  'models_dir',
+  'presets',
+  'cache',
+  'asr_services',
+];
+for (const sub of runtimeDirs) {
+  fs.mkdirSync(path.join(dataDest, sub), { recursive: true });
+}
+
+// 复制 TTS 预设数据（参考音频 + 工作区 + 音色库）
+const ttsSrc = path.join(dataSrc, 'tts_services');
+const ttsDest = path.join(dataDest, 'tts_services');
+fs.mkdirSync(ttsDest, { recursive: true });
+
+if (fs.existsSync(ttsSrc)) {
+  // 复制 SQLite 数据库（含 workspace / voice 元数据）
+  for (const dbFile of ['tts.db', 'tts.db-shm', 'tts.db-wal']) {
+    const src = path.join(ttsSrc, dbFile);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(ttsDest, dbFile));
+    }
+  }
+
+  // 复制默认工作区配置
+  const defaultsFile = path.join(ttsSrc, 'default-workspaces.json');
+  if (fs.existsSync(defaultsFile)) {
+    fs.copyFileSync(defaultsFile, path.join(ttsDest, 'default-workspaces.json'));
+    console.log('   ✓ 默认工作区配置');
+  }
+
+  // 复制工作区目录
+  const wsSrc = path.join(ttsSrc, 'workspaces');
+  if (fs.existsSync(wsSrc)) {
+    copyDirectory(wsSrc, path.join(ttsDest, 'workspaces'));
+    // 确保关键子目录存在（空目录在旧版 copyDirectory 中会丢失，保留此保障）
+    const wsDest = path.join(ttsDest, 'workspaces');
+    if (fs.existsSync(wsDest)) {
+      for (const wsDir of fs.readdirSync(wsDest, { withFileTypes: true })) {
+        if (wsDir.isDirectory()) {
+          for (const sub of ['outputs', 'uploads', 'jobs', 'reference']) {
+            fs.mkdirSync(path.join(wsDest, wsDir.name, sub), { recursive: true });
+          }
+        }
+      }
+    }
+  }
+
+  // 复制参考音频（内置音色）
+  const refSrc = path.join(ttsSrc, 'reference_audio');
+  const refDest = path.join(ttsDest, 'reference_audio');
+  fs.mkdirSync(refDest, { recursive: true });
+  if (fs.existsSync(refSrc)) {
+    const refFiles = fs.readdirSync(refSrc).filter(f => /\.(wav|mp3|flac|ogg)$/i.test(f));
+    for (const f of refFiles) {
+      fs.copyFileSync(path.join(refSrc, f), path.join(refDest, f));
+    }
+    console.log(`   ✓ 参考音频: ${refFiles.length} 个文件`);
+  }
+
+  // 复制音色音频文件
+  const voicesSrc = path.join(ttsSrc, 'voices');
+  if (fs.existsSync(voicesSrc)) {
+    copyDirectory(voicesSrc, path.join(ttsDest, 'voices'));
+  }
+
+}
+console.log('✅ 数据目录已创建 (含 TTS 预设工作区 + 参考音频 + 音色库)');
+
+// 8. 复制 scripts/ 目录（启动脚本 + gpuinfo.exe 等二进制工具）
+console.log('📄 复制 scripts/ ...');
 const scriptsDir = path.join(PROJECT_ROOT, 'scripts');
+const releaseScriptsDir = path.join(RELEASE_DIR, 'scripts');
+fs.mkdirSync(releaseScriptsDir, { recursive: true });
+
+// gpuinfo.exe — GPU 信息查询工具
+const gpuinfoSrc = path.join(scriptsDir, 'gpuinfo.exe');
+if (fs.existsSync(gpuinfoSrc)) {
+  fs.copyFileSync(gpuinfoSrc, path.join(releaseScriptsDir, 'gpuinfo.exe'));
+  console.log('   ✓ gpuinfo.exe');
+} else {
+  console.warn('⚠️  scripts/gpuinfo.exe 不存在，跳过');
+}
 
 // NovaMax.bat / Stop-NovaMax.bat
 for (const script of ['NovaMax.bat', 'Stop-NovaMax.bat']) {
@@ -374,10 +489,9 @@ if (fs.existsSync(sevenZipPath)) {
 
 function copyDirectory(src, dest, excludeDirs = []) {
   if (!fs.existsSync(src)) return;
-  
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
+
+  // 先创建目标目录（即使源目录为空也创建）
+  fs.mkdirSync(dest, { recursive: true });
 
   const entries = fs.readdirSync(src, { withFileTypes: true });
 

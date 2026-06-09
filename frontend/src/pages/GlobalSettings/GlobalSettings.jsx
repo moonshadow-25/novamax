@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Collapse } from 'antd';
-import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined, BgColorsOutlined } from '@ant-design/icons';
+import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Tabs, Collapse } from 'antd';
+import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined, BgColorsOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../contexts/ThemeContext';
-import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService } from '../../services/api';
+import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService, ttsStudioService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
-
+import { normalizeEngineType } from '../../utils/engineType';
 import './GlobalSettings.css';
 const { Header, Content, Sider } = Layout;
 const { Option } = Select;
@@ -40,6 +40,7 @@ const GlobalSettings = () => {
   const [versionDrawerVisible, setVersionDrawerVisible] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState(null);
   const [forcePolling, setForcePolling] = useState(false);
+  const [engineRuntimeSelections, setEngineRuntimeSelections] = useState({}); // { 'engineId::variantId': 'runtimeId' }
 
   // 从 engines.app 派生下载状态，天然支持刷新恢复
   const appDownloadState = engines['app']?.download_state || null;
@@ -51,7 +52,7 @@ const GlobalSettings = () => {
   const [exportModels, setExportModels] = useState([]);
   const [exportFileVersion, setExportFileVersion] = useState('1.0');
   const [exportUpdatedAt, setExportUpdatedAt] = useState('');
-  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'whisper', 'tts']);
+  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'asr', 'tts']);
   const [exportVersionMap, setExportVersionMap] = useState({});
   const [exportJson, setExportJson] = useState('');
 
@@ -77,10 +78,23 @@ const GlobalSettings = () => {
   // 日志相关
   const [logEntries, setLogEntries] = useState([]);
   const [logLevel, setLogLevel] = useState('all');
+  const [logLoading, setLogLoading] = useState(false);
   const [logAutoScroll, setLogAutoScroll] = useState(true);
   const logAutoScrollRef = useRef(true);
   const logContainerRef = useRef(null);
   const logTimerRef = useRef(null);
+  const [logTab, setLogTab] = useState('system');
+  const [ttsLogEntries, setTtsLogEntries] = useState([]);
+  const [ttsLogLevel, setTtsLogLevel] = useState('all');
+  const [ttsLogLoading, setTtsLogLoading] = useState(false);
+  const [ttsLogAutoScroll, setTtsLogAutoScroll] = useState(true);
+  const [asrLogEntries, setAsrLogEntries] = useState([]);
+  const [asrLogLoading, setAsrLogLoading] = useState(false);
+  const [asrLogAutoScroll, setAsrLogAutoScroll] = useState(true);
+  const asrLogContainerRef = useRef(null);
+  const asrLogAutoScrollRef = useRef(true);
+  const ttsLogAutoScrollRef = useRef(true);
+  const ttsLogContainerRef = useRef(null);
 
   // 缓存管理相关
   const [cacheInfo, setCacheInfo] = useState(null);
@@ -145,18 +159,30 @@ const GlobalSettings = () => {
     if (selectedMenu === 'update') handleCheckUpdate();
   }, [selectedMenu]);
 
-  // 日志定时刷新
+  // 日志定时刷新（setTimeout 递归，避免请求堆积；仅拉取当前激活 Tab）
   useEffect(() => {
     if (selectedMenu !== 'logs') {
-      if (logTimerRef.current) clearInterval(logTimerRef.current);
+      clearTimeout(logTimerRef.current);
       return;
     }
-    loadLogs();
-    logTimerRef.current = setInterval(loadLogs, 2000);
-    return () => {
-      if (logTimerRef.current) clearInterval(logTimerRef.current);
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      if (logTab === 'system') {
+        await loadLogs();
+      } else {
+        await loadTtsLogs();
+        await loadAsrLogs();
+      }
+      if (!cancelled) logTimerRef.current = setTimeout(poll, 2000);
     };
-  }, [selectedMenu, logLevel]);
+
+    if (logTab === 'system') loadLogs(); else if (logTab === 'tts') loadTtsLogs(); else loadAsrLogs();
+    logTimerRef.current = setTimeout(poll, 2000);
+
+    return () => { cancelled = true; clearTimeout(logTimerRef.current); };
+  }, [selectedMenu, logTab, logLevel, ttsLogLevel]);
 
   // 有下载进行中时，每 2 秒轮询一次，防止 SSE 事件丢失
   useEffect(() => {
@@ -237,10 +263,10 @@ const GlobalSettings = () => {
     const variant = engine.variants.find(v => String(v.id || '').toLowerCase() === String(variantId).toLowerCase());
     if (!variant) return null;
 
-    const matchKey = String(variant.id || '').toLowerCase().replace('indextts', 'index-tts');
-    const variantInstalled = (engine.installed_versions || []).filter(v => String(v.version || '').toLowerCase().includes(matchKey));
-    const variantBroken = (engine.broken_versions || []).filter(v => String(v.version || '').toLowerCase().includes(matchKey));
-    const variantDownloadStates = (engine.download_states || []).filter(s => String(s.targetQuantization || '').toLowerCase().includes(matchKey));
+    const variantNorm = normalizeEngineType(variant.id);
+    const variantInstalled = (engine.installed_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm));
+    const variantBroken = (engine.broken_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm));
+    const variantDownloadStates = (engine.download_states || []).filter(s => normalizeEngineType(s.targetQuantization || '').includes(variantNorm));
 
     return {
       ...engine,
@@ -280,7 +306,7 @@ const GlobalSettings = () => {
   const loadExportModels = async () => {
     try {
       const result = await modelService.getAll();
-      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'whisper', 'tts'].includes(m.type));
+      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'asr', 'tts'].includes(m.type));
       setExportModels(models);
       const now = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 19) + '+08:00';
       setExportUpdatedAt(now);
@@ -407,16 +433,16 @@ const GlobalSettings = () => {
 
   const loadLogs = async () => {
     try {
+      setLogLoading(true);
       const data = await systemService.getLogs(500, logLevel);
       setLogEntries(data.logs || []);
       if (logAutoScrollRef.current && logContainerRef.current) {
-        setTimeout(() => {
-          const el = logContainerRef.current;
-          if (el) el.scrollTop = el.scrollHeight;
-        }, 50);
+        logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
       }
     } catch (e) {
       // 静默
+    } finally {
+      setLogLoading(false);
     }
   };
 
@@ -439,6 +465,46 @@ const GlobalSettings = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = `novamax-logs-${new Date().toISOString().slice(0, 10)}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const loadTtsLogs = async () => {
+    try {
+      setTtsLogLoading(true);
+      const data = await systemService.getTtsLogs(500, ttsLogLevel);
+      setTtsLogEntries(data.logs || []);
+      if (ttsLogAutoScrollRef.current && ttsLogContainerRef.current) {
+        ttsLogContainerRef.current.scrollTop = ttsLogContainerRef.current.scrollHeight;
+      }
+    } catch {
+      // 静默
+    } finally {
+      setTtsLogLoading(false);
+    }
+  };
+
+  const loadAsrLogs = async () => {
+    try { setAsrLogLoading(true); const data = await systemService.getAsrLogs(500); setAsrLogEntries(data.logs || []); if (asrLogAutoScrollRef.current && asrLogContainerRef.current) asrLogContainerRef.current.scrollTop = asrLogContainerRef.current.scrollHeight; } catch {} finally { setAsrLogLoading(false); }
+  };
+  const handleClearAsrLogs = async () => { try { await systemService.clearAsrLogs(); setAsrLogEntries([]); message.success('ASR 日志已清除'); } catch { message.error('清除失败'); } };
+  const handleClearTtsLogs = async () => {
+    try {
+      await systemService.clearTtsLogs();
+      setTtsLogEntries([]);
+      message.success('TTS 日志已清空');
+    } catch { message.error('清空失败'); }
+  };
+
+  const handleDownloadTtsLogs = () => {
+    const text = ttsLogEntries.map(e =>
+      `${new Date(e.timestamp).toLocaleString('zh-CN', { hour12: false })} [${e.level.toUpperCase()}] ${e.message}`
+    ).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `novamax-tts-logs-${new Date().toISOString().slice(0, 10)}.log`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -534,7 +600,11 @@ const GlobalSettings = () => {
         message.warning(t('runtime.cannotStopMainService'));
         return;
       }
-      if (proc.category === 'router') {
+      if (proc.id.startsWith('tts-engine-')) {
+        // TTS 引擎：调用 stopEngine
+        const engineType = proc.id.replace('tts-engine-', '');
+        await ttsStudioService.stopEngine(engineType);
+      } else if (proc.category === 'router') {
         for (const modelId of (proc.modelIds || [])) {
           await backendService.stop(modelId);
         }
@@ -692,9 +762,10 @@ const GlobalSettings = () => {
 
       for (const variant of engine.variants) {
         const variantVersions = Array.isArray(variant.versions) ? variant.versions : [];
-        const variantInstalled = (engine.installed_versions || []).filter(v => String(v.version || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
-        const variantBroken = (engine.broken_versions || []).filter(v => String(v.version || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
-        const variantDownloadStates = (engine.download_states || []).filter(s => String(s.targetQuantization || '').toLowerCase().includes(String(variant.id || '').toLowerCase().replace('indextts', 'index-tts')));
+        const variantNorm2 = normalizeEngineType(variant.id);
+        const variantInstalled = (engine.installed_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm2));
+        const variantBroken = (engine.broken_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm2));
+        const variantDownloadStates = (engine.download_states || []).filter(s => normalizeEngineType(s.targetQuantization || '').includes(variantNorm2));
 
         rows.push({
           ...engine,
@@ -722,7 +793,7 @@ const GlobalSettings = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));
     const llm = filtered.filter(m => m.type === 'llm');
     const comfyui = filtered.filter(m => m.type === 'comfyui');
-    const whisper = filtered.filter(m => m.type === 'whisper');
+    const asrModels = filtered.filter(m => m.type === 'asr');
     const tts = filtered.filter(m => m.type === 'tts');
 
     const toExportModel = (m) => {
@@ -748,7 +819,7 @@ const GlobalSettings = () => {
     };
     if (exportTypes.includes('llm')) result.models.llm = llm.map(toExportModel);
     if (exportTypes.includes('comfyui')) result.models.comfyui = comfyui.map(toExportModel);
-    if (exportTypes.includes('whisper')) result.models.whisper = whisper.map(toExportModel);
+    if (exportTypes.includes('asr')) result.models.asr = asrModels.map(toExportModel);
     if (exportTypes.includes('tts')) result.models.tts = tts.map(toExportModel);
 
     const json = JSON.stringify(result, null, 2);
@@ -805,12 +876,12 @@ const GlobalSettings = () => {
     }
   };
 
-  const handleDownloadEngine = async (engineId, version = null) => {
+  const handleDownloadEngine = async (engineId, version = null, runtimeId = null) => {
     try {
       const engine = engines[engineId];
       const resolvedVersions = resolveEngineVersions(engine);
       const targetVersion = version || resolvedVersions[0]?.version;
-      await engineService.download(engineId, targetVersion);
+      await engineService.download(engineId, targetVersion, runtimeId);
       // 立即开启强制轮询，防止 download_state 尚未就绪时漏掉状态
       setForcePolling(true);
       // 立即刷新一次，确保主列表拿到 download_state 并启动轮询
@@ -897,6 +968,15 @@ const GlobalSettings = () => {
           const hasNewerVersion = engine.installed && latestVersion &&
             !engine.installed_versions?.some(v => v.version === latestVersion.version);
 
+          const isTts = (engine.id === 'tts' || engine.engine_api_id === 'tts');
+          const latestVariantId = latestVersion?.variant_id;
+          const latestVariant = latestVariantId && Array.isArray(engine.variants)
+            ? engine.variants.find(v => v.id === latestVariantId)
+            : null;
+          const variantRuntimes = latestVariant?.runtimes || [];
+          const runtimeKey = `${engine.engine_api_id || engine.id}::${latestVariantId || 'default'}`;
+          const selectedRuntime = engineRuntimeSelections[runtimeKey] || variantRuntimes[0]?.id;
+
           return (
             <List.Item
               actions={[
@@ -918,26 +998,53 @@ const GlobalSettings = () => {
                       />
                     </Badge>
                   )
-                ) : engine.installed ? (
-                  <Space>
-                    <Tag icon={<CheckCircleOutlined />} color="success">{t('engines.installed')}</Tag>
-                    <Badge dot={hasNewerVersion} color="orange" offset={[-4, 4]}>
-                      <Button
-                        icon={<HistoryOutlined />}
-                        onClick={() => openVersionDrawer(engine)}
-                      >
-                        {t('engines.manageVersions')}{hasNewerVersion ? t('engines.hasNewVersionSuffix') : ''}
-                      </Button>
-                    </Badge>
-                  </Space>
                 ) : (
-                  <Button
-                    type="primary"
-                    icon={<DownloadOutlined />}
-                    onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version)}
-                  >
-                    {t('engines.download')}
-                  </Button>
+                  <Space>
+                    {!isDownloading && isTts && variantRuntimes.length > 0 && (
+                      <Select
+                        size="small"
+                        value={selectedRuntime}
+                        onChange={val => setEngineRuntimeSelections(prev => ({ ...prev, [runtimeKey]: val }))}
+                        style={{ width: 180 }}
+                        placeholder="运行时环境"
+                      >
+                        {variantRuntimes.map(rt => (
+                          <Option key={rt.id} value={rt.id}>{rt.name}</Option>
+                        ))}
+                      </Select>
+                    )}
+                    {engine.installed ? (
+                      hasNewerVersion ? (
+                        <Button
+                          type="primary"
+                          icon={<SyncOutlined />}
+                          onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version, selectedRuntime)}
+                        >
+                          更新
+                        </Button>
+                      ) : (
+                        <Space>
+                          <Tag icon={<CheckCircleOutlined />} color="success">{t('engines.installed')}</Tag>
+                          <Badge dot={hasNewerVersion} color="orange" offset={[-4, 4]}>
+                            <Button
+                              icon={<HistoryOutlined />}
+                              onClick={() => openVersionDrawer(engine)}
+                            >
+                              {t('engines.manageVersions')}
+                            </Button>
+                          </Badge>
+                        </Space>
+                      )
+                    ) : (
+                      <Button
+                        type="primary"
+                        icon={<DownloadOutlined />}
+                        onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version, selectedRuntime)}
+                      >
+                        {t('engines.download')}
+                      </Button>
+                    )}
+                  </Space>
                 )
               ]}
             >
@@ -1073,7 +1180,7 @@ const GlobalSettings = () => {
                     options={[
                       { label: 'LLM', value: 'llm' },
                       { label: 'ComfyUI', value: 'comfyui' },
-                      { label: 'Whisper', value: 'whisper' },
+                      { label: 'ASR', value: 'asr' },
                       { label: 'TTS', value: 'tts' }
                     ]}
                   />
@@ -1296,7 +1403,7 @@ const GlobalSettings = () => {
     const processes = systemInfo?.processes || [];
     const typeColorMap = {
       llm: 'blue', comfyui: 'purple',
-      tts: 'green', whisper: 'orange', system: 'default'
+      tts: 'green', asr: 'orange', system: 'default'
     };
     const processColumns = [
       {
@@ -1329,6 +1436,27 @@ const GlobalSettings = () => {
         title: t('runtime.memory'), dataIndex: 'memory', key: 'memory', width: 100,
         sorter: (a, b) => (a.memory || 0) - (b.memory || 0),
         render: (mem) => formatBytes(mem)
+      },
+      {
+        title: '显存', dataIndex: 'vram', key: 'vram', width: 100,
+        sorter: (a, b) => (a.vram || 0) - (b.vram || 0),
+        render: (vram, record) => {
+          if (!vram || vram <= 0) return <Text type="secondary">-</Text>;
+          if (record.vram_detail) {
+            const d = record.vram_detail;
+            return (
+              <Tooltip title={
+                <div>
+                  <div>专用显存: {d.vram_used_mb} / {d.vram_total_mb} MB</div>
+                  <div>共享显存: {d.shared_used_mb} / {d.shared_total_mb} MB</div>
+                </div>
+              }>
+                <span style={{ cursor: 'help', borderBottom: '1px dashed #888' }}>{formatBytes(vram)}</span>
+              </Tooltip>
+            );
+          }
+          return formatBytes(vram);
+        }
       },
       {
         title: t('runtime.duration'), dataIndex: 'startTime', key: 'startTime', width: 100,
@@ -1399,27 +1527,40 @@ const GlobalSettings = () => {
                 {/* VRAM */}
                 {hw.gpus && hw.gpus.length > 0 ? (
                   <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>{t('runtime.vram')}</div>
-                    {hw.gpus.map((gpu, i) => (
-                      <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
-                        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
-                        {gpu.amdSoftwareVersion ? (
-                          <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>
-                            {t('runtime.amdSoftware', { version: gpu.amdSoftwareVersion })}
-                          </div>
-                        ) : null}
-                        {gpu.used != null ? (
-                          <>
-                            <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
-                            <Progress percent={gpu.usagePercent ?? 0} size="small"
-                              strokeColor={(gpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#722ed1'}
-                              format={(p) => `${p}%`} />
-                          </>
-                        ) : (
-                          <div style={{ fontSize: 12, color: token.colorText }}>{t('runtime.capacity', { size: formatBytes(gpu.total) })}</div>
-                        )}
-                      </div>
-                    ))}
+                    <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{t('runtime.vram')}</div>
+                    {hw.gpus.map((gpu, i) => {
+                      const hasShared = (gpu.shared_total || 0) > 0;
+                      const displayUsed = hasShared ? (gpu.total_used ?? (gpu.used + gpu.shared_used)) : gpu.used;
+                      const displayTotal = hasShared ? (gpu.total_avail ?? (gpu.total + gpu.shared_total)) : gpu.total;
+                      const displayPct = displayTotal > 0 ? Math.round((displayUsed / displayTotal) * 100) : 0;
+                      return (
+                        <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
+                          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
+                          {gpu.amdSoftwareVersion ? (
+                            <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>
+                              {t('runtime.amdSoftware', { version: gpu.amdSoftwareVersion })}
+                            </div>
+                          ) : null}
+                          {gpu.used != null ? (
+                            <>
+                              {hasShared ? (
+                                <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>
+                                  专用: {formatBytes(gpu.used)} / {formatBytes(gpu.total)}
+                                  {' · '}共享: {formatBytes(gpu.shared_used)} / {formatBytes(gpu.shared_total)}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{formatBytes(gpu.used)} / {formatBytes(gpu.total)}</div>
+                              )}
+                              <Progress percent={displayPct} size="small"
+                                strokeColor={displayPct > 80 ? '#ff4d4f' : '#722ed1'}
+                                format={(p) => `${p}%`} />
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('runtime.capacity', { size: formatBytes(gpu.total) })}</div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
@@ -1520,38 +1661,35 @@ const GlobalSettings = () => {
     );
   };
 
-  const renderLogsContent = () => {
+  const renderLogViewer = (entries, containerRef, level, setLevel, autoScroll, setAutoScroll, autoScrollRef, onReload, onDownload, onClear, loading) => {
     const levelColors = { info: '#1890ff', warn: '#faad14', error: '#ff4d4f' };
     return (
-      <>
-      <div className="gs-section-head">
-        <span className="gs-section-title">{t('sections.logs')}</span>
-        <Space>
-          <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
-            <Option value="all">{t('logs.all')}</Option>
-            <Option value="info">INFO</Option>
-            <Option value="warn">WARN</Option>
-            <Option value="error">ERROR</Option>
-          </Select>
-          <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
-            {t('logs.autoScroll')}
-          </Checkbox>
-          <Button size="small" icon={<FolderOpenOutlined />} onClick={async () => {
-            try { await backendService.openLogsFolder(); } catch { message.error(t('common.failedToOpen')); }
-          }}>{t('logs.folder')}</Button>
-          <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs}>{t('common.refresh')}</Button>
-          <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>{t('common.download')}</Button>
-          <Popconfirm title={t('logs.clearConfirm')} onConfirm={handleClearLogs} okText={t('logs.clear')} cancelText={t('common.cancel')}>
-            <Button size="small" danger icon={<DeleteOutlined />}>{t('logs.clear')}</Button>
-          </Popconfirm>
-        </Space>
-      </div>
-      <div className="gs-section-body">
-      <Card className="gs-section-card">
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <div style={{ flexShrink: 0, paddingBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <Space>
+            <Select value={logLevel} onChange={setLogLevel} size="small" style={{ width: 100 }}>
+              <Option value="all">{t('logs.all')}</Option>
+              <Option value="info">INFO</Option>
+              <Option value="warn">WARN</Option>
+              <Option value="error">ERROR</Option>
+            </Select>
+            <Checkbox checked={logAutoScroll} onChange={e => { setLogAutoScroll(e.target.checked); logAutoScrollRef.current = e.target.checked; }}>
+              {t('logs.autoScroll')}
+            </Checkbox>
+          </Space>
+          <Space>
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadLogs} loading={logLoading}>{t('common.refresh')}</Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadLogs} disabled={logEntries.length === 0}>{t('common.download')}</Button>
+            <Popconfirm title={t('logs.clearConfirm')} onConfirm={handleClearLogs} okText={t('logs.clear')} cancelText={t('common.cancel')}>
+              <Button size="small" danger icon={<DeleteOutlined />}>{t('logs.clear')}</Button>
+            </Popconfirm>
+          </Space>
+        </div>
         <div
-          ref={logContainerRef}
+          ref={containerRef}
           style={{
-            height: 'calc(100vh - 220px)',
+            flex: 1,
+            minHeight: 0,
             overflow: 'auto',
             background: '#1e1e1e',
             borderRadius: 6,
@@ -1561,10 +1699,12 @@ const GlobalSettings = () => {
             lineHeight: 1.6
           }}
         >
-          {logEntries.length === 0 ? (
+          {loading && logEntries.length === 0 ? (
+            <div style={{ color: '#888', textAlign: 'center', paddingTop: 40 }}>加载中...</div>
+          ) : logEntries.length === 0 ? (
             <div style={{ color: '#666', textAlign: 'center', paddingTop: 40 }}>{t('logs.empty')}</div>
           ) : (
-            logEntries.map((entry, i) => (
+            entries.map((entry, i) => (
               <div key={i} style={{ color: levelColors[entry.level] || '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 <span style={{ color: token.colorTextTertiary }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                 {' '}
@@ -1576,11 +1716,59 @@ const GlobalSettings = () => {
             ))
           )}
         </div>
-      </Card>
       </div>
-      </>
     );
   };
+
+  const renderLogsContent = () => (
+    <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">系统日志</span>
+        <Button size="small" icon={<FolderOpenOutlined />} onClick={async () => {
+          try { await backendService.openLogsFolder(); } catch { message.error('打开失败'); }
+        }}>日志文件夹</Button>
+      </div>
+      <div className="gs-section-body">
+        <Card className="gs-section-card" styles={{ body: { height: '100%', padding: 16, display: 'flex', flexDirection: 'column' } }}>
+          <Tabs
+            activeKey={logTab}
+            onChange={setLogTab}
+            size="small"
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+            items={[
+              {
+                key: 'system',
+                label: '系统日志',
+                children: (
+                  <div className="log-tab-content">
+                    {renderLogViewer(logEntries, logContainerRef, logLevel, setLogLevel, logAutoScroll, setLogAutoScroll, logAutoScrollRef, loadLogs, handleDownloadLogs, handleClearLogs, logLoading)}
+                  </div>
+                ),
+              },
+              {
+                key: 'tts',
+                label: 'TTS 日志',
+                children: (
+                  <div className="log-tab-content">
+                    {renderLogViewer(ttsLogEntries, ttsLogContainerRef, ttsLogLevel, setTtsLogLevel, ttsLogAutoScroll, setTtsLogAutoScroll, ttsLogAutoScrollRef, loadTtsLogs, handleDownloadTtsLogs, handleClearTtsLogs, ttsLogLoading)}
+                  </div>
+                ),
+              },
+              {
+                key: 'asr',
+                label: 'ASR 日志',
+                children: (
+                  <div className="log-tab-content">
+                    {renderLogViewer(asrLogEntries, asrLogContainerRef, 'all', () => {}, asrLogAutoScroll, setAsrLogAutoScroll, asrLogAutoScrollRef, loadAsrLogs, undefined, handleClearAsrLogs, asrLogLoading)}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      </div>
+    </>
+  );
 
   const renderContent = () => {
     switch (selectedMenu) {
@@ -1655,7 +1843,14 @@ const GlobalSettings = () => {
 
     const renderAvailableVersionItem = (version) => {
       const isInstalled = selectedEngine.installed_versions?.some(
-        v => v.version === version.version
+        v => {
+          if (v.version !== version.version) return false;
+          // 多 variant 引擎：版本号相同但 variant 不同不算已安装
+          if (version.variant_id && v.variant_id) {
+            return v.variant_id === version.variant_id;
+          }
+          return true;
+        }
       );
       const ds = allDownloadStates.find(s => s.targetQuantization === version.version);
       const isThisDownloading = ds && ['downloading', 'unpacking', 'installing'].includes(ds.status);
