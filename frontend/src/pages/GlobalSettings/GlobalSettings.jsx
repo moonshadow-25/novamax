@@ -950,12 +950,12 @@ const GlobalSettings = () => {
                   <div>
                     <div>{engine.description}</div>
                     {latestVersion && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+                      <div style={{ marginTop: 8, fontSize: 12, color: token.colorTextTertiary }}>
                         {t('engines.latestVersion')}: {latestVersion.version} ({formatBytes(latestVersion.size)})
                       </div>
                     )}
                     {engine.dependencies?.length > 0 && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
+                      <div style={{ marginTop: 4, fontSize: 12, color: token.colorTextTertiary }}>
                         {t('engines.dependencies')}: {engine.dependencies.join(', ')}
                       </div>
                     )}
@@ -974,7 +974,7 @@ const GlobalSettings = () => {
                       <div style={{ marginTop: 8 }}>
                         {activeStates.map(ds => (
                           <div key={ds.targetQuantization} style={{ marginBottom: 4 }}>
-                            <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>
+                            <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 2 }}>
                               {ds.targetQuantization}
                               {ds.status === 'downloading' && t('engines.downloadingWithSpeed', { speed: ds.speed > 0 ? ` ${formatBytes(ds.speed)}/s` : '' })}
                               {ds.status === 'unpacking' && t('engines.unpacking')}
@@ -1258,7 +1258,7 @@ const GlobalSettings = () => {
       ) : cacheInfo ? (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <HddOutlined style={{ fontSize: 20, color: '#888' }} />
+            <HddOutlined style={{ fontSize: 20, color: token.colorTextTertiary }} />
             <span style={{ fontSize: 15 }}>
               {t('cache.usage')}<Text strong>{formatBytes(cacheInfo.totalSize)}</Text>
             </span>
@@ -1366,12 +1366,12 @@ const GlobalSettings = () => {
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
               {[1, 2, 3, 4].map(i => (
-                <div key={i} style={{ padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                <div key={i} style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
                   <Skeleton active paragraph={{ rows: 2 }} />
                 </div>
               ))}
             </div>
-            <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16 }}>
+            <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8, padding: 16 }}>
               <Skeleton active paragraph={{ rows: 4 }} />
             </div>
           </div>
@@ -1381,16 +1381,16 @@ const GlobalSettings = () => {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
                 {/* CPU */}
                 <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>CPU</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{t('runtime.cpu')}</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.cpu.model}</div>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 6 }}>{hw.cpu.cores} 核 · {hw.cpu.speed} MHz</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 6 }}>{t('runtime.cpuCoresSpeed', { cores: hw.cpu.cores, speed: hw.cpu.speed })}</div>
                   <Progress percent={hw.cpu.usagePercent ?? 0} size="small"
                     strokeColor={(hw.cpu.usagePercent ?? 0) > 80 ? '#ff4d4f' : '#1890ff'}
                     format={(p) => `${p}%`} />
                 </div>
                 {/* RAM */}
                 <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>内存 (RAM)</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{t('runtime.ram')}</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{formatBytes(hw.memory.used)} / {formatBytes(hw.memory.total)}</div>
                   <Progress percent={hw.memory.usagePercent} size="small"
                     strokeColor={hw.memory.usagePercent > 80 ? '#ff4d4f' : '#1890ff'}
@@ -1399,13 +1399,13 @@ const GlobalSettings = () => {
                 {/* VRAM */}
                 {hw.gpus && hw.gpus.length > 0 ? (
                   <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>显存 (VRAM)</div>
+                    <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>{t('runtime.vram')}</div>
                     {hw.gpus.map((gpu, i) => (
                       <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
                         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
                         {gpu.amdSoftwareVersion ? (
                           <div style={{ fontSize: 12, color: token.colorText, marginBottom: 4 }}>
-                            AMD Software: {gpu.amdSoftwareVersion}
+                            {t('runtime.amdSoftware', { version: gpu.amdSoftwareVersion })}
                           </div>
                         ) : null}
                         {gpu.used != null ? (
@@ -1416,22 +1416,22 @@ const GlobalSettings = () => {
                               format={(p) => `${p}%`} />
                           </>
                         ) : (
-                          <div style={{ fontSize: 12, color: token.colorText }}>容量: {formatBytes(gpu.total)}</div>
+                          <div style={{ fontSize: 12, color: token.colorText }}>{t('runtime.capacity', { size: formatBytes(gpu.total) })}</div>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                    <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>显存 (VRAM)</div>
-                    <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 8 }}>未检测到 GPU 信息</div>
+                    <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{t('runtime.vram')}</div>
+                    <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 8 }}>{t('runtime.noGpu')}</div>
                   </div>
                 )}
                 {/* 系统 */}
                 <div style={{ padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>系统</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>{t('runtime.system')}</div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{hw.hostname}</div>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{hw.platform}/{hw.arch} · 运行 {formatUptime(hw.uptime)}</div>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('runtime.runningWithPlatform', { platform: hw.platform, arch: hw.arch, uptime: formatUptime(hw.uptime) })}</div>
                 </div>
               </div>
             )}
@@ -1476,7 +1476,7 @@ const GlobalSettings = () => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {storageItems.map((item) => (
-              <div key={item.type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+              <div key={item.type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
                     <Text strong>{item.label}</Text>
@@ -1566,7 +1566,7 @@ const GlobalSettings = () => {
           ) : (
             logEntries.map((entry, i) => (
               <div key={i} style={{ color: levelColors[entry.level] || '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                <span style={{ color: '#888' }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                <span style={{ color: token.colorTextTertiary }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                 {' '}
                 <span style={{ color: levelColors[entry.level], fontWeight: entry.level === 'error' ? 600 : 400 }}>
                   [{entry.level.toUpperCase()}]
@@ -1695,7 +1695,7 @@ const GlobalSettings = () => {
             }
             description={
               isThisDownloading ? (
-                <div style={{ fontSize: 12, color: '#888' }}>
+                <div style={{ fontSize: 12, color: token.colorTextTertiary }}>
                   {ds.status === 'downloading' && t('engines.downloadingWithSpeed', { speed: ds.speed > 0 ? ` · ${formatBytes(ds.speed)}/s` : '' })}
                   {ds.status === 'unpacking' && t('engines.unpacking')}
                   {ds.status === 'installing' && t('engines.installing')}
@@ -1937,7 +1937,7 @@ const GlobalSettings = () => {
                     })}
                   </Text>
                 ) : (
-                  <Text style={{ fontSize: 12, color: '#888' }}>
+                  <Text style={{ fontSize: 12, color: token.colorTextTertiary }}>
                     {t('migrate.backupPath', { path: migrateModal.srcPath })}
                   </Text>
                 )}
@@ -1951,7 +1951,7 @@ const GlobalSettings = () => {
               <div style={{ color: '#1677ff', fontSize: 13 }}>{t('migrate.sameDrive')}</div>
             ) : (
               <>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 4 }}>
                   {migrateProgress?.phase === 'backup' ? t('migrate.backuping') : t('migrate.migrating')}
                 </div>
                 <Progress
@@ -1960,13 +1960,13 @@ const GlobalSettings = () => {
                   strokeColor={{ from: '#108ee9', to: '#87d068' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                  <Text style={{ fontSize: 12, color: '#888' }}>
+                  <Text style={{ fontSize: 12, color: token.colorTextTertiary }}>
                     {migrateProgress
                       ? `${(migrateProgress.copiedBytes / 1024 ** 3).toFixed(2)} GB / ${(migrateProgress.totalBytes / 1024 ** 3).toFixed(2)} GB`
                       : t('common.preparing')}
                   </Text>
                   {migrateProgress?.speed > 0 && (
-                    <Text style={{ fontSize: 12, color: '#888' }}>
+                    <Text style={{ fontSize: 12, color: token.colorTextTertiary }}>
                       {migrateProgress.speed >= 1024 ** 2
                         ? `${(migrateProgress.speed / 1024 ** 2).toFixed(1)} MB/s`
                         : `${(migrateProgress.speed / 1024).toFixed(0)} KB/s`}
@@ -2025,7 +2025,7 @@ const GlobalSettings = () => {
                 </div>
               </>
             )}
-            <div style={{ marginTop: 12, color: '#888', fontSize: 12 }}>
+            <div style={{ marginTop: 12, color: token.colorTextTertiary, fontSize: 12 }}>
               {t('restore.progressHint')}
             </div>
           </div>

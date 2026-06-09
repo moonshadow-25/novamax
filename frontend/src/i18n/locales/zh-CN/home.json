@@ -399,7 +399,10 @@
     "crashed": "已崩溃",
     "running": "运行中",
     "starting": "启动中",
-    "stopped": "已停止"
+    "stopped": "已停止",
+    "open": "打开",
+    "restart": "重启",
+    "clear": "清除"
   },
   "workflowAnalysisView": {
     "analysisResult": "工作流分析结果",

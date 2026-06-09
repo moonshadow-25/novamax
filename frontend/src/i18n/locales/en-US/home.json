@@ -399,7 +399,10 @@
     "crashed": "Crashed",
     "running": "Running",
     "starting": "Starting",
-    "stopped": "Stopped"
+    "stopped": "Stopped",
+    "open": "Open",
+    "restart": "Restart",
+    "clear": "Clear"
   },
   "workflowAnalysisView": {
     "analysisResult": "Workflow Analysis Result",

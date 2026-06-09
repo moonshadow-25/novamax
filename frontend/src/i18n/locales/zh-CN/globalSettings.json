@@ -105,13 +105,16 @@
     "durationSecond": "{{seconds}}秒",
     "durationMinuteSecond": "{{minutes}}分{{seconds}}秒",
     "durationHourMinute": "{{hours}}时{{minutes}}分",
+    "cpu": "CPU",
     "cpuCoresSpeed": "{{cores}} 核 · {{speed}} MHz",
     "ram": "内存 (RAM)",
     "vram": "显存 (VRAM)",
+    "amdSoftware": "AMD Software: {{version}}",
     "capacity": "容量: {{size}}",
     "noGpu": "未检测到 GPU 信息",
     "system": "系统",
-    "runningFor": "运行 {{uptime}}"
+    "runningFor": "运行 {{uptime}}",
+    "runningWithPlatform": "{{platform}}/{{arch}} · 运行 {{uptime}}"
   },
   "storage": {
     "description": "管理各类模型的存储目录，支持迁移到其他磁盘",
