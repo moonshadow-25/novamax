@@ -45,7 +45,6 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [availableRuntimes, setAvailableRuntimes] = useState([]);
   const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
   const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
-  const [saving, setSaving] = useState(false);
   const [idleInfo, setIdleInfo] = useState(null);
 
   // 引擎空闲倒计时（每秒轮询）
@@ -171,6 +170,7 @@ function TtsSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       onDelete?.();
       onSave?.();
     } catch (error) { message.error(error.response?.data?.error || error.message || t('settingsDrawer.deleteFailed')); }
+  };
 
   return (
     <>
