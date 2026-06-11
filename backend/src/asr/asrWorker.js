@@ -22,6 +22,7 @@ const genId = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
  * DB
  * ======================================================================== */
 
+fs.mkdirSync(ASR_DATA_DIR, { recursive: true });
 const db = new Database(ASR_HISTORY_DB);
 db.pragma('journal_mode = WAL');
 migrateDb(db, ASR_DATA_DIR);
