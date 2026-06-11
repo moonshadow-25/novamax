@@ -210,29 +210,65 @@ async function transcribe(msg) {
 
   await ensureEngineReady(modelId, engineType, { modelFilePath, language, threads });
 
+  // 标记引擎忙碌，防止闲置超时在转录中途杀死引擎
+  const entry = engines.get(modelId);
+  if (entry) { entry.busy = true; entry.activeTasks = (entry.activeTasks || 0) + 1; }
+
   addLog('info', `Transcribing: ${path.basename(audioPath)} (${modelId})`);
 
-  const result = await sendToEngine(modelId, engineType, 'transcribe', {
-    audioPath,
-    params: { language, response_format: outputFormat, temperature, prompt, stream }
-  });
+  try {
+    const result = await sendToEngine(modelId, engineType, 'transcribe', {
+      audioPath,
+      params: { language, response_format: outputFormat, temperature, prompt, stream }
+    });
 
-  let parsed = result || {};
-  if (typeof parsed === 'string') parsed = { text: parsed };
+    let parsed = result || {};
+    if (typeof parsed === 'string') parsed = { text: parsed };
 
-  const historyId = genId('asr-hist');
-  const outputDir = msg.outputDir || path.join(getModelDir(modelId), 'outputs');
-  fs.mkdirSync(outputDir, { recursive: true });
+    const historyId = genId('asr-hist');
+    const outputDir = msg.outputDir || path.join(getModelDir(modelId), 'outputs');
+    fs.mkdirSync(outputDir, { recursive: true });
 
-  const now = new Date().toISOString();
-  db.prepare(`INSERT INTO asr_transcription_history
-    (id, model_id, original_filename, audio_path, result_text, output_format, language, task_type, output_files, source_type, source_file, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(historyId, modelId, path.basename(audioPath), audioPath, parsed.text || '', outputFormat || 'json',
-      language || '', taskType, JSON.stringify([]), msg.sourceType || 'manual', msg.sourceFile || '', now);
+    // 输出到文件 (output_mode === 'file')
+    const outputFiles = [];
+    const outputMode = msg.outputMode || 'inline';
+    if (outputMode === 'file' && parsed.text) {
+      const ext = outputFormat === 'text' ? 'txt'
+        : outputFormat === 'srt' ? 'srt'
+        : outputFormat === 'vtt' ? 'vtt'
+        : outputFormat === 'verbose_json' ? 'json'
+        : 'json';
+      const baseName = path.basename(audioPath, path.extname(audioPath));
+      const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+      const outPath = path.join(outputDir, `${baseName}_${ts}.${ext}`);
+      let content = parsed.text;
+      if (outputFormat === 'srt') content = formatSrt(parsed);
+      else if (outputFormat === 'vtt') content = formatVtt(parsed);
+      else if (outputFormat === 'verbose_json' || outputFormat === 'json') {
+        content = JSON.stringify(parsed, null, 2);
+      }
+      fs.writeFileSync(outPath, content, 'utf-8');
+      outputFiles.push(outPath);
+      addLog('info', `Output written: ${outPath}`);
+    }
 
-  addLog('info', `Transcription done: historyId=${historyId}`);
-  return { historyId, text: parsed.text || '', outputFiles: [] };
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO asr_transcription_history
+      (id, model_id, original_filename, audio_path, result_text, output_format, language, task_type, output_files, source_type, source_file, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(historyId, modelId, path.basename(audioPath), audioPath, parsed.text || '', outputFormat || 'json',
+        language || '', taskType, JSON.stringify(outputFiles), msg.sourceType || 'manual', msg.sourceFile || '', now);
+
+    addLog('info', `Transcription done: historyId=${historyId}`);
+    return { historyId, text: parsed.text || '', outputFiles };
+  } finally {
+    // 无论成功或失败，释放忙碌标记，允许闲置超时
+    if (entry) {
+      entry.busy = false;
+      entry.activeTasks = Math.max(0, (entry.activeTasks || 1) - 1);
+      entry.lastActiveTime = Date.now();
+    }
+  }
 }
 
 function formatSrt(result) {
@@ -433,22 +469,8 @@ async function dispatch(type, payload) {
     case 'getAsrLogs': return { logs: asrLogs.slice(-(payload.limit || ASR_DEFAULTS.LOG_FETCH_LIMIT)), _count: asrLogs.length };
     case 'clearAsrLogs': asrLogs.length = 0; return { success: true };
 
-    // 输出目录
-    case 'getOutputDir': {
-      const { modelManager } = await import('../services/modelManager.js');
-      const m = modelManager.default.getById(payload.modelId);
-      return { output_dir: m?.asr_config?.output_dir || path.join(getModelDir(payload.modelId), 'outputs') };
-    }
-    case 'setOutputDir': {
-      const { modelManager } = await import('../services/modelManager.js');
-      const m = modelManager.default.getById(payload.modelId);
-      if (m) {
-        const cfg = m.asr_config || {};
-        cfg.output_dir = payload.outputDir;
-        modelManager.default.update(payload.modelId, { asr_config: cfg });
-      }
-      return { success: true };
-    }
+    // 输出目录（已迁移到 asr-studio.js 路由层直接调用 modelManager）
+    // getOutputDir / setOutputDir 不再通过 Worker，因 Worker 中无法 import modelManager（native better-sqlite3 兼容性问题）
     case 'openOutputDir': {
       const dir = payload.outputDir || path.join(getModelDir(payload.modelId), 'outputs');
       fs.mkdirSync(dir, { recursive: true });

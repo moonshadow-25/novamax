@@ -165,10 +165,13 @@ export const asrStudioService = {
   // History (shared)
   getHistory: (params) => api.get('/asr-studio/history', { params }),
   deleteHistoryItem: (id) => api.delete(`/asr-studio/history/${id}`),
-  // Output dir (shared)
-  getOutputDir: () => api.get('/asr-studio/output-dir'),
-  setOutputDir: (dir) => api.put('/asr-studio/output-dir', { output_dir: dir }),
-  openOutputDir: (dir) => api.post('/asr-studio/output-dir/open', { output_dir: dir }),
+  // Output dir (per-model: model_id 用于查询/持久化)
+  getOutputDir: (modelId) => {
+    const params = modelId ? { model_id: modelId } : {};
+    return api.get('/asr-studio/output-dir', { params });
+  },
+  setOutputDir: (modelId, dir) => api.put('/asr-studio/output-dir', { output_dir: dir, model_id: modelId }),
+  openOutputDir: (modelId, dir) => api.post('/asr-studio/output-dir/open', { output_dir: dir, model_id: modelId }),
   // Engine
   startEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/start`),
   stopEngine: (modelId) => api.post(`/asr-studio/engines/${modelId}/stop`),
@@ -292,6 +295,8 @@ export const ttsStudioService = {
   getReferenceAudio: (id) => api.get(`/tts-studio/reference-audios/${id}`),
   deleteReferenceAudio: (id) => api.delete(`/tts-studio/reference-audios/${id}`),
   renameReferenceAudio: (id, name) => api.put(`/tts-studio/reference-audios/${id}/rename`, { name }),
+  transcribeVoice: (id) => api.post(`/tts-studio/reference-audios/${id}/transcribe`),
+  updateVoiceText: (id, text) => api.put(`/tts-studio/reference-audios/${id}/text`, { reference_text: text }),
   getWorkspaces: () => api.get('/tts-studio/workspaces'),
   createWorkspace: (formData) => api.post('/tts-studio/workspaces', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   getWorkspace: (id) => api.get(`/tts-studio/workspaces/${id}`),

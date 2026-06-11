@@ -34,8 +34,10 @@ export default function ASRUse() {
   useEffect(() => { if (outputDir) localStorage.setItem('asr_odir', outputDir); }, [outputDir]);
 
   useEffect(() => { modelService.getByType('asr').then(data => { const arr = Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : []; setModels(arr); if (arr.length && !selectedModelId) setSelectedModelId(arr[0].id); }).catch(() => {}); }, []);
-  const loadData = useCallback(() => { asrStudioService.getFiles().then(setFiles).catch(() => {}); asrStudioService.getHistory({ page_size: 50 }).then(r => setHistory(r.items || [])).catch(() => {}); asrStudioService.getOutputDir().then(r => setOutputDir(r.output_dir || '')).catch(() => {}); }, []);
+  const loadData = useCallback(() => { asrStudioService.getFiles().then(setFiles).catch(() => {}); asrStudioService.getHistory({ page_size: 50 }).then(r => setHistory(r.items || [])).catch(() => {}); }, []);
   useEffect(() => { loadData(); const t = setInterval(loadData, 3000); return () => clearInterval(t); }, [loadData]);
+  // output-dir 随模型切换加载（服务端持久化，无需轮询）
+  useEffect(() => { if (!selectedModelId) return; asrStudioService.getOutputDir(selectedModelId).then(r => setOutputDir(r.output_dir || '')).catch(() => {}); }, [selectedModelId]);
   useEffect(() => { if (!selectedModelId) return; asrService.getCapabilities(selectedModelId).then(d => { if (d?.supported_languages?.length) setCapabilities(d); else setCapabilities({ supported_languages: ALL_LANGUAGES.map(l => l.value), output_formats: ['json'] }); }).catch(() => setCapabilities({ supported_languages: ALL_LANGUAGES.map(l => l.value), output_formats: ['json'] })); }, [selectedModelId]);
   const [capabilities, setCapabilities] = useState(null);
   const availableLanguages = useMemo(() => { const s = capabilities?.supported_languages || ALL_LANGUAGES.map(l => l.value); return ALL_LANGUAGES.filter(l => s.includes(l.value)); }, [capabilities]);
@@ -125,7 +127,7 @@ export default function ASRUse() {
             <Table columns={fileCols} dataSource={files} rowKey="filename" size="small" pagination={false} locale={{ emptyText: '暂无文件' }} />
           </Card>
           <Card size="small" title="转录历史" style={{ marginTop: 12 }}><Table columns={histCols} dataSource={history} rowKey="id" size="small" pagination={{ pageSize: 15, showSizeChanger: false }} locale={{ emptyText: '暂无记录' }} /></Card>
-          <Card size="small" title="输出目录" style={{ marginTop: 12 }}><Space.Compact style={{ width: '100%' }}><Input value={outputDir} onChange={e => setOutputDir(e.target.value)} size="small" /><Button size="small" icon={<FolderOpenOutlined />} onClick={() => asrStudioService.openOutputDir(outputDir)} /><Button size="small" type="primary" onClick={async () => { await asrStudioService.setOutputDir(outputDir); message.success('已保存'); }}>保存</Button></Space.Compact></Card>
+          <Card size="small" title="输出目录" style={{ marginTop: 12 }}><Space.Compact style={{ width: '100%' }}><Input value={outputDir} onChange={e => setOutputDir(e.target.value)} size="small" /><Button size="small" icon={<FolderOpenOutlined />} onClick={() => asrStudioService.openOutputDir(selectedModelId, outputDir)} /><Button size="small" type="primary" onClick={async () => { await asrStudioService.setOutputDir(selectedModelId, outputDir); message.success('已保存'); }}>保存</Button></Space.Compact></Card>
         </div>
       </div>
 

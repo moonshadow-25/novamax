@@ -13,6 +13,27 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
 const SHARED_ID = '__shared__';
 
+// 输出目录辅助函数（直接使用 modelManager，不走 Worker——Worker 中无法 import modelManager）
+function getDefaultOutputDir(modelId) {
+  return path.join(PROJECT_ROOT, 'data', 'asr_services', modelId || SHARED_ID, 'outputs');
+}
+
+function getModelOutputDir(modelId) {
+  if (!modelId) return getDefaultOutputDir(SHARED_ID);
+  const m = modelManager.getById(modelId);
+  return m?.asr_config?.output_dir || getDefaultOutputDir(modelId);
+}
+
+function setModelOutputDir(modelId, outputDir) {
+  if (!modelId) return;
+  const m = modelManager.getById(modelId);
+  if (m) {
+    const cfg = m.asr_config || {};
+    cfg.output_dir = outputDir;
+    modelManager.update(modelId, { asr_config: cfg });
+  }
+}
+
 // Files
 router.post('/files', upload.array('files', 20), async (req, res) => {
   try {
@@ -52,20 +73,28 @@ router.delete('/history/:id', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Output dir (shared)
+// Output dir (per-model: 通过 modelManager 直接读写 asr_config.output_dir)
 router.get('/output-dir', async (req, res) => {
-  try { res.json({ output_dir: path.join(PROJECT_ROOT, 'data', 'asr_services', SHARED_ID, 'outputs') }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    res.json({ output_dir: getModelOutputDir(req.query.model_id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/output-dir', async (req, res) => {
   try {
-    await fs.promises.mkdir(req.body.output_dir, { recursive: true });
+    const { output_dir, model_id } = req.body;
+    if (!output_dir) return res.status(400).json({ error: 'output_dir 不能为空' });
+    await fs.promises.mkdir(output_dir, { recursive: true });
+    if (model_id) setModelOutputDir(model_id, output_dir);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post('/output-dir/open', async (req, res) => {
   try {
-    const dir = req.body.output_dir || path.join(PROJECT_ROOT, 'data', 'asr_services', SHARED_ID, 'outputs');
+    let dir = req.body.output_dir;
+    if (!dir && req.body.model_id) {
+      dir = getModelOutputDir(req.body.model_id);
+    }
+    if (!dir) dir = path.join(PROJECT_ROOT, 'data', 'asr_services', SHARED_ID, 'outputs');
     await fs.promises.mkdir(dir, { recursive: true });
     const { exec } = await import('child_process');
     exec(`start "" "${dir}"`, { shell: true });
@@ -111,7 +140,11 @@ router.post('/save-output', async (req, res) => {
   try {
     const { text, format, filename, model_id } = req.body;
     if (!text) return res.status(400).json({ error: 'No text provided' });
-    const outputDir = path.join(PROJECT_ROOT, 'data', 'asr_services', '__shared__', 'outputs');
+    let outputDir;
+    if (model_id) {
+      outputDir = getModelOutputDir(model_id);
+    }
+    if (!outputDir) outputDir = getDefaultOutputDir(SHARED_ID);
     await fs.promises.mkdir(outputDir, { recursive: true });
     const baseName = filename ? path.basename(filename, path.extname(filename)) : 'output';
     const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);

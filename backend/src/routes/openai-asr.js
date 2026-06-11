@@ -57,6 +57,7 @@ async function handleRequest(req, res) {
       stream: stream === 'true' || stream === true,
       modelFilePath: asrModel.path, threads: cfg.threads || ASR_DEFAULTS.DEFAULT_THREADS,
       outputDir: cfg.output_dir,
+      outputMode: output_mode || 'inline',
       sourceType,
     });
 
