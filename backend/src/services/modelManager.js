@@ -5,6 +5,7 @@ import { generateId } from '../utils/fileHelper.js';
 import { DB_PATH, MODELS_RUN_DIR } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
+import { isAuxiliaryLlmFile } from '../utils/llmFileHelper.js';
 
 class ModelManager {
   constructor() {
@@ -253,7 +254,7 @@ class ModelManager {
     }
 
     const files = fs.readdirSync(modelDir);
-    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
 
     // console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);
 
@@ -303,7 +304,7 @@ class ModelManager {
 
     // 只扫描根目录的文件（扁平化结构）
     const files = fs.readdirSync(modelDir);
-    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
     const downloadedQuantizations = [];
 
     // console.log(`  找到 ${ggufFiles.length} 个 .gguf 文件`);

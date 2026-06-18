@@ -15,6 +15,7 @@ import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileInt
 import remoteConfigService from '../services/remoteConfigService.js';
 import modelscopeParser from '../services/modelscopeParser.js';
 import { isEmbeddingModelData, EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
+import { isAuxiliaryLlmFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 const router = express.Router();
 
@@ -204,9 +205,9 @@ router.post('/models/custom', async (req, res) => {
     }
 
     const entries = fs.readdirSync(local_path);
-    const ggufFiles = entries.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    const ggufFiles = entries.filter(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
     if (ggufFiles.length === 0) {
-      return res.status(400).json({ error: '该文件夹中没有找到 .gguf 文件（mmproj 文件不计入）' });
+      return res.status(400).json({ error: '该文件夹中没有找到主模型 .gguf 文件（mmproj / DFlash 文件不计入）' });
     }
 
     const downloaded_files = ggufFiles.map((filename, idx) => {
@@ -229,7 +230,7 @@ router.post('/models/custom', async (req, res) => {
       local_path,
       downloaded_files,
       quantizations,
-      files: { model: downloaded_files[0], mmproj: null },
+      files: { model: downloaded_files[0], mmproj: null, dflash: null },
       parameters: {
         ...DEFAULT_LLM_PARAMETERS,
         port: EMBEDDING_PATTERN.test(trimmedName) ? 1278 : DEFAULT_LLM_PARAMETERS.port
@@ -315,7 +316,8 @@ async function handleAddAsrCustom(req, res) {
             size,
             is_active: true
           },
-          mmproj: null
+          mmproj: null,
+          dflash: null
         }
       });
 
@@ -485,9 +487,8 @@ router.put('/models/:id', async (req, res) => {
             // 更新 files 字段指向新的量化版本
             updates.files = {
               model: selectedQuant.file,
-              mmproj: model.mmproj_options && model.mmproj_options.length > 0
-                ? model.mmproj_options.find(m => m.name === model.selected_mmproj) || model.mmproj_options[0]
-                : null
+              mmproj: pickAuxiliaryFile(model.mmproj_options, model.selected_mmproj),
+              dflash: pickAuxiliaryFile(model.dflash_options, model.selected_dflash)
             };
             console.log('📂 更新 files 字段:', updates.files.model?.name || updates.files.model);
           } else {
@@ -784,15 +785,22 @@ router.post('/models/:id/refresh-remote', async (req, res) => {
     const { modelData, files, description } = await modelscopeParser.fetchModelInfo(model.modelscope_id);
     const quantizations = modelscopeParser.generateQuantizations(files, model.modelscope_id, model.filter_folder || null);
     const mmprojOptions = modelscopeParser.generateMmprojOptions(files, model.modelscope_id);
+    const dflashOptions = modelscopeParser.generateDflashOptions(files, model.modelscope_id);
 
-    // 重新计算 files 字段（指向当前选择的量化版本）
     const selectedQuant = quantizations.find(q => q.name === model.selected_quantization) || quantizations.find(q => q.recommended) || quantizations[0];
     const filesField = selectedQuant && !selectedQuant.is_folder ? {
       model: selectedQuant.file,
-      mmproj: mmprojOptions.length > 0 ? mmprojOptions.find(m => m.name === model.files?.mmproj?.name) || mmprojOptions[0] : null
+      mmproj: pickAuxiliaryFile(mmprojOptions, model.files?.mmproj?.name),
+      dflash: pickAuxiliaryFile(dflashOptions, model.files?.dflash?.name)
     } : model.files;
 
-    await modelManager.update(model.id, { quantizations, mmproj_options: mmprojOptions, files: filesField, modelscope_refreshed: true });
+    await modelManager.update(model.id, {
+      quantizations,
+      mmproj_options: mmprojOptions,
+      dflash_options: dflashOptions,
+      files: filesField,
+      modelscope_refreshed: true
+    });
 
     const updated = modelManager.getById(req.params.id);
     eventBus.broadcast('model-updated', { modelId: req.params.id });

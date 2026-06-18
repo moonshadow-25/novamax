@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import { EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
+import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 // 量化类型元数据
 const QUANTIZATION_INFO = {
@@ -307,7 +308,7 @@ class ModelscopeParser {
       // 检查文件夹内是否包含 .gguf 文件（排除 mmproj）
       const ggufFilesInFolder = filesInFolder.filter(f =>
         f.Name?.toLowerCase().endsWith('.gguf') &&
-        !f.Name.toLowerCase().includes('mmproj')
+        !isAuxiliaryLlmFile(f.Name)
       );
 
       // 如果文件夹内没有 .gguf 文件，跳过该文件夹
@@ -353,7 +354,7 @@ class ModelscopeParser {
     // 处理 GGUF 文件（排除 mmproj）
     const ggufFiles = blobFiles.filter(f =>
       f.Name?.toLowerCase().endsWith('.gguf') &&
-      !f.Name.toLowerCase().includes('mmproj')
+      !isAuxiliaryLlmFile(f.Name)
     );
 
     for (const file of ggufFiles) {
@@ -417,11 +418,24 @@ class ModelscopeParser {
   generateMmprojOptions(files, modelId) {
     const mmprojFiles = files.filter(f =>
       f.Type === 'blob' &&
-      f.Name?.toLowerCase().includes('mmproj') &&
-      f.Name?.toLowerCase().endsWith('.gguf')
+      isMmprojFile(f.Name)
     );
 
     return mmprojFiles.map(file => ({
+      name: file.Name,
+      size: file.Size,
+      sha256: file.Sha256,
+      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
+    }));
+  }
+
+  generateDflashOptions(files, modelId) {
+    const dflashFiles = files.filter(f =>
+      f.Type === 'blob' &&
+      isDflashFile(f.Name)
+    );
+
+    return dflashFiles.map(file => ({
       name: file.Name,
       size: file.Size,
       sha256: file.Sha256,
@@ -457,6 +471,7 @@ class ModelscopeParser {
       // 生成量化版本列表
       const quantizations = this.generateQuantizations(files, modelId, filterFolder);
       const mmprojOptions = this.generateMmprojOptions(files, modelId);
+      const dflashOptions = this.generateDflashOptions(files, modelId);
 
       // 验证是否有量化版本
       if (quantizations.length === 0) {
@@ -465,6 +480,9 @@ class ModelscopeParser {
 
       // 默认选择推荐版本
       const defaultQuant = quantizations.find(q => q.recommended) || quantizations[0];
+
+      const defaultMmproj = pickAuxiliaryFile(mmprojOptions);
+      const defaultDflash = pickAuxiliaryFile(dflashOptions);
 
       return {
         ...baseConfig,
@@ -475,12 +493,15 @@ class ModelscopeParser {
 
         // mmproj 配置
         mmproj_options: mmprojOptions,
-        selected_mmproj: mmprojOptions.length > 0 ? mmprojOptions[0].name : null,
+        selected_mmproj: defaultMmproj?.name || null,
+        dflash_options: dflashOptions,
+        selected_dflash: defaultDflash?.name || null,
 
         // 向后兼容：保留 files 字段（指向当前选择的量化版本）
         files: defaultQuant && !defaultQuant.is_folder ? {
           model: defaultQuant.file,
-          mmproj: mmprojOptions.length > 0 ? mmprojOptions[0] : null
+          mmproj: defaultMmproj,
+          dflash: defaultDflash
         } : null,
 
         capabilities: {

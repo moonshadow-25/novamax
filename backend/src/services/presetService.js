@@ -7,6 +7,7 @@ import { PRESETS_DIR, MODELS_RUN_DIR, MODEL_TYPES } from '../config/constants.js
 import modelManager from './modelManager.js';
 import parameterService from './parameterService.js';
 import { getModelPath } from '../utils/pathHelper.js';
+import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
 
 class PresetService {
   constructor() {
@@ -99,6 +100,13 @@ class PresetService {
         }
       }
 
+      if (model.files?.dflash) {
+        const dflashPath = this._getDflashPath(model);
+        if (dflashPath) {
+          lines.push(`spec-draft-model = ${dflashPath}`);
+        }
+      }
+
       // 模型别名
       if (model.alias) {
         lines.push(`alias = ${model.alias}`);
@@ -164,7 +172,7 @@ class PresetService {
 
     // 只扫描根目录的 .gguf 文件
     const files = fs.readdirSync(modelDir);
-    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    const ggufFiles = files.filter(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
 
     if (ggufFiles.length === 0) {
       console.warn(`⚠ 未找到任何 .gguf 模型文件: ${modelDir}`);
@@ -198,20 +206,12 @@ class PresetService {
    */
   _getMmprojPath(model) {
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
+    return findAuxiliaryFilePath(modelDir, isMmprojFile);
+  }
 
-    if (!fs.existsSync(modelDir) || !fs.statSync(modelDir).isDirectory()) {
-      return null;
-    }
-
-    // 只扫描根目录
-    const files = fs.readdirSync(modelDir);
-    const mmprojFile = files.find(f => f.startsWith('mmproj') && f.endsWith('.gguf'));
-
-    if (mmprojFile) {
-      return path.join(modelDir, mmprojFile);
-    }
-
-    return null;
+  _getDflashPath(model) {
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
+    return findAuxiliaryFilePath(modelDir, isDflashFile);
   }
 
   /**

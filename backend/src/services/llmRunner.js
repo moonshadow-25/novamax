@@ -3,6 +3,7 @@ import fs from 'fs';
 import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import presetService from './presetService.js';
 import parameterService from './parameterService.js';
+import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
 
 /**
  * 生成 llama-server 路由模式启动命令
@@ -143,6 +144,11 @@ export function generateSingleModelCommand(model, port, options = {}) {
     args.push('--mmproj', mmprojPath);
   }
 
+  const dflashPath = _findDflashFile(model.local_path);
+  if (dflashPath) {
+    args.push('--spec-draft-model', dflashPath);
+  }
+
   // RPC 多机互联：如果传入了 rpcArg，附加 --rpc 参数
   if (options?.rpcArg) {
     args.push('--rpc', options.rpcArg);
@@ -182,7 +188,7 @@ function _findModelFile(localPath, model) {
 
     // 回退：使用目录中第一个 .gguf 文件
     const files = fs.readdirSync(localPath);
-    const modelFile = files.find(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    const modelFile = files.find(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
     if (modelFile) {
       return path.join(localPath, modelFile);
     }
@@ -195,14 +201,11 @@ function _findModelFile(localPath, model) {
  * 查找 mmproj 文件
  */
 function _findMmprojFile(localPath) {
-  if (!fs.existsSync(localPath) || !fs.statSync(localPath).isDirectory()) {
-    return null;
-  }
+  return findAuxiliaryFilePath(localPath, isMmprojFile);
+}
 
-  const files = fs.readdirSync(localPath);
-  const mmprojFile = files.find(f => f.startsWith('mmproj') && f.endsWith('.gguf'));
-
-  return mmprojFile ? path.join(localPath, mmprojFile) : null;
+function _findDflashFile(localPath) {
+  return findAuxiliaryFilePath(localPath, isDflashFile);
 }
 
 /**

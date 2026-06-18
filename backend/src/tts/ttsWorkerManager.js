@@ -19,6 +19,8 @@ class TtsWorkerManager {
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
     this._pending = new Map();
     this._ready = false;
+    this._restartTimer = null;
+    this._stopping = false;
   }
 
   /* ========================================================================
@@ -26,11 +28,17 @@ class TtsWorkerManager {
    * ======================================================================== */
 
   start() {
-    if (this._worker) return;
+    this._stopping = false;
+    if (this._worker || this._restartTimer) return;
     this._spawn();
   }
 
   async stop() {
+    this._stopping = true;
+    if (this._restartTimer) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = null;
+    }
     if (this._worker) {
       // 拒绝所有 pending 请求
       for (const [, { reject }] of this._pending) {
@@ -69,11 +77,20 @@ class TtsWorkerManager {
    * ======================================================================== */
 
   _spawn() {
+    if (this._stopping || this._worker) return;
+
     const workerPath = path.join(PROJECT_ROOT, 'backend', 'src', 'tts', 'ttsWorker.js');
     this._worker = new Worker(workerPath, {
       workerData: { PROJECT_ROOT },
       stdout: true, stderr: true
     });
+
+    if (this._worker.stdout) {
+      this._worker.stdout.on('data', chunk => process.stdout.write(chunk));
+    }
+    if (this._worker.stderr) {
+      this._worker.stderr.on('data', chunk => process.stderr.write(chunk));
+    }
 
     this._worker.on('message', (msg) => {
       const cb = this._pending.get(msg.id);
@@ -88,12 +105,11 @@ class TtsWorkerManager {
     });
 
     this._worker.on('error', (err) => {
-      console.error('[TtsWorkerManager] Worker 错误:', err.message);
+      console.error('[TtsWorkerManager] Worker 错误:', err?.stack || err?.message || err);
       this._ready = false;
-      this._rejectAll(new Error(`TTS Worker 错误: ${err.message}`));
+      this._rejectAll(new Error(`TTS Worker 错误: ${err?.message || 'unknown error'}`));
       this._worker = null;
-      // 自动重连
-      setTimeout(() => this._spawn(), RECONNECT_DELAY);
+      this._scheduleRestart();
     });
 
     this._worker.on('exit', (code) => {
@@ -102,7 +118,7 @@ class TtsWorkerManager {
       this._rejectAll(new Error('TTS Worker 已退出'));
       this._worker = null;
       if (code !== 0) {
-        setTimeout(() => this._spawn(), RECONNECT_DELAY);
+        this._scheduleRestart();
       }
     });
 
@@ -110,6 +126,17 @@ class TtsWorkerManager {
       this._ready = true;
       console.log('[TtsWorkerManager] TTS Worker 已就绪');
     });
+  }
+
+  _scheduleRestart() {
+    if (this._stopping || this._restartTimer) {
+      return;
+    }
+
+    this._restartTimer = setTimeout(() => {
+      this._restartTimer = null;
+      this._spawn();
+    }, RECONNECT_DELAY);
   }
 
   _rejectAll(err) {

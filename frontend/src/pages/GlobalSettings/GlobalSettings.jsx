@@ -787,7 +787,8 @@ const GlobalSettings = () => {
   };
 
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
-    'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'files', 'capabilities'];
+    'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'selected_mmproj',
+    'dflash_options', 'selected_dflash', 'files', 'capabilities'];
 
   const buildExportJson = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));
@@ -1706,7 +1707,7 @@ const GlobalSettings = () => {
           ) : (
             entries.map((entry, i) => (
               <div key={i} style={{ color: levelColors[entry.level] || '#d4d4d4', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                <span style={{ color: token.colorTextTertiary }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                <span style={{ color: effectiveTheme === 'light' ? 'rgba(255,255,255,0.78)' : token.colorTextTertiary, fontWeight: 500 }}>{new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                 {' '}
                 <span style={{ color: levelColors[entry.level], fontWeight: entry.level === 'error' ? 600 : 400 }}>
                   [{entry.level.toUpperCase()}]

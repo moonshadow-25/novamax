@@ -11,6 +11,7 @@ import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { isQuantizationIncomplete, checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
+import { isAuxiliaryLlmFile } from '../utils/llmFileHelper.js';
 
 class LlmDownloader extends EventEmitter {
   constructor() {
@@ -392,6 +393,14 @@ class LlmDownloader extends EventEmitter {
       }
     };
 
+    const addDflash = () => {
+      const chosen = model.dflash_options?.[0] || model.files?.dflash || null;
+      if (chosen?.download_url) {
+        files.push({ name: chosen.name, url: chosen.download_url, size: chosen.size || 0, sha256: chosen.sha256 || null });
+        console.log(`添加 DFlash 文件: ${chosen.name}`);
+      }
+    };
+
     if (targetQuantization) {
       const quantInfo = model.quantizations?.find(q => q.name === targetQuantization);
       if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
@@ -406,10 +415,14 @@ class LlmDownloader extends EventEmitter {
         files.push({ name: quantInfo.file.name, url: quantInfo.file.download_url, size: quantInfo.file.size, sha256: quantInfo.file.sha256 || null });
       }
       addMmproj();
+      addDflash();
     } else if (model.files?.model?.download_url) {
       files.push({ name: model.files.model.name, url: model.files.model.download_url, size: model.files.model.size, sha256: model.files.model.sha256 || null });
       if (model.files.mmproj?.download_url) {
         files.push({ name: model.files.mmproj.name, url: model.files.mmproj.download_url, size: model.files.mmproj.size, sha256: model.files.mmproj.sha256 || null });
+      }
+      if (model.files.dflash?.download_url) {
+        files.push({ name: model.files.dflash.name, url: model.files.dflash.download_url, size: model.files.dflash.size, sha256: model.files.dflash.sha256 || null });
       }
     }
 
@@ -1033,7 +1046,7 @@ class LlmDownloader extends EventEmitter {
       return [];
     }
     const files = fs.readdirSync(dir);
-    return files.filter(f => f.endsWith('.gguf') && !f.startsWith('mmproj'));
+    return files.filter(f => f.endsWith('.gguf') && !isAuxiliaryLlmFile(f));
   }
 
   /**
