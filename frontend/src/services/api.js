@@ -138,6 +138,15 @@ export const ttsService = {
   cancelDownload: (taskId) => api.post(`/tts/download-cancel/${taskId}`)
 };
 
+export const ocrModelsService = {
+  getFilesStatus: (modelId) => api.get(`/ocr-models/models/${modelId}/files-status`),
+  downloadFile: (modelId, filename) => api.post(`/ocr-models/models/${modelId}/download`, { filename }),
+  getDownloadStatus: (taskId) => api.get(`/ocr-models/download-status/${taskId}`),
+  pauseDownload: (taskId) => api.post(`/ocr-models/download-pause/${taskId}`),
+  resumeDownload: (taskId) => api.post(`/ocr-models/download-resume/${taskId}`),
+  cancelDownload: (taskId) => api.post(`/ocr-models/download-cancel/${taskId}`)
+};
+
 export const asrModelsService = {
   getFilesStatus: (modelId) => api.get(`/asr-models/models/${modelId}/files-status`),
   downloadFile: (modelId, filename) => api.post(`/asr-models/models/${modelId}/download`, { filename }),

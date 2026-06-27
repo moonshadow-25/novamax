@@ -812,6 +812,10 @@ class ProcessManager {
       return this._startIndextts2LegacyBackend(modelId, model);
     }
 
+    if (model.type === 'ocr') {
+      return this._startOcrBackend(modelId, model);
+    }
+
     const port = await this.allocatePort(model.type);
 
     try {
@@ -940,6 +944,140 @@ class ProcessManager {
     }
   }
 
+  async _startOcrBackend(modelId, model) {
+    const engine = engineManager.getEngine('ocr');
+    const engineType = model.engine_id || model.engine_type || 'ocr';
+    const engineVersion = model.engine_version || engineManager.getDefaultVersion(engineType);
+
+    if (!engineVersion) {
+      throw new Error('请先安装 OCR 引擎');
+    }
+
+    // 查找引擎安装路径：external/ocr/{variant}/{version}/
+    let enginePath = null;
+    let variantId = 'mineru';
+    for (const v of engine?.variants || []) {
+      const varPath = path.join(PROJECT_ROOT, 'external', 'ocr', v.id, engineVersion);
+      if (fs.existsSync(varPath)) {
+        enginePath = varPath;
+        variantId = v.id;
+        break;
+      }
+    }
+    if (!enginePath) {
+      throw new Error(`OCR 引擎版本 ${engineVersion} 未找到`);
+    }
+
+    // 查找 Python 解释器：engine/python.exe (runtime zip 解压后)
+    const pythonExe = path.join(enginePath, 'engine', 'python.exe');
+    if (!fs.existsSync(pythonExe)) {
+      throw new Error(`OCR 运行环境 Python 不存在: ${pythonExe}`);
+    }
+
+    const startScript = path.join(enginePath, 'start_services.py');
+    if (!fs.existsSync(startScript)) {
+      throw new Error(`OCR 启动脚本不存在: ${startScript}`);
+    }
+
+    // 动态分配端口
+    const apiPort = await this._findFreePortInRange(9987, 9997);
+    const gradioPort = await this._findFreePortInRange(7860, 7870);
+    this.allocatedPorts.add(apiPort);
+    this.allocatedPorts.add(gradioPort);
+
+    // 模型目录：data/models_dir/ocr/{modelId}/
+    const modelDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'ocr', modelId);
+    fs.mkdirSync(modelDir, { recursive: true });
+
+    const args = [
+      startScript,
+      '--host', '127.0.0.1',
+      '--api-port', String(apiPort),
+      '--gradio-port', String(gradioPort),
+      '--config', path.join(modelDir, 'mineru.json'),
+    ];
+
+    console.log(`启动 OCR: ${pythonExe} ${args.join(' ')}`);
+
+    const proc = spawn(pythonExe, ['-u', ...args], { cwd: enginePath });
+
+    // 日志
+    const logDir = path.join(PROJECT_ROOT, 'data', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFilePath = path.join(logDir, `ocr_${modelId}_runtime.log`);
+    const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+    logStream.write(`=== OCR 启动日志 ===\n`);
+    logStream.write(`模型: ${model.name} (${modelId})\n`);
+    logStream.write(`时间: ${new Date().toISOString()}\n`);
+    logStream.write(`API 端口: ${apiPort}\n`);
+    logStream.write(`Gradio 端口: ${gradioPort}\n`);
+    logStream.write(`${'='.repeat(50)}\n\n`);
+
+    this.processes.set(modelId, {
+      process: proc,
+      port: apiPort,
+      gradioPort,
+      type: 'ocr',
+      logs: [],
+      ready: false,
+      logStream,
+      lastActivity: Date.now(),
+    });
+
+    this._attachLegacyProcessListeners(modelId, proc, (log) => {
+      const processInfo = this.processes.get(modelId);
+      if (!processInfo?.ready && this._isOcrReadyLog(log)) {
+        processInfo.ready = true;
+        console.log(`[${modelId}] OCR 已就绪（日志检测）`);
+        eventBus.broadcast('model-updated', { modelId });
+      }
+    });
+
+    // 闲置自动关闭监控（暂时注释）
+    // this._startOcrIdleMonitor(modelId, model);
+
+    return { port: apiPort, status: MODEL_STATUS.RUNNING };
+  }
+
+  /*
+  _startOcrIdleMonitor(modelId, model) {
+    const cfg = model.ocr_config || {};
+    const timeoutMin = Number(cfg.idle_timeout_min) || 5;
+    const timeoutMs = timeoutMin * 60 * 1000;
+
+    const checkInterval = setInterval(() => {
+      const processInfo = this.processes.get(modelId);
+      if (!processInfo) {
+        clearInterval(checkInterval);
+        return;
+      }
+      const idleMs = Date.now() - (processInfo.lastActivity || 0);
+      if (idleMs >= timeoutMs) {
+        console.log(`[${modelId}] OCR 闲置超过 ${timeoutMin} 分钟，自动关闭`);
+        clearInterval(checkInterval);
+        this.stopBackend(modelId).catch(() => {});
+      }
+    }, 30000); // 每 30 秒检查一次
+
+    // 存储 interval 引用，以便在 stopBackend 时清理
+    const existing = this.processes.get(modelId);
+    if (existing) {
+      existing._idleMonitor = checkInterval;
+    }
+  }
+  */
+
+  async _findFreePortInRange(start, end) {
+    for (let p = start; p <= end; p++) {
+      if (await this.isPortAvailable(p)) return p;
+    }
+    throw new Error(`端口范围 ${start}-${end} 无可用端口`);
+  }
+
+  _isOcrReadyLog(log = '') {
+    return log.includes('Application startup complete') || log.includes('Uvicorn running on') || log.includes('所有服务已启动');
+  }
+
   _attachLegacyProcessListeners(modelId, process, onLog = null) {
     process.stdout.on('data', (data) => {
       const log = data.toString();
@@ -947,6 +1085,7 @@ class ProcessManager {
       if (!processInfo) return;
       processInfo.logs.push(log);
       processInfo.logStream?.write(log);
+      processInfo.lastActivity = Date.now();
       console.log(`[${modelId}] ${log}`);
       if (onLog) onLog(log);
     });
@@ -957,6 +1096,7 @@ class ProcessManager {
       if (!processInfo) return;
       processInfo.logs.push(log);
       processInfo.logStream?.write(log);
+      processInfo.lastActivity = Date.now();
       console.log(`[${modelId}] ${log}`);
       if (onLog) onLog(log);
     });
@@ -1157,6 +1297,9 @@ class ProcessManager {
       if (processInfo.watchdogTimer) {
         clearInterval(processInfo.watchdogTimer);
       }
+      if (processInfo._idleMonitor) {
+        clearInterval(processInfo._idleMonitor);
+      }
 
       if (processInfo.logStream && !processInfo.logStream.writableEnded && !processInfo.logStream.destroyed) {
         processInfo.logStream.end();
@@ -1194,6 +1337,7 @@ class ProcessManager {
         running: false,
         starting: true,
         port: processInfo.port,
+        gradioPort: processInfo.gradioPort || null,
         type: processInfo.type
       };
     }
@@ -1201,6 +1345,7 @@ class ProcessManager {
     return {
       running: true,
       port: processInfo.port,
+      gradioPort: processInfo.gradioPort || null,
       type: processInfo.type
     };
   }

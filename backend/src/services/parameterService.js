@@ -67,7 +67,15 @@ class ParameterService {
 
     // 移除 version 字段（版本号由默认参数控制）
     const { version, _source, _version, _note, ...cleanParamsRaw } = userParams;
-    const cleanParams = this._sanitizeByModelSource(model, cleanParamsRaw);
+
+    // trim 所有 key 和 string value，清理历史脏数据和防止前端漏洞
+    const trimmedParams = {};
+    for (let [k, v] of Object.entries(cleanParamsRaw)) {
+      if (typeof v === 'string') v = v.trim();
+      trimmedParams[k.trim()] = v;
+    }
+
+    const cleanParams = this._sanitizeByModelSource(model, trimmedParams);
 
     // 归一化 RPC 参数：关闭且无设备时视为“未配置”，避免仅开关来回导致进入用户自定义状态
     if (cleanParams.rpc_enable !== true) {
@@ -151,6 +159,7 @@ class ParameterService {
    * 添加自定义键值对
    */
   async addCustomParameter(modelId, key, value) {
+    const trimmedKey = key.trim();
     const model = modelManager.getById(modelId);
     if (!model) {
       throw new Error('模型不存在');
@@ -158,16 +167,16 @@ class ParameterService {
 
     // 如果用户重新添加了此前删除的 key，从删除记录中移除
     const prevDeleted = model.deleted_parameters || [];
-    if (prevDeleted.includes(key)) {
+    if (prevDeleted.includes(trimmedKey)) {
       await modelManager.update(modelId, {
-        deleted_parameters: prevDeleted.filter(k => k !== key)
+        deleted_parameters: prevDeleted.filter(k => k !== trimmedKey)
       });
     }
 
     const currentParams = model.user_parameters || {};
     const updatedParams = {
       ...currentParams,
-      [key]: value
+      [trimmedKey]: value
     };
 
     return this.saveUserParameters(modelId, updatedParams);
@@ -182,19 +191,22 @@ class ParameterService {
       throw new Error('模型不存在');
     }
 
-    // 从 user_parameters 里移除
+    const trimmedKey = key.trim();
+
+    // 从 user_parameters 里移除（trim 匹配，兼容历史脏数据）
     const currentParams = this._sanitizeByModelSource(model, model.user_parameters || {});
-    const { [key]: removed, ...remainingParams } = currentParams;
+    const actualKey = Object.keys(currentParams).find(k => k.trim() === trimmedKey) || trimmedKey;
+    const { [actualKey]: removed, ...remainingParams } = currentParams;
 
     // 同时从 parameters（默认参数）里移除，防止它通过 defaultParams 合并回来
-    if (model.parameters && key in model.parameters) {
-      const { [key]: _removed, ...remainingDefault } = model.parameters;
+    if (model.parameters && actualKey in model.parameters) {
+      const { [actualKey]: _removed, ...remainingDefault } = model.parameters;
       await modelManager.update(modelId, { parameters: remainingDefault });
     }
 
     // 记录用户主动删除的 key，防止远程同步时恢复
     const deletedSet = new Set(model.deleted_parameters || []);
-    deletedSet.add(key);
+    deletedSet.add(trimmedKey);
     await modelManager.update(modelId, { deleted_parameters: [...deletedSet] });
 
     return this.saveUserParameters(modelId, remainingParams);

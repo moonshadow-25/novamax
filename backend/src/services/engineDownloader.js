@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import * as tar from 'tar';
-import AdmZip from 'adm-zip';
+import StreamZip from 'node-stream-zip';
 import axios from 'axios';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
@@ -193,6 +193,16 @@ class EngineDownloader {
       } catch (err) {
         downloadStateManager.setState(runtimeTask.taskId, 'failed', err.message, null);
       }
+      // 运行时下载完成，将关联的引擎任务统一标记为 completed
+      for (const taskInfo of tasks) {
+        if (!taskInfo.isRuntime && taskInfo.skipRuntimeDownload) {
+          const stateId = taskInfo.engineId;
+          const stateVer = taskInfo.version;
+          downloadStateManager.setState(stateId, 'completed', null, stateVer);
+          downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
+          eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
+        }
+      }
     }
   }
 
@@ -228,9 +238,15 @@ class EngineDownloader {
 
         await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo, skipRuntimeDownload);
 
-        downloadStateManager.setState(stateId, 'completed', null, stateVer);
-        downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
-        eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
+        // 引擎包已安装但运行时还需下载 → 保持 installing 状态，等运行时完成后由 _runDownloadChain 统一标记 completed
+        if (!taskInfo.isRuntime && skipRuntimeDownload) {
+          downloadStateManager.setState(stateId, 'installing', null, stateVer);
+          eventBus.broadcast('download-progress', { engineId: stateId, status: 'installing' });
+        } else {
+          downloadStateManager.setState(stateId, 'completed', null, stateVer);
+          downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
+          eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
+        }
         resolveLock();
       } catch (error) {
         // 用户主动暂停 → 不覆盖 paused 状态
@@ -596,7 +612,10 @@ class EngineDownloader {
       await tar.extract({ file: filePath, cwd: targetPath });
     } else if (name.endsWith('.zip')) {
       console.log(`Extracting zip: ${filePath} -> ${targetPath}`);
-      new AdmZip(filePath).extractAllTo(targetPath, true);
+      const zip = new StreamZip.async({ file: filePath });
+      const count = await zip.extract(null, targetPath);
+      await zip.close();
+      console.log(`  zip extracted ${count} entries`);
     } else {
       throw new Error(`不支持的压缩格式: ${path.basename(filePath)}`);
     }

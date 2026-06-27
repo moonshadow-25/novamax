@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Drawer, Progress, Button, Space, Tag, Empty, Typography, message } from 'antd';
 import { PauseCircleOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { downloadService, comfyuiService, asrModelsService, ttsService, engineService } from '../../services/api';
+import { downloadService, comfyuiService, asrModelsService, ttsService, engineService, ocrModelsService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
@@ -85,6 +85,8 @@ function DownloadCenter({ visible, onClose }) {
         await asrModelsService.pauseDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'tts') {
         await ttsService.pauseDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'ocr') {
+        await ocrModelsService.pauseDownload(dl.taskId || dl.comfyuiTaskId || dl.id);
       } else {
         await downloadService.pause(dl.modelId, dl.targetQuantization);
       }
@@ -104,6 +106,8 @@ function DownloadCenter({ visible, onClose }) {
         await asrModelsService.resumeDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'tts') {
         await ttsService.resumeDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'ocr') {
+        await ocrModelsService.resumeDownload(dl.taskId || dl.comfyuiTaskId || dl.id);
       } else {
         await downloadService.resume(dl.modelId, dl.targetQuantization);
       }
@@ -123,6 +127,8 @@ function DownloadCenter({ visible, onClose }) {
         await asrModelsService.cancelDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'tts') {
         await ttsService.cancelDownload(dl.comfyuiTaskId);
+      } else if (dl.type === 'ocr') {
+        await ocrModelsService.cancelDownload(dl.taskId || dl.comfyuiTaskId || dl.id);
       } else {
         await downloadService.cancel(dl.modelId, dl.targetQuantization);
       }
@@ -172,6 +178,7 @@ function DownloadCenter({ visible, onClose }) {
                     {dl.type === 'comfyui' && <Tag color="green" style={{ marginLeft: 8 }}>ComfyUI</Tag>}
                     {dl.type === 'asr' && <Tag color="cyan" style={{ marginLeft: 8 }}>ASR</Tag>}
                     {dl.type === 'tts' && <Tag color="geekblue" style={{ marginLeft: 8 }}>TTS</Tag>}
+                    {dl.type === 'ocr' && <Tag color="gold" style={{ marginLeft: 8 }}>OCR</Tag>}
                   </Text>
                   <Space size={4}>
                     {dl.type !== 'comfyui' && dl.targetQuantization && (

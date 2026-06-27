@@ -22,14 +22,15 @@ import {
   CloudOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  RedoOutlined
+  RedoOutlined,
+  ExportOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { normalizeEngineType } from '../../utils/engineType';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
 import { ENGINE_STATUS_MAP } from '../../utils/engineStatus';
-import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, asrModelsService, ttsStudioService, asrStudioService } from '../../services/api';
+import { backendService, modelService, downloadService, comfyuiService, engineService, parameterService, multiConnectService, ttsService, asrModelsService, ttsStudioService, asrStudioService, ocrModelsService } from '../../services/api';
 import ParametersDrawer from '../ParametersDrawer/ParametersDrawer';
 import QuantizationSelector from '../QuantizationSelector/QuantizationSelector';
 import RequiredModelsPanel from '../RequiredModelsPanel/RequiredModelsPanel';
@@ -37,8 +38,10 @@ import UserMappingPanel from '../UserMappingPanel/UserMappingPanel';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 import AsrModelsPanel from '../AsrModelsPanel/AsrModelsPanel';
 import TtsModelsPanel from '../TtsModelsPanel/TtsModelsPanel';
+import OcrModelsPanel from '../OcrModelsPanel/OcrModelsPanel';
 import AsrSettingsDrawer from '../AsrSettingsDrawer/AsrSettingsDrawer';
 import TtsSettingsDrawer from '../TtsSettingsDrawer/TtsSettingsDrawer';
+import OcrSettingsDrawer from '../OcrSettingsDrawer/OcrSettingsDrawer';
 import './ModelCard.css';
 
 const { Text } = Typography;
@@ -86,6 +89,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [parametersVisible, setParametersVisible] = useState(false);
   const [whisperSettingsVisible, setWhisperSettingsVisible] = useState(false);
   const [ttsSettingsVisible, setTtsSettingsVisible] = useState(false);
+  const [ocrSettingsVisible, setOcrSettingsVisible] = useState(false);
   const [quantizationSelectorVisible, setQuantizationSelectorVisible] = useState(false);
   const [realDownloadedQuantizations, setRealDownloadedQuantizations] = useState([]);
   const [realDownloadedFiles, setRealDownloadedFiles] = useState([]);
@@ -97,9 +101,10 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(model.name);
 
-  // whisper / tts 管理弹窗
+  // whisper / tts / ocr 管理弹窗
   const [whisperModelsVisible, setWhisperModelsVisible] = useState(false);
   const [ttsModelsVisible, setTtsModelsVisible] = useState(false);
+  const [ocrModelsVisible, setOcrModelsVisible] = useState(false);
   const [ttsStatus, setTtsStatus] = useState('idle');
   const [ttsEngineUpdate, setTtsEngineUpdate] = useState(false);
   const [ttsModelMissing, setTtsModelMissing] = useState(false);
@@ -373,6 +378,26 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         if (filesStatus.summary && filesStatus.summary.missing > 0) {
           message.warning(t('modelCard.downloadWhisperFilesFirst'));
           setWhisperModelsVisible(true);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // OCR 模型启动前检查引擎和模型文件
+      if (model.type === 'ocr') {
+        const engineResult = await engineService.checkInstalled('ocr');
+        if (!engineResult.installed) {
+          setEngineInfo(engineResult.engineInfo);
+          setEngineTarget('ocr');
+          setShowEngineModal(true);
+          setLoading(false);
+          return;
+        }
+        // 检查模型文件是否全部下载
+        const filesStatus = await ocrModelsService.getFilesStatus(model.id);
+        if (filesStatus.summary && filesStatus.summary.missing > 0) {
+          message.warning('请先下载完整的模型文件后再运行');
+          setOcrModelsVisible(true);
           setLoading(false);
           return;
         }
@@ -749,7 +774,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       llm: `/llm/${model.id}`,
       comfyui: `/comfyui/${model.id}`,
       // tts: `/tts/${model.id}`,  // 已改为直接打开 WebUI，如需恢复 React 页面取消此注释并删除上方 tts 块
-      asr: `/asr/use`
+      asr: `/asr/use`,
+      ocr: `/ocr`
     };
     navigate(routes[model.type]);
   };
@@ -761,6 +787,8 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
       setWhisperSettingsVisible(true);
     } else if (model.type === 'tts') {
       setTtsSettingsVisible(true);
+    } else if (model.type === 'ocr') {
+      setOcrSettingsVisible(true);
     } else {
       setParametersVisible(true);
     }
@@ -863,7 +891,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
   // 判断是否可以启动：
   // 场景1：有active文件且完整（已下载的默认版本）且不在下载默认版本
   // 场景2：选中了未下载版本且该版本已下载完成
-  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'asr' && !!model.path);
+  const canStart = (activeFileOk && !isDownloadingDefault) || (hasUndownloadedSelection && isDefaultDownloadCompleted) || model.source === 'cloudapi' || (model.type === 'asr' && !!model.path) || (model.type === 'ocr');
 
   // 判断是否应该显示下载按钮：
   // 1. 选中了未下载版本 且 不在下载中/已完成状态
@@ -1339,6 +1367,64 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         </Space>
       )}
 
+      {/* OCR 专属按钮 */}
+      {(model.type === 'ocr' && model.source !== 'custom') && (
+        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+          {isStarting ? (
+            <Button danger icon={<LoadingOutlined />} onClick={handleStop} block color="red" variant="solid">
+              {t('modelCard.abortStart')}
+            </Button>
+          ) : isRunning ? (
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <Button
+                danger
+                icon={<StopOutlined />}
+                onClick={handleStop}
+                loading={loading}
+                color="red"
+                variant="solid"
+                style={{ flex: 1 }}
+              >
+                {t('modelCard.stop')}
+              </Button>
+              <Button
+                type="primary"
+                icon={<ExportOutlined />}
+                onClick={() => {
+                  const host = window.location.hostname || '127.0.0.1';
+                  const port = model.gradio_port || model.port;
+                  window.open(`http://${host}:${port}`, '_blank');
+                }}
+                color="green"
+                variant="solid"
+                style={{ flex: 1 }}
+              >
+                使用
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleStart}
+              loading={loading}
+              block
+              color="blue"
+              variant="solid"
+            >
+              {t('modelCard.run')}
+            </Button>
+          )}
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() => setOcrModelsVisible(true)}
+            block
+          >
+            {t('modelCard.manageWorkflow')}
+          </Button>
+        </Space>
+      )}
+
       <Modal
         title={t('modelCard.rpcValidationTitle')}
         open={rpcValidationVisible}
@@ -1526,9 +1612,32 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         <TtsModelsPanel modelId={model.id} />
       </Modal>
 
+      {/* OCR 模型管理 Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>{model.name}</span>
+          </Space>
+        }
+        open={ocrModelsVisible}
+        onCancel={() => setOcrModelsVisible(false)}
+        footer={null}
+        width={880}
+        destroyOnClose
+      >
+        <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label={t('modelCard.modelDescription')}>
+            <Text>{model.description || t('modelCard.noDescription')}</Text>
+          </Descriptions.Item>
+        </Descriptions>
+        <Divider style={{ margin: '12px 0' }} />
+        <OcrModelsPanel modelId={model.id} />
+      </Modal>
+
 
       {/* 启动按钮 - 当有active文件且不在下载默认版本时显示（非ComfyUI、非Whisper remote、非TTS） */}
-      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && !(model.type === 'asr' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+      {canStart && model.type !== 'comfyui' && model.type !== 'tts' && model.type !== 'ocr' && !(model.type === 'asr' && model.source !== 'custom') && (        <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
           {isStarting ? (
             <Button
               danger
@@ -1690,6 +1799,14 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
         visible={ttsSettingsVisible}
         model={model}
         onClose={() => setTtsSettingsVisible(false)}
+        onSave={onUpdate}
+        onDelete={onUpdate}
+      />
+
+      <OcrSettingsDrawer
+        visible={ocrSettingsVisible}
+        model={model}
+        onClose={() => setOcrSettingsVisible(false)}
         onSave={onUpdate}
         onDelete={onUpdate}
       />

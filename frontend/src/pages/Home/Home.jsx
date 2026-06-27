@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse, Alert, Card } from 'antd';
-import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined, SoundOutlined } from '@ant-design/icons';
+import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined, SoundOutlined, ScanOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { setLocale } from '../../i18n';
@@ -23,7 +23,8 @@ const MODEL_TYPES = [
   { key: 'llm', label: 'LLM' },
   { key: 'comfyui', label: 'ComfyUI' },
   { key: 'tts', label: 'TTS' },
-  { key: 'asr', label: 'ASR' }
+  { key: 'asr', label: 'ASR' },
+  { key: 'ocr', label: 'OCR' }
 ];
 
 const DEFAULT_FILTER_OPTIONS = (t, favorites, downloadedModels, customModels, cloudApiModels) => [
@@ -45,6 +46,7 @@ const COMFYUI_FILTER_OPTIONS = (t) => [
 // 其他类型暂时使用空选项，后续可以根据需要调整
 const TTS_FILTER_OPTIONS = () => [];
 const ASR_FILTER_OPTIONS = () => [];
+const OCR_FILTER_OPTIONS = () => [];
 
 function Home() {
   const { t, i18n } = useTranslation(['home', 'common']);
@@ -52,9 +54,9 @@ function Home() {
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
-    return ['llm', 'comfyui', 'tts', 'asr'].includes(tab) ? tab : 'llm';
+    return ['llm', 'comfyui', 'tts', 'asr', 'ocr'].includes(tab) ? tab : 'llm';
   });
-  const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', asr: 'all' });
+  const [filterTabs, setFilterTabs] = useState({ llm: 'all', comfyui: 'all', tts: 'all', asr: 'all', ocr: 'all' });
   const filterTab = filterTabs[activeTab] || 'all';
   const setFilterTab = (val) => setFilterTabs(prev => ({ ...prev, [activeTab]: val }));
   const [searchQuery, setSearchQuery] = useState('');
@@ -510,16 +512,18 @@ function Home() {
                 items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
                 style={{ flex: 1 }}
               />
-              <Segmented
-                value={filterTab}
-                onChange={setFilterTab}
-                options={
-                  activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS(t)
-                    : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                    : activeTab === 'asr' ? ASR_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
-                    : DEFAULT_FILTER_OPTIONS(t, favorites, downloadedModels, customModels, cloudApiModels)
-                }
-              />
+              {activeTab !== 'ocr' && (
+                <Segmented
+                  value={filterTab}
+                  onChange={setFilterTab}
+                  options={
+                    activeTab === 'comfyui' ? COMFYUI_FILTER_OPTIONS(t)
+                      : activeTab === 'tts' ? TTS_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                      : activeTab === 'asr' ? ASR_FILTER_OPTIONS(favorites, downloadedModels, customModels, cloudApiModels)
+                      : DEFAULT_FILTER_OPTIONS(t, favorites, downloadedModels, customModels, cloudApiModels)
+                  }
+                />
+              )}
             </div>
           </div>
         </div>

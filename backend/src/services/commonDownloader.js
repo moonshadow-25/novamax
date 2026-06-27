@@ -73,6 +73,56 @@ class CommonDownloader {
   }
 
   /**
+   * 下载模型文件（支持 file / folder / repo 三种 download_type）。
+   * - file:   单文件直接 HTTP 下载
+   * - folder: 先调 ModelScope API 列出目录下所有文件，再依次下载
+   * - repo:   先调 ModelScope API 列出整个仓库所有文件，再依次下载
+   *
+   * @param {Object} modelInfo - 必须包含 download_type, original_url, dest, filename
+   * @param {Function} onComplete - 下载完成/失败时的回调
+   * @returns {string} taskId
+   */
+  startRepoDownload(modelInfo, onComplete = null) {
+    const taskId = randomUUID();
+    const abortController = new AbortController();
+
+    const stateType = modelInfo.source_model_type || 'ocr';
+    const stateId = `${stateType}_${taskId}`;
+    const dsState = downloadStateManager.createState(stateId, modelInfo.filename, stateType);
+    dsState.comfyuiTaskId = taskId;
+    dsState.displayName = `${modelInfo.source_model_name || modelInfo.filename}`;
+    dsState.sourceModelId = modelInfo.source_model_id || null;
+    dsState.sourceModelType = stateType;
+    dsState._modelInfo = modelInfo;
+
+    this.tasks.set(taskId, {
+      taskId,
+      filename: modelInfo.filename,
+      type: modelInfo.type,
+      status: 'pending',
+      progress: 0,
+      totalBytes: null,
+      downloadedBytes: null,
+      speed: null,
+      source: null,
+      path: null,
+      error: null,
+      _abortController: abortController,
+      _modelInfo: modelInfo,
+      _onComplete: onComplete,
+      _process: null,
+      _stateId: stateId,
+      _isMultiFile: true,
+      _fileList: null,
+      _completedFiles: [],
+      _currentFile: null,
+    });
+
+    this._runRepoDownload(taskId, modelInfo, onComplete);
+    return taskId;
+  }
+
+  /**
    * 暂停下载
    */
   pauseDownload(taskId) {
@@ -106,6 +156,8 @@ class CommonDownloader {
       const dsState = downloadStateManager.getFullStateByComfyuiTaskId(taskId);
       if (!dsState || !dsState._modelInfo) return false;
 
+      const isMultiFile = dsState._modelInfo.download_type === 'folder' || dsState._modelInfo.download_type === 'repo';
+
       task = {
         taskId,
         filename: dsState.targetQuantization,
@@ -122,7 +174,11 @@ class CommonDownloader {
         _modelInfo: dsState._modelInfo,
         _onComplete: null,
         _process: null,
-        _stateId: dsState.id
+        _stateId: dsState.id,
+        _isMultiFile: isMultiFile,
+        _fileList: null,
+        _completedFiles: [],
+        _currentFile: null,
       };
       this.tasks.set(taskId, task);
     }
@@ -135,8 +191,12 @@ class CommonDownloader {
     // 同步到 downloadStateManager
     downloadStateManager.setState(task._stateId, 'downloading', null, task.filename);
 
-    // 重新启动下载（各下载方法内部支持断点续传）
-    this._runDownload(taskId, task._modelInfo, task._onComplete);
+    // 根据下载模式选择 runner
+    if (task._isMultiFile) {
+      this._runRepoDownload(taskId, task._modelInfo, task._onComplete);
+    } else {
+      this._runDownload(taskId, task._modelInfo, task._onComplete);
+    }
     return true;
   }
 
@@ -166,9 +226,11 @@ class CommonDownloader {
     // 从 downloadStateManager 删除
     downloadStateManager.deleteState(task._stateId, task.filename);
 
-    // 延迟清理临时文件（等待进程释放文件锁）
-    const targetPath = this._getTargetPath(task.type, task.filename, task._modelInfo?.dest || null);
-    this._cleanupTempFiles(targetPath);
+    // 延迟清理临时文件（多文件下载由 _runRepoDownload 自行清理）
+    if (!task._isMultiFile) {
+      const targetPath = this._getTargetPath(task.type, task.filename, task._modelInfo?.dest || null);
+      this._cleanupTempFiles(targetPath);
+    }
 
     // 5秒后清理任务记录
     setTimeout(() => this.tasks.delete(taskId), 5000);
@@ -225,7 +287,7 @@ class CommonDownloader {
       return null;
     }
     // 不暴露内部字段
-    const { _abortController, _modelInfo, _onComplete, _process, ...publicTask } = task;
+    const { _abortController, _modelInfo, _onComplete, _process, _stateId, _isMultiFile, _fileList, _completedFiles, _currentFile, ...publicTask } = task;
     return publicTask;
   }
 
@@ -472,6 +534,223 @@ class CommonDownloader {
     if (fs.existsSync(dir)) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     }
+  }
+
+  /**
+   * 多文件下载编排（folder / repo 类型）。
+   * 先获取文件列表，再依次 HTTP 下载每个文件，聚合整体进度。
+   */
+  async _runRepoDownload(taskId, modelInfo, onComplete) {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+
+    task.status = 'downloading';
+    downloadStateManager.setState(task._stateId, 'downloading', null, task.filename);
+
+    try {
+      // 1. 获取文件列表
+      const files = await this._resolveFileList(modelInfo, task._abortController.signal);
+      if (!files || files.length === 0) {
+        throw new Error('未找到可下载的文件');
+      }
+      task._fileList = files;
+
+      // 2. 计算总大小
+      const totalSize = files.reduce((sum, f) => sum + (f.Size || 0), 0);
+      task.totalBytes = totalSize;
+      downloadStateManager.updateBytes(task._stateId, 0, totalSize, task.filename);
+
+      const destDir = modelInfo.dest;
+      const checkAborted = () => task._abortController.signal.aborted;
+
+      // 3. 依次下载每个文件
+      let completedCount = 0;
+      const totalFiles = files.length;
+      for (const file of files) {
+        if (checkAborted()) {
+          if (task.status !== 'paused') task.status = 'cancelled';
+          return;
+        }
+
+        task._currentFile = file;
+
+        const fileUrl = this._buildResolveUrl(modelInfo, file);
+        const filePathInRepo = file.Path || file.Name;
+        const fileDest = path.join(destDir, filePathInRepo);
+
+        // 跳过已存在的完整文件
+        if (fs.existsSync(fileDest)) {
+          const existingSize = fs.statSync(fileDest).size;
+          if (existingSize > 0 && (!file.Size || existingSize >= file.Size)) {
+            console.log(`  ✓ 文件已存在，跳过: ${filePathInRepo}`);
+            completedCount++;
+            task._completedFiles.push(file);
+            const aggregateBytes = totalSize > 0
+              ? task.downloadedBytes + existingSize
+              : task.downloadedBytes;
+            task.downloadedBytes = aggregateBytes;
+            task.progress = Math.floor(completedCount / totalFiles * 100);
+            continue;
+          }
+        }
+
+        const success = await this._downloadWithHTTP(fileUrl, fileDest, (info) => {
+          if (checkAborted()) return;
+          // 聚合进度：已完成文件字节 + 当前文件字节
+          const completedBytes = totalSize > 0
+            ? files.slice(0, completedCount).reduce((s, f) => s + (f.Size || 0), 0)
+            : 0;
+          const currentBytes = info.downloadedBytes || 0;
+          const aggregateBytes = completedBytes + currentBytes;
+          task.downloadedBytes = aggregateBytes;
+          if (totalSize > 0) {
+            task.progress = Math.min(99, Math.floor(aggregateBytes / totalSize * 100));
+          }
+          task.speed = info.speed || 0;
+          downloadStateManager.updateProgress(task._stateId, task.progress, task.speed, task.filename);
+          if (totalSize > 0) {
+            downloadStateManager.updateBytes(task._stateId, aggregateBytes, totalSize, task.filename);
+          }
+        }, task._abortController.signal);
+
+        if (!success) {
+          if (checkAborted()) {
+            // 暂停/取消：清理当前未完成下载的 .part 文件
+            try { fs.unlinkSync(fileDest + '.part'); } catch {}
+            return;
+          }
+          throw new Error(`下载失败: ${filePathInRepo}`);
+        }
+
+        completedCount++;
+        task._completedFiles.push(file);
+      }
+
+      // 4. 完成
+      task.status = 'completed';
+      task.progress = 100;
+      task.downloadedBytes = totalSize;
+      task.speed = 0;
+      downloadStateManager.setState(task._stateId, 'completed', null, task.filename);
+
+      // 写入 .download-complete 标记文件，供 files-status 判断完整性
+      const markerDir = modelInfo.download_type === 'repo'
+        ? destDir
+        : path.join(destDir, modelInfo.filename);
+      try {
+        fs.mkdirSync(markerDir, { recursive: true });
+        fs.writeFileSync(path.join(markerDir, '.download-complete'), JSON.stringify({
+          completed_at: new Date().toISOString(),
+          file_count: files.length,
+          total_bytes: totalSize
+        }));
+      } catch {}
+
+      if (onComplete) onComplete({ success: true, path: destDir });
+    } catch (error) {
+      const t = this.tasks.get(taskId);
+      if (t && t.status !== 'paused' && t.status !== 'cancelled') {
+        t.status = 'failed';
+        t.error = error.message;
+        downloadStateManager.setState(t._stateId, 'failed', error.message, t.filename);
+        if (onComplete) onComplete({ success: false, error: error.message });
+      }
+    }
+
+    // 终态清理（与 _runDownload 保持一致）
+    const finalTask = this.tasks.get(taskId);
+    if (finalTask && (finalTask.status === 'completed' || finalTask.status === 'failed')) {
+      setTimeout(() => {
+        this.tasks.delete(taskId);
+        downloadStateManager.deleteState(finalTask._stateId, finalTask.filename);
+      }, TASK_CLEANUP_MS);
+    }
+  }
+
+  /**
+   * 根据 download_type 获取待下载文件列表。
+   * - file:   返回合成单文件条目
+   * - folder: 调 ModelScope API 列出目录下所有文件
+   * - repo:   调 ModelScope API 列出整个仓库文件（自动尝试 Root='' 和 'models'）
+   */
+  async _resolveFileList(modelInfo, signal) {
+    const downloadType = modelInfo.download_type || 'file';
+    const url = modelInfo.original_url || modelInfo.download_sources?.original || '';
+
+    if (downloadType === 'file') {
+      // 单文件：返回合成条目，Path 保留完整仓库路径以维持目录结构
+      const filePath = modelInfo.filename;
+      return [{ Name: path.basename(filePath), Path: filePath, Size: modelInfo.size || 0 }];
+    }
+
+    // folder / repo：调用 ModelScope API 获取文件列表
+    const { repo, revision, rootPath } = this._parseModelScopeUrl(url);
+    if (!repo) throw new Error(`无法解析 ModelScope URL: ${url}`);
+
+    const apiUrl = `https://modelscope.cn/api/v1/models/${repo}/repo/files`;
+
+    // repo 类型自动尝试多个 Root（根目录 / models/ 子目录）
+    const rootsToTry = downloadType === 'repo'
+      ? ['', 'models']
+      : [rootPath];
+
+    let files = [];
+    for (const rt of rootsToTry) {
+      if (signal?.aborted) throw new Error('下载已取消');
+      try {
+        console.log(`[commonDownloader] 获取文件列表: ${apiUrl}?Revision=${revision}&Recursive=true&Root=${rt}`);
+        const resp = await axios.get(apiUrl, {
+          params: { Revision: revision, Recursive: 'true', Root: rt },
+          timeout: 15000,
+          signal
+        });
+        const data = resp.data;
+        files = (data?.Data?.Files || []).filter(f => !f.IsDir);
+        if (files.length > 0) {
+          console.log(`[commonDownloader] 获取到 ${files.length} 个文件 (Root=${rt})`);
+          break;
+        }
+        console.log(`[commonDownloader] Root=${rt} 返回 0 个文件，尝试下一个...`);
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        console.log(`[commonDownloader] Root=${rt} 请求失败: ${e.message}`);
+      }
+    }
+
+    if (files.length === 0) {
+      throw new Error(`仓库 ${repo} 中没有可下载的文件`);
+    }
+
+    return files;
+  }
+
+  /**
+   * 解析 ModelScope tree URL，提取 repo / revision / rootPath。
+   * 输入: https://modelscope.cn/models/{repo}/tree/{revision}/{path...}
+   */
+  _parseModelScopeUrl(url) {
+    const match = url?.match(/modelscope\.cn\/models\/([^/]+\/[^/]+)\/tree\/([^/]+)(?:\/(.*))?$/);
+    if (!match) return { repo: null, revision: 'master', rootPath: '' };
+    return {
+      repo: match[1],
+      revision: match[2],
+      rootPath: match[3] || ''
+    };
+  }
+
+  /**
+   * 为单个文件构建 ModelScope resolve 直链。
+   * 输入: https://modelscope.cn/models/{repo}/resolve/{revision}/{filePath}
+   */
+  _buildResolveUrl(modelInfo, file) {
+    const url = modelInfo.original_url || modelInfo.download_sources?.original || '';
+    const { repo, revision } = this._parseModelScopeUrl(url);
+    const filePath = file.Path || file.Name;
+    if (repo) {
+      return `https://modelscope.cn/models/${repo}/resolve/${revision}/${filePath}`;
+    }
+    // 降级：直接替换 tree → resolve
+    return url.replace('/tree/', '/resolve/');
   }
 }
 

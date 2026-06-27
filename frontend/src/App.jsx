@@ -6,6 +6,7 @@ import LLMChat from './pages/LLMChat/LLMChat';
 import ComfyUI from './pages/ComfyUI/ComfyUI';
 import WorkbenchPage from './pages/TTS/Workbench';
 import ASRUse from './pages/ASR/ASRUse';
+import OCRUse from './pages/OCR/OCRUse';
 import Settings from './pages/Settings/Settings';
 import GlobalSettings from './pages/GlobalSettings/GlobalSettings';
 
@@ -20,7 +21,9 @@ function App() {
           <Route path="/tts/workspace/:id" element={<WorkbenchPage />} />
           <Route path="/tts" element={<Navigate to="/?tab=tts" replace />} />
           <Route path="/asr/use" element={<ASRUse />} />
+          <Route path="/ocr" element={<OCRUse />} />
           <Route path="/asr" element={<Navigate to="/?tab=asr" replace />} />
+          <Route path="/ocr/use" element={<Navigate to="/ocr" replace />} />
           <Route path="/whisper/:modelId" element={<Navigate to="/?tab=asr" replace />} />
           <Route path="/whisper" element={<Navigate to="/?tab=asr" replace />} />
           <Route path="/settings/:modelId" element={<Settings />} />

@@ -112,7 +112,7 @@ async function syncModels() {
   let added = 0;
   let updated = 0;
 
-  for (const type of ['llm', 'comfyui', 'tts', 'asr']) {
+  for (const type of ['llm', 'comfyui', 'tts', 'asr', 'ocr']) {
     const list = remoteModels[type] || (type === 'asr' ? remoteModels['whisper'] : null) || [];
     for (const remoteModel of list) {
       const { id, version: remoteVersion, ...remoteFields } = remoteModel;

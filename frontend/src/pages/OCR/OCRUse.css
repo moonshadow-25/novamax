@@ -1,0 +1,22 @@
+.ocr-use-page {
+  padding: 24px;
+}
+
+.ocr-use-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.ocr-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 960px) {
+  .ocr-model-grid {
+    grid-template-columns: 1fr;
+  }
+}

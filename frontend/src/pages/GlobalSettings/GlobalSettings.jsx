@@ -52,7 +52,7 @@ const GlobalSettings = () => {
   const [exportModels, setExportModels] = useState([]);
   const [exportFileVersion, setExportFileVersion] = useState('1.0');
   const [exportUpdatedAt, setExportUpdatedAt] = useState('');
-  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'asr', 'tts']);
+  const [exportTypes, setExportTypes] = useState(['llm', 'comfyui', 'asr', 'tts', 'ocr']);
   const [exportVersionMap, setExportVersionMap] = useState({});
   const [exportJson, setExportJson] = useState('');
 
@@ -306,7 +306,7 @@ const GlobalSettings = () => {
   const loadExportModels = async () => {
     try {
       const result = await modelService.getAll();
-      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'asr', 'tts'].includes(m.type));
+      const models = (result.models || []).filter(m => ['llm', 'comfyui', 'asr', 'tts', 'ocr'].includes(m.type));
       setExportModels(models);
       const now = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 19) + '+08:00';
       setExportUpdatedAt(now);

@@ -13,7 +13,8 @@ class ModelManager {
       llm: [],
       comfyui: [],
       tts: [],
-      asr: []
+      asr: [],
+      ocr: []
     };
     this.db = null;
 
@@ -58,7 +59,7 @@ class ModelManager {
 
   _loadFromDB() {
     const rows = this.db.prepare('SELECT id, type, data FROM models ORDER BY rowid').all();
-    this.models = { llm: [], comfyui: [], tts: [], asr: [] };
+    this.models = { llm: [], comfyui: [], tts: [], asr: [], ocr: [] };
     for (const row of rows) {
       try {
         const model = JSON.parse(row.data);

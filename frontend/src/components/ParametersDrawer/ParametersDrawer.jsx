@@ -306,22 +306,24 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
   };
 
   const handleAddCustom = async () => {
-    if (!newKey.trim()) {
+    const trimmedKey = newKey.trim();
+    if (!trimmedKey) {
       message.error(t('settingsDrawer.inputParameterName'));
       return;
     }
 
     try {
+      const trimmedValue = newValue.trim();
       // 尝试解析值为数字或布尔值
-      let parsedValue = newValue;
-      if (newValue === 'true') parsedValue = true;
-      else if (newValue === 'false') parsedValue = false;
-      else if (!isNaN(newValue) && newValue.trim() !== '') {
-        parsedValue = Number(newValue);
+      let parsedValue = trimmedValue;
+      if (trimmedValue === 'true') parsedValue = true;
+      else if (trimmedValue === 'false') parsedValue = false;
+      else if (!isNaN(trimmedValue) && trimmedValue !== '') {
+        parsedValue = Number(trimmedValue);
       }
 
       await axios.post(`/api/parameters/${modelId}/custom`, {
-        key: newKey,
+        key: trimmedKey,
         value: parsedValue
       });
 

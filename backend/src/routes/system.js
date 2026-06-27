@@ -880,7 +880,8 @@ const STORAGE_TYPES = {
   llm: { label: 'LLM 模型', dir: 'llm' },
   comfyui: { label: 'ComfyUI 模型', dir: 'comfyui' },
   tts: { label: 'TTS 模型', dir: 'tts' },
-  asr: { label: 'ASR 模型', dir: 'asr' }
+  asr: { label: 'ASR 模型', dir: 'asr' },
+  ocr: { label: 'OCR 模型', dir: 'ocr' }
 };
 
 /** 递归计算目录大小 */
@@ -1153,6 +1154,8 @@ const CACHE_EXCLUDE = new Set([
   'novamax.db',
   'novamax.db-shm',
   'novamax.db-wal',
+  'tts_services',
+  'asr_services'
 ]);
 
 /** 递归计算目录或文件的大小（字节）及文件数量 */
