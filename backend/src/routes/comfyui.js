@@ -513,6 +513,29 @@ router.post('/comfyui/:id/download-all-models', async (req, res) => {
 });
 
 /**
+ * 删除模型文件
+ * DELETE /api/comfyui/:id/delete-model
+ */
+router.delete('/comfyui/:id/delete-model', async (req, res) => {
+  try {
+    const { type, filename } = req.body;
+    if (!type || !filename) return res.status(400).json({ error: '缺少 type 或 filename' });
+    const filePath = comfyuiModelManager.getModelPath(type, filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    // 更新模型状态
+    const model = modelManager.getById(req.params.id);
+    if (model?.required_models) {
+      const updated = comfyuiModelManager.updateModelsStatus(model.required_models);
+      await modelManager.update(req.params.id, { required_models: updated });
+    }
+    eventBus.broadcast('model-updated', { modelId: req.params.id });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * 查询下载任务状态
  * GET /api/comfyui/download-status/:taskId
  */

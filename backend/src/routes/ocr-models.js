@@ -138,6 +138,33 @@ function writeMineruConfig(modelId) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
+/* ── 删除模型文件 ── */
+router.delete('/models/:modelId/files/:filename', async (req, res) => {
+  const { modelId, filename } = req.params;
+  const model = modelManager.getById(modelId);
+  if (!model || model.type !== 'ocr') return res.status(404).json({ error: 'Model not found' });
+  const fileInfo = (model.models || []).find(m => m.filename === filename);
+  if (!fileInfo) return res.status(400).json({ error: '文件不在模型配置中' });
+  const itemPath = getItemLocalPath(modelId, fileInfo);
+  try {
+    if (fileInfo.download_type === 'file') {
+      if (fs.existsSync(itemPath)) fs.unlinkSync(itemPath);
+    } else {
+      // folder / repo: 删除整个目录
+      if (fs.existsSync(itemPath) && fs.statSync(itemPath).isDirectory()) {
+        fs.rmSync(itemPath, { recursive: true, force: true });
+      }
+    }
+    // 清除 .download-complete 标记
+    const markerPath = path.join(getItemLocalPath(modelId, fileInfo), '.download-complete');
+    if (fs.existsSync(markerPath)) fs.unlinkSync(markerPath);
+    eventBus.broadcast('model-updated', { modelId });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /* ── 下载任务管理 ── */
 router.get('/download-status/:taskId', (req, res) => {
   const task = commonDownloader.getTask(req.params.taskId);

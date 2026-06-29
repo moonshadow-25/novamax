@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Table, Tag, Button, Space, Typography, message, Progress } from 'antd';
+import { Table, Tag, Button, Space, Typography, message, Progress, Popconfirm } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined,
-  PauseCircleOutlined, PlayCircleOutlined, StopOutlined
+  PauseCircleOutlined, PlayCircleOutlined, StopOutlined, DeleteOutlined
 } from '@ant-design/icons';
 import { ttsService, downloadService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
@@ -172,6 +172,29 @@ function TtsModelsPanel({ modelId }) {
     } catch { message.error(t('ttsModelsPanel.cancelFailed')); }
   };
 
+  const handleDelete = async (filename) => {
+    try {
+      await ttsService.deleteFile(modelId, filename);
+      message.success('文件已删除');
+      loadStatus();
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '删除失败');
+    }
+  };
+
+  const handleDeleteGroup = async (groupRecord) => {
+    const downloadedFiles = groupRecord.files.filter(f => f.downloaded);
+    if (downloadedFiles.length === 0) return;
+    let failed = 0;
+    for (const f of downloadedFiles) {
+      try { await ttsService.deleteFile(modelId, f.filename); }
+      catch { failed++; }
+    }
+    if (failed === 0) message.success(`已删除 ${downloadedFiles.length} 个文件`);
+    else message.warning(`删除完成，${failed} 个文件删除失败`);
+    loadStatus();
+  };
+
   const handleDownloadGroup = async (groupName, fileList) => {
     const missing = fileList.filter(f => !f.downloaded);
     if (missing.length === 0) return;
@@ -307,7 +330,34 @@ function TtsModelsPanel({ modelId }) {
       render: (_, record) => {
         if (record.isGroup) {
           const missing = record.files.filter(f => !f.downloaded);
-          if (missing.length === 0) return <Button size="small" disabled>{t('ttsModelsPanel.downloaded')}</Button>;
+          const running = record.files.filter(f => tasks[f.filename]);
+          // 有下载中的任务 → 显示暂停/取消
+          if (running.length > 0) {
+            const allPaused = running.every(f => tasks[f.filename]?.paused);
+            return (
+              <Space size={4}>
+                {allPaused
+                  ? <Button size="small" type="primary" icon={<PlayCircleOutlined />}
+                      onClick={() => running.forEach(f => handleResume(f.filename))}>{t('ttsModelsPanel.resume')}</Button>
+                  : <Button size="small" type="primary" icon={<PauseCircleOutlined />}
+                      onClick={() => running.forEach(f => handlePause(f.filename))}>{t('ttsModelsPanel.pause')}</Button>}
+                <Button size="small" type="primary" danger icon={<StopOutlined />}
+                  onClick={() => running.forEach(f => handleCancel(f.filename))}>{t('ttsModelsPanel.cancel')}</Button>
+              </Space>
+            );
+          }
+          if (missing.length === 0) return (
+            <Popconfirm
+              title="确认删除模型文件"
+              description={`确定要删除 ${record.groupName} 下的全部已下载文件吗？删除后需要重新下载才能使用。`}
+              onConfirm={() => handleDeleteGroup(record)}
+              okText="确认"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+            </Popconfirm>
+          );
           return (
             <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadGroup(record.groupName, record.files)}>
               {t('ttsModelsPanel.download')}
@@ -326,7 +376,18 @@ function TtsModelsPanel({ modelId }) {
             </Space>
           );
         }
-        if (record.downloaded) return <Button size="small" disabled>{t('ttsModelsPanel.downloaded')}</Button>;
+        if (record.downloaded) return (
+          <Popconfirm
+            title="确认删除模型文件"
+            description={`确定要删除 ${record.filename} 吗？删除后需要重新下载才能使用。`}
+            onConfirm={() => handleDelete(record.filename)}
+            okText="确认"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        );
         return (
           <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownload(record.filename)}>
             {t('ttsModelsPanel.download')}
@@ -356,7 +417,13 @@ function TtsModelsPanel({ modelId }) {
             icon={<DownloadOutlined />}
             onClick={() => {
               const targets = rows.flatMap(r => r.files).filter(f => !f.downloaded);
-              targets.forEach(f => handleDownload(f.filename));
+              targets.forEach(f => {
+                if (tasks[f.filename]?.paused) {
+                  handleResume(f.filename);
+                } else if (!tasks[f.filename]) {
+                  handleDownload(f.filename);
+                }
+              });
             }}
           >
             {t('ttsModelsPanel.downloadAllMissing')}

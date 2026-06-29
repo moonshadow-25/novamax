@@ -1328,7 +1328,7 @@ function ModelCard({ model, onUpdate, isFavorited = false, onToggleFavorite }) {
             </Button>
           )}
           <Button icon={<DownloadOutlined />} onClick={() => setTtsModelsVisible(true)} block>
-            管理模型文件
+            {t('modelCard.manageWorkflow')}
           </Button>
         </Space>
       )}

@@ -120,6 +120,21 @@ router.post('/tts/models/:modelId/download', async (req, res) => {
   res.json({ success: true, taskId });
 });
 
+/* ── 删除模型文件 ── */
+router.delete('/tts/models/:modelId/files/:filename', async (req, res) => {
+  const { modelId, filename } = req.params;
+  const model = modelManager.getById(modelId);
+  if (!model || model.type !== 'tts') return res.status(404).json({ error: 'Model not found' });
+  const filePath = path.join(MODELS_RUN_DIR, 'tts', modelId, filename);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    eventBus.broadcast('model-updated', { modelId });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/tts/download-status/:taskId', (req, res) => {
   res.json({ success: true, task: commonDownloader.getTask(req.params.taskId) || { status: 'not_found' } });
 });

@@ -87,6 +87,24 @@ router.post('/models/:modelId/download', async (req, res) => {
   res.json({ success: true, taskId });
 });
 
+/* ── 删除模型文件 ── */
+router.delete('/models/:modelId/files/:filename', async (req, res) => {
+  const { modelId, filename } = req.params;
+  const model = modelManager.getById(modelId);
+  if (!model || model.type !== 'asr') return res.status(404).json({ error: 'Model not found' });
+  const filePath = path.join(ASR_MODELS_DIR, modelId, filename);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    // 清除 .download-complete 标记（如果有）
+    const markerPath = filePath + '.download-complete';
+    if (fs.existsSync(markerPath)) fs.unlinkSync(markerPath);
+    eventBus.broadcast('model-updated', { modelId });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /* ── 下载任务管理 ── */
 router.get('/download-status/:taskId', (req, res) => {
   const task = commonDownloader.getTask(req.params.taskId);

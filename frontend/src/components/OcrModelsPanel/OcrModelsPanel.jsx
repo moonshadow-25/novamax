@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Tag, Button, Space, Typography, message, Progress } from 'antd';
+import { Table, Tag, Button, Space, Typography, message, Progress, Popconfirm } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined,
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined,
-  LoadingOutlined
+  LoadingOutlined, DeleteOutlined
 } from '@ant-design/icons';
 import { ocrModelsService, downloadService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
@@ -165,6 +165,16 @@ function OcrModelsPanel({ modelId }) {
     setTasks(prev => { const n = { ...prev }; delete n[filename]; return n; });
   };
 
+  const handleDelete = async (filename) => {
+    try {
+      await ocrModelsService.deleteFile(modelId, filename);
+      message.success('文件已删除');
+      loadStatus();
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '删除失败');
+    }
+  };
+
   const columns = [
     {
       title: '类型', dataIndex: 'role', key: 'role', width: 100,
@@ -228,7 +238,18 @@ function OcrModelsPanel({ modelId }) {
             </Space>
           );
         }
-        if (record.downloaded) return <Button size="small" disabled>已下载</Button>;
+        if (record.downloaded) return (
+          <Popconfirm
+            title="确认删除模型文件"
+            description={`确定要删除 ${record.filename} 吗？删除后需要重新下载才能使用。`}
+            onConfirm={() => handleDelete(record.filename)}
+            okText="确认"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        );
         // 已有暂停任务时点下载 → 恢复，避免创建重复任务
         if (tasks[record.filename]?.paused) {
           return (

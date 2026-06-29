@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Tag, Button, Space, Typography, message, Tooltip, Progress } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
+import { Table, Tag, Button, Space, Typography, message, Tooltip, Progress, Popconfirm } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined, DeleteOutlined } from '@ant-design/icons';
 import { comfyuiService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 import './RequiredModelsPanel.css';
@@ -333,6 +333,16 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
     }
   };
 
+  const handleDelete = async (record) => {
+    try {
+      await comfyuiService.deleteModelFile(modelId, record.type, record.filename);
+      message.success('文件已删除');
+      loadModelsStatus();
+    } catch (error) {
+      message.error(error.response?.data?.error || error.message || '删除失败');
+    }
+  };
+
   const columns = [
     {
       title: t('requiredModelsPanel.type'),
@@ -416,7 +426,18 @@ function RequiredModelsPanel({ requiredModels, modelId, onUpdate }) {
         }
 
         if (record.downloaded) {
-          return <Button size="small" disabled>{t('requiredModelsPanel.downloaded')}</Button>;
+          return (
+            <Popconfirm
+              title="确认删除模型文件"
+              description={`确定要删除 ${record.filename} 吗？删除后需要重新下载才能使用。`}
+              onConfirm={() => handleDelete(record)}
+              okText="确认"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+            </Popconfirm>
+          );
         }
 
         if (!record.has_url) {

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Tag, Button, Space, Typography, message, Progress } from 'antd';
+import { Table, Tag, Button, Space, Typography, message, Progress, Popconfirm } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, DownloadOutlined,
-  PauseCircleOutlined, PlayCircleOutlined, StopOutlined
+  PauseCircleOutlined, PlayCircleOutlined, StopOutlined, DeleteOutlined
 } from '@ant-design/icons';
 import { asrModelsService, downloadService } from '../../services/api';
 import { useTranslation } from 'react-i18next';
@@ -165,6 +165,16 @@ function AsrModelsPanel({ modelId, onPathReady }) {
     } catch (e) { message.error(t('whisperModelsPanel.cancelFailed')); }
   };
 
+  const handleDelete = async (filename) => {
+    try {
+      await asrModelsService.deleteFile(modelId, filename);
+      message.success('文件已删除');
+      loadStatus();
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '删除失败');
+    }
+  };
+
   const columns = [
     {
       title: t('whisperModelsPanel.type'), dataIndex: 'role', key: 'role', width: 100,
@@ -218,7 +228,18 @@ function AsrModelsPanel({ modelId, onPathReady }) {
             </Space>
           );
         }
-        if (record.downloaded) return <Button size="small" disabled>{t('whisperModelsPanel.downloaded')}</Button>;
+        if (record.downloaded) return (
+          <Popconfirm
+            title="确认删除模型文件"
+            description={`确定要删除 ${record.filename} 吗？删除后需要重新下载才能使用。`}
+            onConfirm={() => handleDelete(record.filename)}
+            okText="确认"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        );
         return (
           <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownload(record.filename)}>
             {t('whisperModelsPanel.download')}
@@ -248,7 +269,13 @@ function AsrModelsPanel({ modelId, onPathReady }) {
             icon={<DownloadOutlined />}
             onClick={() => {
               const targets = files.filter(f => !f.downloaded);
-              targets.forEach(f => handleDownload(f.filename));
+              targets.forEach(f => {
+                if (tasks[f.filename]?.paused) {
+                  handleResume(f.filename);
+                } else if (!tasks[f.filename]) {
+                  handleDownload(f.filename);
+                }
+              });
             }}
           >
             {t('whisperModelsPanel.downloadAllMissing')}
