@@ -207,6 +207,109 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
+/* Engine carousel banner */
+.engine-carousel-wrapper {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.engine-carousel-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  animation: bannerSlideDown 0.4s ease-out;
+  min-height: 44px;
+}
+
+.engine-carousel-banner .update-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.engine-carousel-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+  flex-shrink: 0;
+}
+
+.engine-carousel-arrow {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  padding: 4px;
+  color: #fff;
+}
+
+.engine-carousel-arrow:hover {
+  opacity: 1;
+}
+
+.engine-carousel-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.engine-carousel-dot.active {
+  background: #fff;
+  width: 18px;
+  border-radius: 3px;
+}
+
+.engine-carousel-dot:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* Persistent action bar */
+.engine-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 24px;
+  background: linear-gradient(135deg, #f0f5ff 0%, #f9f0ff 100%);
+  border-bottom: 1px solid #e8e0f0;
+  flex-shrink: 0;
+}
+
+[data-theme='dark'] .engine-action-bar {
+  background: linear-gradient(135deg, #1a1a2e 0%, #1f1a2e 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.engine-action-bar-text {
+  font-size: 13px;
+  color: #555;
+}
+
+[data-theme='dark'] .engine-action-bar-text {
+  color: #bbb;
+}
+
+.engine-action-bar-btn {
+  border-radius: 16px;
+  font-weight: 500;
+  padding: 0 20px;
+  height: 32px;
+}
+
 /* 深色主题 */
 [data-theme='dark'] .home-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);

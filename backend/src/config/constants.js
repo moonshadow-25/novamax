@@ -45,7 +45,6 @@ export { PROJECT_ROOT };
 export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 export const DB_PATH = path.join(DATA_DIR, 'novamax.db');
 export const MODELS_DIR = path.join(DATA_DIR, 'models');
-export const DOWNLOADS_DIR = path.join(DATA_DIR, 'downloads');
 export const MODELS_RUN_DIR = path.join(DATA_DIR, 'models_dir');
 export const PRESETS_DIR = path.join(DATA_DIR, 'presets');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');

@@ -8,7 +8,7 @@ import processManager from '../services/processManager.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import parameterService from '../services/parameterService.js';
 import engineManager from '../services/engineManager.js';
-import { MODELS_RUN_DIR, DOWNLOADS_DIR, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
+import { MODELS_RUN_DIR, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import eventBus from '../services/eventBus.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
@@ -578,13 +578,6 @@ router.delete('/models/:id/quantization', async (req, res) => {
       console.log(`✓ 已删除文件: ${runtimeFile}`);
     }
 
-    // 删除下载目录中的文件
-    const downloadFile = path.join(getModelPath(DOWNLOADS_DIR, model), filename);
-    if (fs.existsSync(downloadFile)) {
-      fs.unlinkSync(downloadFile);
-      console.log(`✓ 已删除下载文件: ${downloadFile}`);
-    }
-
     // 更新 downloaded_files，移除该文件
     const existingFiles = model.downloaded_files || [];
     const deletedFile = existingFiles.find(f => f.filename === filename);
@@ -645,13 +638,6 @@ router.delete('/models/:id/files', async (req, res) => {
       console.log(`✓ 已删除运行时文件: ${runtimeDir}`);
     }
 
-    // 删除下载目录中的所有量化版本文件
-    const downloadDir = getModelPath(DOWNLOADS_DIR, model);
-    if (fs.existsSync(downloadDir)) {
-      fs.rmSync(downloadDir, { recursive: true, force: true });
-      console.log(`✓ 已删除下载文件: ${downloadDir}`);
-    }
-
     // 只更新持久字段（不涉及临时下载状态）
     await modelManager.update(req.params.id, {
       downloaded_files: [],
@@ -693,11 +679,6 @@ router.delete('/models/:id', async (req, res) => {  try {
     const runtimeDir = getModelPath(MODELS_RUN_DIR, model);
     if (fs.existsSync(runtimeDir)) {
       fs.rmSync(runtimeDir, { recursive: true, force: true });
-    }
-
-    const downloadDir = getModelPath(DOWNLOADS_DIR, model);
-    if (fs.existsSync(downloadDir)) {
-      fs.rmSync(downloadDir, { recursive: true, force: true });
     }
 
     // ComfyUI: 清理 workflows 目录下对应的工作流 JSON 文件

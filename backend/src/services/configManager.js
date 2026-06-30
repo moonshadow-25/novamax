@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { ensureDir } from '../utils/fileHelper.js';
-import { DB_PATH, CONFIG_FILE, DATA_DIR, MODELS_DIR, DOWNLOADS_DIR } from '../config/constants.js';
+import { DB_PATH, CONFIG_FILE, DATA_DIR, MODELS_DIR } from '../config/constants.js';
 
 class ConfigManager {
   constructor() {
@@ -15,11 +15,6 @@ class ConfigManager {
   async init() {
     await ensureDir(DATA_DIR);
     await ensureDir(MODELS_DIR);
-    await ensureDir(DOWNLOADS_DIR);
-    await ensureDir(path.join(DOWNLOADS_DIR, 'LLM'));
-    await ensureDir(path.join(DOWNLOADS_DIR, 'COMFYUI'));
-    await ensureDir(path.join(DOWNLOADS_DIR, 'TTS'));
-    await ensureDir(path.join(DOWNLOADS_DIR, 'ASR'));
     await ensureDir(path.join(DATA_DIR, 'logs'));
 
     this.db = new Database(DB_PATH);

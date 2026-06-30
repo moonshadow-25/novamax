@@ -4,7 +4,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
-import { DOWNLOADS_DIR, MODELS_RUN_DIR } from '../config/constants.js';
+import { MODELS_RUN_DIR } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import engineManager from './engineManager.js';
 import presetService from './presetService.js';
@@ -19,14 +19,6 @@ class LlmDownloader extends EventEmitter {
     // activeDownloads 已被 downloadStateManager 替代
     // _activeFileDownloads: 记录当前正在写入的文件路径，防止并发下载同一共享文件（如 mmproj）
     this._activeFileDownloads = new Map(); // finalPath → Promise
-    this.ensureDownloadDir();
-  }
-
-  ensureDownloadDir() {
-    // 确保下载目录存在
-    if (!fs.existsSync(DOWNLOADS_DIR)) {
-      fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
-    }
   }
 
   /**

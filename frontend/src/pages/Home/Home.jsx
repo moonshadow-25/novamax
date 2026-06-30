@@ -99,6 +99,9 @@ function Home() {
   // 引擎列表（含下载状态，SSE 变化时刷新）
   const [allEngines, setAllEngines] = useState({});
   const [dismissedEngineUpdates, setDismissedEngineUpdates] = useState(new Set());
+  const [engineUpdateIndex, setEngineUpdateIndex] = useState(0);
+  const [carouselHovered, setCarouselHovered] = useState(false);
+  const [installingAll, setInstallingAll] = useState(false);
 
   // 从引擎列表派生需要提示的 banner（下载中的引擎及其依赖自动隐藏）
   const engineUpdates = useMemo(() => {
@@ -183,6 +186,42 @@ function Home() {
 
     return updates;
   }, [allEngines, dismissedEngineUpdates]);
+
+  // Carousel: reset index when the list changes (items dismissed, etc.)
+  useEffect(() => {
+    setEngineUpdateIndex(0);
+  }, [engineUpdates.length]);
+
+  // Carousel: auto-rotate every 4s, pause on hover or when only 1 item
+  useEffect(() => {
+    if (engineUpdates.length <= 1 || carouselHovered) return;
+    const timer = setInterval(() => {
+      setEngineUpdateIndex(prev => (prev + 1) % engineUpdates.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [engineUpdates.length, carouselHovered]);
+
+  // Install all handler
+  const handleInstallAll = async () => {
+    setInstallingAll(true);
+    const toInstall = [...engineUpdates];
+    // Dismiss all immediately
+    const allKeys = toInstall.map(e => e.dismissKey);
+    setDismissedEngineUpdates(prev => new Set([...prev, ...allKeys]));
+    let successCount = 0;
+    for (const engine of toInstall) {
+      try {
+        await engineService.download(engine.engineApiId || engine.id, engine.latestVersion);
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to start download for ${engine.name}:`, e);
+      }
+    }
+    if (successCount > 0) {
+      message.success(t('home:downloadStarted', { name: `${successCount} 个组件` }));
+    }
+    setInstallingAll(false);
+  };
 
   useEffect(() => {
     configService.getFavorites().then(res => {
@@ -466,40 +505,96 @@ function Home() {
           <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
         </div>
       )}
-      {engineUpdates.map(engine => (
-        <div key={engine.id} className="update-banner engine-update-banner">
-          <div className="update-banner-content">
-            <ToolOutlined className="update-banner-icon" />
-            <span className="update-banner-text">
-              {engine.installed
-                ? t('home:engineUpdateAvailable', { name: engine.name, latestVersion: engine.latestVersion })
-                : t('home:engineNotInstalled', { name: engine.name })}
-            </span>
-            <Button
-              type="primary"
-              size="small"
-              onClick={async () => {
-                const rootEngine = allEngines[engine.engineApiId] || allEngines[engine.id] || {};
-                const deps = rootEngine.dependencies || [];
-                setDismissedEngineUpdates(prev => new Set([...prev, engine.dismissKey, ...deps]));
-                try {
-                  await engineService.download(engine.engineApiId || engine.id, engine.latestVersion);
-                  message.success(t('home:downloadStarted', { name: engine.name }));
-                } catch (e) {
-                  message.error(t('home:downloadFailed', { error: e.response?.data?.error || e.message }));
-                }
-              }}
-              className="update-banner-btn"
+      {engineUpdates.length > 0 && (() => {
+        const current = engineUpdates[engineUpdateIndex] || engineUpdates[0];
+        const hasMultiple = engineUpdates.length > 1;
+        const installCount = engineUpdates.filter(e => !e.installed).length;
+        const updateCount = engineUpdates.filter(e => e.installed).length;
+        return (
+          <div className="engine-carousel-wrapper">
+            {/* Carousel banner — single item */}
+            <div
+              className="engine-carousel-banner"
+              onMouseEnter={() => setCarouselHovered(true)}
+              onMouseLeave={() => setCarouselHovered(false)}
             >
-              {engine.installed ? t('home:updateNow') : t('home:installNow')}
-            </Button>
+              <div className="update-banner-content">
+                <ToolOutlined className="update-banner-icon" />
+                <span className="update-banner-text">
+                  {current.installed
+                    ? t('home:engineUpdateAvailable', { name: current.name, latestVersion: current.latestVersion })
+                    : t('home:engineNotInstalled', { name: current.name })}
+                </span>
+                <Button
+                  type="primary"
+                  size="small"
+                  onClick={async () => {
+                    const rootEngine = allEngines[current.engineApiId] || allEngines[current.id] || {};
+                    const deps = rootEngine.dependencies || [];
+                    setDismissedEngineUpdates(prev => new Set([...prev, current.dismissKey, ...deps]));
+                    try {
+                      await engineService.download(current.engineApiId || current.id, current.latestVersion);
+                      message.success(t('home:downloadStarted', { name: current.name }));
+                    } catch (e) {
+                      message.error(t('home:downloadFailed', { error: e.response?.data?.error || e.message }));
+                    }
+                  }}
+                  className="update-banner-btn"
+                >
+                  {current.installed ? t('home:updateNow') : t('home:installNow')}
+                </Button>
+              </div>
+              <div className="engine-carousel-nav">
+                {hasMultiple && (
+                  <>
+                    <span
+                      className="engine-carousel-arrow"
+                      onClick={(e) => { e.stopPropagation(); setEngineUpdateIndex(prev => (prev - 1 + engineUpdates.length) % engineUpdates.length); }}
+                    >◀</span>
+                    <span className="engine-carousel-dots">
+                      {engineUpdates.map((_, i) => (
+                        <span
+                          key={i}
+                          className={`engine-carousel-dot${i === engineUpdateIndex ? ' active' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); setEngineUpdateIndex(i); }}
+                        />
+                      ))}
+                    </span>
+                    <span
+                      className="engine-carousel-arrow"
+                      onClick={(e) => { e.stopPropagation(); setEngineUpdateIndex(prev => (prev + 1) % engineUpdates.length); }}
+                    >▶</span>
+                  </>
+                )}
+              </div>
+              <CloseOutlined
+                className="update-banner-close"
+                onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, current.dismissKey]))}
+              />
+            </div>
+            {/* Persistent action bar */}
+            <div className="engine-action-bar">
+              <span className="engine-action-bar-text">
+                {installCount > 0 && updateCount > 0
+                  ? `${t('home:installAllSummary', { count: installCount })}，${t('home:updateAllSummary', { count: updateCount })}`
+                  : installCount > 0
+                    ? t('home:installAllSummary', { count: installCount })
+                    : t('home:updateAllSummary', { count: updateCount })}
+              </span>
+              <Button
+                type="primary"
+                size="small"
+                icon={<DownloadOutlined />}
+                loading={installingAll}
+                onClick={handleInstallAll}
+                className="engine-action-bar-btn"
+              >
+                {updateCount === 0 ? t('home:installAll') : installCount === 0 ? t('home:updateAll') : t('home:installUpdateAll')}
+              </Button>
+            </div>
           </div>
-          <CloseOutlined
-            className="update-banner-close"
-            onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, engine.dismissKey]))}
-          />
-        </div>
-      ))}
+        );
+      })()}
       <Content className="home-content">
         <div className="home-toolbar-bar">
           <div className="home-content-inner">
