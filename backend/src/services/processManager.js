@@ -991,7 +991,7 @@ class ProcessManager {
 
     const args = [
       startScript,
-      '--host', '127.0.0.1',
+      '--host', '0.0.0.0',
       '--api-port', String(apiPort),
       '--gradio-port', String(gradioPort),
       '--config', path.join(modelDir, 'mineru.json'),
@@ -1026,10 +1026,9 @@ class ProcessManager {
 
     this._attachLegacyProcessListeners(modelId, proc, (log) => {
       const processInfo = this.processes.get(modelId);
-      if (!processInfo?.ready && this._isOcrReadyLog(log)) {
-        processInfo.ready = true;
-        console.log(`[${modelId}] OCR 已就绪（日志检测）`);
-        eventBus.broadcast('model-updated', { modelId });
+      if (!processInfo?.ready && !processInfo?._ocrReadyChecking && this._isOcrReadyLog(log)) {
+        console.log(`[${modelId}] OCR 日志就绪，开始 HTTP 健康检查...`);
+        this._monitorOcrReadiness(modelId, apiPort, gradioPort);
       }
     });
 
@@ -1076,6 +1075,49 @@ class ProcessManager {
 
   _isOcrReadyLog(log = '') {
     return log.includes('Application startup complete') || log.includes('Uvicorn running on') || log.includes('所有服务已启动');
+  }
+
+  async _monitorOcrReadiness(modelId, apiPort, gradioPort, maxAttempts = 60) {
+    const processInfo = this.processes.get(modelId);
+    if (!processInfo || processInfo.ready || processInfo._ocrReadyChecking) return;
+
+    processInfo._ocrReadyChecking = true;
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
+        const latest = this.processes.get(modelId);
+        if (!latest || latest.ready) return;
+
+        // 检查 Gradio 是否真正就绪（用户「使用」按钮打开的就是 Gradio）
+        let gradioOk = false;
+        try {
+          const resp = await axios.get(`http://127.0.0.1:${gradioPort}`, { timeout: 2000 });
+          if (resp.status >= 200 && resp.status < 500) {
+            gradioOk = true;
+          }
+        } catch (_) {}
+
+        if (gradioOk) {
+          latest.ready = true;
+          latest._ocrReadyChecking = false;
+          console.log(`[${modelId}] OCR Gradio(${gradioPort}) 已就绪（第 ${i + 1} 次）`);
+          eventBus.broadcast('model-updated', { modelId });
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      // 超时后仍标记为就绪（兜底，避免永远无法使用）
+      const latest = this.processes.get(modelId);
+      if (latest && !latest.ready) {
+        latest.ready = true;
+        latest._ocrReadyChecking = false;
+        console.log(`[${modelId}] OCR 健康检查超时，强制标记为就绪`);
+        eventBus.broadcast('model-updated', { modelId });
+      }
+    } finally {
+      const latest = this.processes.get(modelId);
+      if (latest) latest._ocrReadyChecking = false;
+    }
   }
 
   _attachLegacyProcessListeners(modelId, process, onLog = null) {
@@ -1274,6 +1316,16 @@ class ProcessManager {
     }
 
     this._terminateProcess(processInfo.process?.pid);
+
+    // OCR 引擎会 fork 多个子进程（FastAPI + Gradio + 网关），
+    // taskkill /T 可能杀不干净，通过端口反查 PID 兜底清理
+    if (processInfo.type === 'ocr') {
+      const ports = [processInfo.port, processInfo.gradioPort].filter(Boolean);
+      for (const port of ports) {
+        this._killProcessOnPort(port);
+      }
+    }
+
     this.cleanup(modelId);
 
     return { status: MODEL_STATUS.STOPPED };
@@ -1306,6 +1358,10 @@ class ProcessManager {
       }
 
       this.allocatedPorts.delete(processInfo.port);
+      // OCR 有两个端口，都需要清理
+      if (processInfo.gradioPort) {
+        this.allocatedPorts.delete(processInfo.gradioPort);
+      }
       this.processes.delete(modelId);
     }
   }
@@ -1324,6 +1380,32 @@ class ProcessManager {
         process.kill(pid, 'SIGKILL');
       } catch (_) {}
     }
+  }
+
+  _killProcessOnPort(port) {
+    if (!port) return;
+    try {
+      if (process.platform === 'win32') {
+        // netstat -ano 找占用端口的 PID，然后 taskkill
+        const output = execSync(`netstat -ano | findstr :${port}`, { stdio: 'pipe' }).toString();
+        const lines = output.trim().split('\n').filter(Boolean);
+        const killed = new Set();
+        for (const line of lines) {
+          const match = line.trim().match(/:(\d+)\s+.*LISTENING\s+(\d+)$/);
+          if (match && match[2]) {
+            const pid = match[2];
+            if (!killed.has(pid)) {
+              killed.add(pid);
+              try {
+                execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+              } catch (_) {}
+            }
+          }
+        }
+      } else {
+        execSync(`fuser -k ${port}/tcp 2>/dev/null || lsof -ti:${port} | xargs kill -9 2>/dev/null`, { stdio: 'ignore' });
+      }
+    } catch (_) {}
   }
 
   getStatus(modelId) {
