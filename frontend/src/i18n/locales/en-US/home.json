@@ -552,6 +552,8 @@
     "portRequired": "Please enter port",
     "customArgsLabel": "Launch Arguments",
     "customArgsTooltip": "Enter command-line arguments directly, e.g.: --preview-method auto --fp8_e4m3fn",
+    "envVarsLabel": "Environment Variables",
+    "envVarsTooltip": "One environment variable per line, format: KEY=VALUE. Lines starting with # are treated as comments. These are injected into the ComfyUI process environment on startup",
     "openFolder": "Open ComfyUI Folder"
   },
   "engineVersionSelector": {

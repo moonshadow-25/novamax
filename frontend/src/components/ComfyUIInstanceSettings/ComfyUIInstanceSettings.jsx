@@ -44,7 +44,8 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
         name: instance.name,
         host: instance.host,
         port: instance.port,
-        custom_args: instance.custom_args || ''
+        custom_args: instance.custom_args || '',
+        env_vars: instance.env_vars || ''
       });
     }
   }, [visible, instance, form]);
@@ -197,6 +198,17 @@ function ComfyUIInstanceSettings({ visible, instance, onClose, onSave, onDelete 
           <Input.TextArea
             rows={4}
             placeholder="--preview-method auto --fp8_e4m3fn"
+          />
+        </Form.Item>
+
+        <Form.Item
+          label={t('comfyuiInstanceSettings.envVarsLabel')}
+          name="env_vars"
+          tooltip={t('comfyuiInstanceSettings.envVarsTooltip')}
+        >
+          <Input.TextArea
+            rows={5}
+            placeholder={'CUDA_VISIBLE_DEVICES=0\nPYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync'}
           />
         </Form.Item>
 

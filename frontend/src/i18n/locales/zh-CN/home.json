@@ -552,6 +552,8 @@
     "portRequired": "请输入端口",
     "customArgsLabel": "启动参数",
     "customArgsTooltip": "直接输入命令行参数，例如：--preview-method auto --fp8_e4m3fn",
+    "envVarsLabel": "环境变量",
+    "envVarsTooltip": "每行一个环境变量，格式：KEY=VALUE。支持 # 注释行。这些变量会在 ComfyUI 启动时注入进程环境",
     "openFolder": "打开 ComfyUI 文件夹"
   },
   "engineVersionSelector": {

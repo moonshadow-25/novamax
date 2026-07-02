@@ -63,7 +63,8 @@ class ComfyUIInstanceManager {
       host: config.host || '0.0.0.0',
       port,
       engine_version: engineVersion,
-      custom_args: config.custom_args || ''
+      custom_args: config.custom_args || '',
+      env_vars: config.env_vars || ''
     };
     instances.push(newInstance);
     configManager.set('comfyui_instances', instances);
@@ -163,10 +164,26 @@ class ComfyUIInstanceManager {
       args.push(...customArgsList);
     }
 
+    // 构建环境变量：继承 process.env + 内置变量 + 用户自定义
+    const env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' };
+    if (config.env_vars && config.env_vars.trim()) {
+      const lines = config.env_vars.trim().split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue; // 跳过空行和注释
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const value = trimmed.slice(eqIdx + 1).trim();
+          if (key) env[key] = value;
+        }
+      }
+    }
+
     // 启动进程（不使用 shell，避免安全警告）
     const childProc = spawn(venvPython, args, {
       cwd: enginePath,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }
+      env
     });
 
     const logs = [];
@@ -325,7 +342,8 @@ class ComfyUIInstanceManager {
         host: '0.0.0.0',
         port: 8188,
         engine_version: null,
-        custom_args: ''
+        custom_args: '',
+        env_vars: ''
       });
     }
     return instances[0];

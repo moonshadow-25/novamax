@@ -287,7 +287,7 @@ class ProcessManager {
     }
 
     try {
-      // RPC 多机互联：如果启用，先启动本地 rpc-server
+      // RPC 多机互联：如果启用，先启动本地 ggml-rpc-server
       let rpcArg = null;
       const rpcEnable = effectiveParams.rpc_enable === true;
       const rpcDevices = Array.isArray(effectiveParams.rpc_devices) ? effectiveParams.rpc_devices.filter(Boolean) : [];

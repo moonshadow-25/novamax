@@ -20,7 +20,7 @@ const RPC_LOG_DIR = path.join(PROJECT_ROOT, 'data', 'logs');
 
 class MultiConnectService {
   constructor() {
-    this._rpcProcess = null;       // 从机 rpc-server 进程
+    this._rpcProcess = null;       // 从机 ggml-rpc-server 进程
     this._slaveConfig = {};        // { port, ip, mask, network_mode }
     this._bridgeInfo = null;       // { bridge, bridge_guid } when bridge mode enabled
     this._bridgeGuid = null;       // 桥接 GUID，用于退出时删除
@@ -36,7 +36,7 @@ class MultiConnectService {
     const enginePath = engineManager.getEnginePath('llamacpp', version);
     if (!enginePath) return null;
 
-    return path.join(enginePath, 'rpc-server.exe');
+    return path.join(enginePath, 'ggml-rpc-server.exe');
   }
 
   _createRpcLogStream(kind) {
@@ -244,10 +244,10 @@ class MultiConnectService {
     const cfg = this._normalizeEnableArgs(portOrConfig, ip, mask);
 
     const rpcServerPath = this._getRpcServerPath();
-    if (!rpcServerPath) throw new Error('未找到 rpc-server，请先安装 llamacpp 引擎');
-    if (!fs.existsSync(rpcServerPath)) throw new Error(`未找到 rpc-server 可执行文件: ${rpcServerPath}`);
+    if (!rpcServerPath) throw new Error('未找到 ggml-rpc-server，请先安装 llamacpp 引擎');
+    if (!fs.existsSync(rpcServerPath)) throw new Error(`未找到 ggml-rpc-server 可执行文件: ${rpcServerPath}`);
 
-    // 启动 rpc-server（从机模式严格使用用户指定端口，不自动递增）
+    // 启动 ggml-rpc-server（从机模式严格使用用户指定端口，不自动递增）
     const actualPort = cfg.port;
     if (!Number.isInteger(actualPort) || actualPort < 1024 || actualPort > 65535) {
       throw new Error('端口无效，请设置 1024-65535 之间的端口');
@@ -264,12 +264,12 @@ class MultiConnectService {
     const { stream: slaveLogStream, filePath: slaveLogPath } = this._createRpcLogStream('slave');
     slaveLogStream.write(`command: ${rpcServerPath} -H 0.0.0.0 -p ${actualPort} -c\n`);
 
-    // 先配置网络（建桥），再启动 rpc-server
-    // 原因：rpc-server 以 -H 0.0.0.0 启动后会绑定所有网卡（含 USB4 适配器），
+    // 先配置网络（建桥），再启动 ggml-rpc-server
+    // 原因：ggml-rpc-server 以 -H 0.0.0.0 启动后会绑定所有网卡（含 USB4 适配器），
     // 此时 Windows 会保护有活跃 socket 的网卡，导致第二块网卡无法加入网桥（静默失败）
     let networkResult;
     try {
-      console.log('[enableSlaveMode] 先配置网络，再启动 rpc-server...');
+      console.log('[enableSlaveMode] 先配置网络，再启动 ggml-rpc-server...');
       networkResult = await this._applySlaveNetwork(adapters, cfg.ip, cfg.mask);
     } catch (e) {
       // 网络配置失败时回滚桥接
@@ -291,10 +291,10 @@ class MultiConnectService {
     });
 
     this._slaveLogStream = slaveLogStream;
-    this._bindProcessLogging(proc, '[rpc-server]', slaveLogStream);
+    this._bindProcessLogging(proc, '[ggml-rpc-server]', slaveLogStream);
 
     proc.on('error', (err) => {
-      console.error(`[rpc-server] 启动失败: ${err.message}`);
+      console.error(`[ggml-rpc-server] 启动失败: ${err.message}`);
       if (this._slaveLogStream && !this._slaveLogStream.destroyed) {
         this._slaveLogStream.write(`[error] ${err.message}\n`);
         this._slaveLogStream.end();
@@ -306,7 +306,7 @@ class MultiConnectService {
 
     proc.on('exit', (code, signal) => {
       const exitText = code === null ? `signal=${signal || 'unknown'}` : `code=${code}`;
-      console.log(`[rpc-server] 进程退出，${exitText}`);
+      console.log(`[ggml-rpc-server] 进程退出，${exitText}`);
       if (this._slaveLogStream && !this._slaveLogStream.destroyed) {
         this._slaveLogStream.write(`[exit] ${exitText} at ${new Date().toISOString()}\n`);
         this._slaveLogStream.end();
@@ -319,7 +319,7 @@ class MultiConnectService {
     this._rpcProcess = proc;
 
     try {
-      await this._waitForPort(actualPort, 10, proc, 'slave rpc-server');
+      await this._waitForPort(actualPort, 10, proc, 'slave ggml-rpc-server');
 
       const appliedIp = networkResult.applied_ip || cfg.ip;
 
@@ -345,7 +345,7 @@ class MultiConnectService {
       };
     } catch (e) {
       try { proc.kill(); } catch (_) {}
-      // rpc-server 启动异常时回滚桥接
+      // ggml-rpc-server 启动异常时回滚桥接
       if (this._bridgeGuid) {
         await destroyNetworkBridgeByGuid(this._bridgeGuid).catch(() => {});
         this._bridgeGuid = null;
@@ -415,8 +415,8 @@ class MultiConnectService {
     }
 
     const rpcServerPath = this._getRpcServerPath();
-    if (!rpcServerPath) throw new Error('未找到 rpc-server，请先安装 llamacpp 引擎');
-    if (!fs.existsSync(rpcServerPath)) throw new Error(`未找到 rpc-server 可执行文件: ${rpcServerPath}`);
+    if (!rpcServerPath) throw new Error('未找到 ggml-rpc-server，请先安装 llamacpp 引擎');
+    if (!fs.existsSync(rpcServerPath)) throw new Error(`未找到 ggml-rpc-server 可执行文件: ${rpcServerPath}`);
 
     const port = await this._findAvailablePort(DEFAULT_RPC_PORT);
     const { stream: logStream, filePath: logPath } = this._createRpcLogStream('host');
@@ -426,10 +426,10 @@ class MultiConnectService {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    this._bindProcessLogging(proc, `[rpc-server:${modelId}]`, logStream);
+    this._bindProcessLogging(proc, `[ggml-rpc-server:${modelId}]`, logStream);
 
     proc.on('error', (err) => {
-      console.error(`[rpc-server:${modelId}] 启动失败: ${err.message}`);
+      console.error(`[ggml-rpc-server:${modelId}] 启动失败: ${err.message}`);
       if (!logStream.destroyed) {
         logStream.write(`[error] ${err.message}\n`);
         logStream.end();
@@ -450,7 +450,7 @@ class MultiConnectService {
 
     try {
       // 等待端口就绪
-      await this._waitForPort(port, 10, proc, `model ${modelId} rpc-server`);
+      await this._waitForPort(port, 10, proc, `model ${modelId} ggml-rpc-server`);
     } catch (e) {
       try { proc.kill(); } catch (_) {}
       this._rpcServers.delete(modelId);
@@ -460,7 +460,7 @@ class MultiConnectService {
     return address;
   }
 
-  async _waitForPort(port, maxAttempts = 10, proc = null, processName = 'rpc-server') {
+  async _waitForPort(port, maxAttempts = 10, proc = null, processName = 'ggml-rpc-server') {
     for (let i = 0; i < maxAttempts; i++) {
       // 进程已退出，直接失败
       if (proc && proc.exitCode !== null) {

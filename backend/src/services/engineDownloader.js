@@ -282,6 +282,12 @@ class EngineDownloader {
       await fsp.unlink(filePath).catch(() => {});
 
       const repo = taskInfo.runtimeRepo;
+      if (!repo || typeof repo !== 'string' || !repo.trim()) {
+        throw new Error(
+          `Engine '${engineId}' runtime 缺少 modelscope_repo 配置，` +
+          `请在引擎定义中设置 modelscope_repo`
+        );
+      }
       await this._execDownload(taskInfo.taskId, '', repo, taskInfo.runtimeFile, downloadDir);
 
       // 更新状态：解压中
@@ -349,6 +355,12 @@ class EngineDownloader {
         await this._execHttpDownload(engineId, version, versionInfo.download_url, filePath);
       } else {
         const repo = versionInfo.modelscope_repo || engine.modelscope_repo;
+        if (!repo || typeof repo !== 'string' || !repo.trim()) {
+          throw new Error(
+            `Engine '${engineId}' version '${version}' 缺少 modelscope_repo 配置，` +
+            `请在 versionInfo 或 engine 定义中设置 modelscope_repo`
+          );
+        }
         await this._execDownload(engineId, version, repo, versionInfo.modelscope_file, downloadDir);
       }
     } catch (err) {
