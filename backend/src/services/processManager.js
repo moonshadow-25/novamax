@@ -361,8 +361,8 @@ class ProcessManager {
         logStream.write(log);
         console.log(`[${modelId}] ${log}`);
 
-        // 检测模型是否真正就绪
-        if (!processInfo.ready && (log.includes('server is listening') || log.includes('all slots are idle'))) {
+        // 检测模型是否真正就绪（兼容新旧 llama-server 日志格式）
+        if (!processInfo.ready && (log.includes('server is listening') || log.includes('listening on') || log.includes('all slots are idle'))) {
           processInfo.ready = true;
           console.log(`[${modelId}] 模型已就绪`);
           eventBus.broadcast('model-updated', { modelId });
@@ -377,8 +377,8 @@ class ProcessManager {
         logStream.write(log);
         console.log(`[${modelId}] ${log}`);
 
-        // stderr 也可能包含就绪信号（llama.cpp 日志走 stderr）
-        if (!processInfo.ready && (log.includes('server is listening') || log.includes('all slots are idle'))) {
+        // stderr 也可能包含就绪信号（llama.cpp 日志走 stderr，兼容新旧格式）
+        if (!processInfo.ready && (log.includes('server is listening') || log.includes('listening on') || log.includes('all slots are idle'))) {
           processInfo.ready = true;
           console.log(`[${modelId}] 模型已就绪`);
           eventBus.broadcast('model-updated', { modelId });

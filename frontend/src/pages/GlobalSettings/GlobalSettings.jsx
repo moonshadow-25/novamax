@@ -34,6 +34,7 @@ const GlobalSettings = () => {
   const [restarting, setRestarting] = useState(false);
   const [restartCountdown, setRestartCountdown] = useState(5);
   const [autoUpdate, setAutoUpdate] = useState(false);
+  const [showBanner, setShowBanner] = useState(true);
 
   // 引擎相关状态
   const [engines, setEngines] = useState({});
@@ -247,7 +248,9 @@ const GlobalSettings = () => {
       const updateResult = await configService.getUpdateSettings();
       const s = updateResult.updateSettings || {};
       const autoCheckVal = s.auto_check ?? false;
+      const showBannerVal = s.show_banner ?? true;
       setAutoUpdate(autoCheckVal);
+      setShowBanner(showBannerVal);
       form.setFieldsValue({
         channel: s.channel || 'stable',
         server_url: s.server_url || ''
@@ -1280,7 +1283,28 @@ const GlobalSettings = () => {
     <div className="gs-section-body">
     <Card className="gs-section-card">
       <Form form={form} layout="vertical">
-        <Form.Item>
+        <Text type="secondary" strong style={{ fontSize: 13 }}>{t('update.notificationDisplay')}</Text>
+
+        <Form.Item style={{ marginTop: 8 }}>
+          <Space>
+            <span>{t('update.showBanner')}</span>
+            <Switch
+              checked={showBanner}
+              onChange={async (val) => {
+                setShowBanner(val);
+                await configService.setUpdateSettings({
+                  auto_check: autoUpdate,
+                  channel: form.getFieldValue('channel') || 'stable',
+                  show_banner: val,
+                });
+              }}
+            />
+          </Space>
+        </Form.Item>
+
+        <Text type="secondary" strong style={{ fontSize: 13 }}>{t('update.updateCheck')}</Text>
+
+        <Form.Item style={{ marginTop: 8 }}>
           <Space>
             <span>{t('update.autoUpdate')}</span>
             <Switch

@@ -96,6 +96,8 @@ function Home() {
 
   // 应用更新
   const [updateInfo, setUpdateInfo] = useState(null);
+  // 首页 banner 显示控制
+  const [showBanner, setShowBanner] = useState(true);
   // 引擎列表（含下载状态，SSE 变化时刷新）
   const [allEngines, setAllEngines] = useState({});
   const [dismissedEngineUpdates, setDismissedEngineUpdates] = useState(new Set());
@@ -232,6 +234,12 @@ function Home() {
     loadModels();
     // 启动时触发远程模型同步，完成后刷新列表
     remoteConfigService.sync().then(() => loadModels()).catch(() => {});
+
+    // 读取 banner 显示设置
+    configService.getUpdateSettings().then(res => {
+      const s = res.updateSettings || {};
+      setShowBanner(s.show_banner ?? true);
+    }).catch(() => {});
 
     // 检查应用更新
     updateService.check().then(res => {
@@ -483,7 +491,7 @@ function Home() {
           </div>
         </div>
       </Header>
-      {updateInfo && (
+      {showBanner && updateInfo && (
         <div className="update-banner">
           <div className="update-banner-content">
             <GiftOutlined className="update-banner-icon" />
@@ -505,7 +513,7 @@ function Home() {
           <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
         </div>
       )}
-      {engineUpdates.length > 0 && (() => {
+      {showBanner && engineUpdates.length > 0 && (() => {
         const current = engineUpdates[engineUpdateIndex] || engineUpdates[0];
         const hasMultiple = engineUpdates.length > 1;
         const installCount = engineUpdates.filter(e => !e.installed).length;
