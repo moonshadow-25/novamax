@@ -98,6 +98,13 @@ function Home() {
   const [updateInfo, setUpdateInfo] = useState(null);
   // 首页 banner 显示控制
   const [showBanner, setShowBanner] = useState(true);
+  // 关闭所有 banner（仅当前会话，不持久化）
+  const handleCloseAllBanners = () => {
+    setShowBanner(false);
+    setUpdateInfo(null);
+    setDismissedEngineUpdates(new Set());
+  };
+
   // 引擎列表（含下载状态，SSE 变化时刷新）
   const [allEngines, setAllEngines] = useState({});
   const [dismissedEngineUpdates, setDismissedEngineUpdates] = useState(new Set());
@@ -510,7 +517,7 @@ function Home() {
               {t('home:updateNow')}
             </Button>
           </div>
-          <CloseOutlined className="update-banner-close" onClick={() => setUpdateInfo(null)} />
+          <CloseOutlined className="update-banner-close" onClick={handleCloseAllBanners} />
         </div>
       )}
       {showBanner && engineUpdates.length > 0 && (() => {
@@ -577,7 +584,7 @@ function Home() {
               </div>
               <CloseOutlined
                 className="update-banner-close"
-                onClick={() => setDismissedEngineUpdates(prev => new Set([...prev, current.dismissKey]))}
+                onClick={handleCloseAllBanners}
               />
             </div>
             {/* Persistent action bar */}

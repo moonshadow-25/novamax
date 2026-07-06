@@ -1753,8 +1753,8 @@ const GlobalSettings = () => {
           try { await backendService.openLogsFolder(); } catch { message.error('打开失败'); }
         }}>日志文件夹</Button>
       </div>
-      <div className="gs-section-body">
-        <Card className="gs-section-card" styles={{ body: { height: '100%', padding: 16, display: 'flex', flexDirection: 'column' } }}>
+      <div className="gs-section-body" style={{ overflow: 'hidden' }}>
+        <Card className="gs-section-card" style={{ height: 'calc(100% - 24px)' }} styles={{ body: { height: '100%', padding: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }}>
           <Tabs
             activeKey={logTab}
             onChange={setLogTab}
