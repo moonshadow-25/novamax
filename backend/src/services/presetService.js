@@ -107,9 +107,10 @@ class PresetService {
         }
       }
 
-      // 模型别名
-      if (model.alias) {
-        lines.push(`alias = ${model.alias}`);
+      // 模型别名：优先使用用户设置，否则默认使用 GGUF 文件名（避免新版 llama-server 返回全路径）
+      const modelAlias = model.alias || (modelPath ? path.basename(modelPath) : null);
+      if (modelAlias) {
+        lines.push(`alias = ${modelAlias}`);
       }
 
       // 模型特定参数 - 使用有效参数（默认 + 用户覆盖）

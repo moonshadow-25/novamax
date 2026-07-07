@@ -67,6 +67,7 @@ export function generateSingleModelCommand(model, port, options = {}) {
   const args = [
     '-m', modelPath,
     '--host', '0.0.0.0',
+    '--alias', path.basename(modelPath),
   ];
 
   // 默认参数值（当用户未设置时使用）解构默认参数，去掉 version 字段（不需要传递给 llama-server）
