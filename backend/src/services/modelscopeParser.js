@@ -46,6 +46,28 @@ const QUANTIZATION_INFO = {
 };
 
 class ModelscopeParser {
+  getFileSize(file) {
+    const candidates = [
+      file?.Size,
+      file?.size,
+      file?.SizeBytes,
+      file?.sizeBytes,
+      file?.Lfs?.Size,
+      file?.LFS?.Size,
+      file?.Lfs?.size,
+      file?.LFS?.size
+    ];
+
+    for (const value of candidates) {
+      const size = Number(value);
+      if (Number.isFinite(size) && size >= 0) {
+        return size;
+      }
+    }
+
+    return 0;
+  }
+
   /**
    * 解析 ModelScope URL，提取 modelId 和可选的文件夹路径
    * @param {string} url - ModelScope URL
@@ -325,7 +347,7 @@ class ModelscopeParser {
         recommended: false
       };
 
-      const totalSize = filesInFolder.reduce((sum, f) => sum + (f.Size || 0), 0);
+      const totalSize = filesInFolder.reduce((sum, f) => sum + this.getFileSize(f), 0);
       const sizeLabel = totalSize > 0
         ? `${parseFloat((totalSize / (1024 * 1024 * 1024)).toFixed(2))} GB`
         : '文件夹';
@@ -333,7 +355,7 @@ class ModelscopeParser {
       // 保存每个文件的 name+size+download_url，供下载时使用
       const folderFileList = filesInFolder.map(f => ({
         name: f.Name,
-        size: f.Size || 0,
+        size: this.getFileSize(f),
         download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${f.Path || folderPath + '/' + f.Name}`
       }));
 
@@ -351,11 +373,21 @@ class ModelscopeParser {
       });
     }
 
-    // 处理 GGUF 文件（排除 mmproj）
-    const ggufFiles = blobFiles.filter(f =>
-      f.Name?.toLowerCase().endsWith('.gguf') &&
-      !isAuxiliaryLlmFile(f.Name)
-    );
+    // 处理 GGUF 文件（排除 mmproj），避免把子目录中的分片文件再次当作顶层量化项
+    const ggufFiles = blobFiles.filter(f => {
+      if (!f.Name?.toLowerCase().endsWith('.gguf') || isAuxiliaryLlmFile(f.Name)) {
+        return false;
+      }
+
+      const filePath = f.Path || f.Name;
+      const inSubfolder = filePath.includes('/');
+
+      if (filterFolder) {
+        return false;
+      }
+
+      return !inSubfolder;
+    });
 
     for (const file of ggufFiles) {
       const quantType = this.extractQuantizationType(file.Name);
@@ -372,7 +404,8 @@ class ModelscopeParser {
         recommended: false
       };
 
-      const sizeGB = parseFloat((file.Size / (1024 * 1024 * 1024)).toFixed(2));
+      const fileSize = this.getFileSize(file);
+      const sizeGB = parseFloat((fileSize / (1024 * 1024 * 1024)).toFixed(2));
 
       quantizations.push({
         name: quantType,
@@ -384,7 +417,7 @@ class ModelscopeParser {
         recommended: info.recommended,
         file: {
           name: file.Name,
-          size: file.Size,
+          size: fileSize,
           sha256: file.Sha256,
           download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
         }
@@ -423,7 +456,7 @@ class ModelscopeParser {
 
     return mmprojFiles.map(file => ({
       name: file.Name,
-      size: file.Size,
+      size: this.getFileSize(file),
       sha256: file.Sha256,
       download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
     }));
@@ -437,7 +470,7 @@ class ModelscopeParser {
 
     return dflashFiles.map(file => ({
       name: file.Name,
-      size: file.Size,
+      size: this.getFileSize(file),
       sha256: file.Sha256,
       download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
     }));

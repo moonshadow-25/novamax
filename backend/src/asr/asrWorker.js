@@ -38,11 +38,28 @@ let _logDate = null;
 
 function getLogDate() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
+function cleanOldLogs() {
+  try {
+    if (!fs.existsSync(ASR_LOGS_DIR)) return;
+    const now = Date.now();
+    for (const file of fs.readdirSync(ASR_LOGS_DIR)) {
+      const match = /^asr-engine-(\d{4}-\d{2}-\d{2})\.log$/.exec(file);
+      if (!match) continue;
+      const logDate = new Date(`${match[1]}T00:00:00`).getTime();
+      if (Number.isNaN(logDate)) continue;
+      if ((now - logDate) / 86400000 > ASR_DEFAULTS.LOG_RETENTION_DAYS) {
+        fs.unlinkSync(path.join(ASR_LOGS_DIR, file));
+      }
+    }
+  } catch {}
+}
+
 function ensureLogStream() {
   const today = getLogDate();
   if (_logDate !== today) {
     if (_logStream) { try { _logStream.end(); } catch (e) { addLog('warn', '关闭旧日志流失败: '+e.message); } _logStream = null; }
     fs.mkdirSync(ASR_LOGS_DIR, { recursive: true });
+    cleanOldLogs();
     _logStream = fs.createWriteStream(path.join(ASR_LOGS_DIR, `asr-engine-${today}.log`), { flags: 'a' });
     _logDate = today;
   }
