@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Card, Form, Input, Switch, Select, Button, Space, message, List, Tag, Progress, Drawer, Popconfirm, Typography, Alert, Table, Checkbox, Tooltip, Spin, Empty, Modal, Skeleton, theme, Badge, Tabs, Collapse } from 'antd';
-import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined, BgColorsOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, DownloadOutlined, CheckCircleOutlined, SettingOutlined, AppstoreOutlined, SyncOutlined, DeleteOutlined, HistoryOutlined, ExportOutlined, CopyOutlined, DashboardOutlined, DatabaseOutlined, CloseCircleOutlined, ReloadOutlined, FolderOpenOutlined, SwapOutlined, LinkOutlined, FileTextOutlined, HddOutlined, BgColorsOutlined, ToolOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../contexts/ThemeContext';
-import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService, ttsStudioService } from '../../services/api';
+import { configService, updateService, engineService, modelService, systemService, backendService, comfyuiService, ttsStudioService, moduleService } from '../../services/api';
 import { resolveVersionOrder, getLatestInstalledVersion as getLatestInstalledVersionByAvailable } from '../../services/engineVersionOrder';
 import { normalizeEngineType } from '../../utils/engineType';
 import './GlobalSettings.css';
@@ -41,7 +41,11 @@ const GlobalSettings = () => {
   const [versionDrawerVisible, setVersionDrawerVisible] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState(null);
   const [forcePolling, setForcePolling] = useState(false);
-  const [engineRuntimeSelections, setEngineRuntimeSelections] = useState({}); // { 'engineId::variantId': 'runtimeId' }
+  // 模块开关相关状态
+  const [modules, setModules] = useState([]);
+  const [modulesLoading, setModulesLoading] = useState(false);
+  const [lowEndDevice, setLowEndDevice] = useState(false);
+  const [enginesReloadTrigger, setEnginesReloadTrigger] = useState(0);
 
   // 从 engines.app 派生下载状态，天然支持刷新恢复
   const appDownloadState = engines['app']?.download_state || null;
@@ -102,6 +106,11 @@ const GlobalSettings = () => {
   const [cacheLoading, setCacheLoading] = useState(false);
   const [cacheClearing, setCacheClearing] = useState(null); // null | 'all' | key
 
+  // 切换到引擎管理标签时也刷新
+  useEffect(() => {
+    if (selectedMenu === 'engines') loadEngines();
+  }, [selectedMenu]);
+
   useEffect(() => {
     loadSettings();
     loadEngines();
@@ -154,6 +163,16 @@ const GlobalSettings = () => {
   useEffect(() => {
     if (selectedMenu === 'cache') loadCacheInfo();
   }, [selectedMenu]);
+
+  // 切换到引擎管理标签时加载
+  useEffect(() => {
+    if (selectedMenu === 'engines') { loadModules(); loadEngines(); }
+  }, [selectedMenu]);
+
+  // 模块开关变动后刷新引擎列表
+  useEffect(() => {
+    if (enginesReloadTrigger > 0) loadEngines();
+  }, [enginesReloadTrigger]);
 
   // 切换到更新标签时自动检查
   useEffect(() => {
@@ -952,165 +971,148 @@ const GlobalSettings = () => {
     setVersionDrawerVisible(true);
   };
 
-  const renderEnginesContent = () => (
-    <>
-    <div className="gs-section-head">
-      <span className="gs-section-title">{t('sections.engines')}</span>
-      <Button icon={<SyncOutlined />} onClick={loadEngines}>{t('common.refresh')}</Button>
-    </div>
-    <div className="gs-section-body">
-    <Card className="gs-section-card">
-      <List
-        // 过滤掉 category 为 app 由运行状态页面统一管理
-        dataSource={resolveEngineRows()}
-        renderItem={engine => {
-          const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
-          const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));
-          const isDownloading = activeStates.length > 0;
-          const resolvedVersions = resolveEngineVersions(engine);
-          const latestVersion = resolvedVersions[0];
-          const hasNewerVersion = engine.installed && latestVersion &&
-            !engine.installed_versions?.some(v => v.version === latestVersion.version);
+  // 引擎行渲染（复用逻辑）
+  const renderEngineRow = (engine) => {
+    const downloadStates = engine.download_states || (engine.download_state ? [engine.download_state] : []);
+    const activeStates = downloadStates.filter(s => ['downloading', 'unpacking', 'installing'].includes(s.status));
+    const isDownloading = activeStates.length > 0;
+    const resolvedVersions = resolveEngineVersions(engine);
+    const latestVersion = resolvedVersions[0];
+    const hasNewerVersion = engine.installed && latestVersion &&
+      !engine.installed_versions?.some(v => v.version === latestVersion.version);
 
-          const isTts = (engine.id === 'tts' || engine.engine_api_id === 'tts');
-          const latestVariantId = latestVersion?.variant_id;
-          const latestVariant = latestVariantId && Array.isArray(engine.variants)
-            ? engine.variants.find(v => v.id === latestVariantId)
-            : null;
-          const variantRuntimes = latestVariant?.runtimes || [];
-          const runtimeKey = `${engine.engine_api_id || engine.id}::${latestVariantId || 'default'}`;
-          const selectedRuntime = engineRuntimeSelections[runtimeKey] || variantRuntimes[0]?.id;
+    const engineApiId = engine.engine_api_id || engine.id;
 
-          return (
-            <List.Item
-              actions={[
-                isDownloading ? (
-                  activeStates.length === 1 ? (
-                    <Progress
-                      type="circle"
-                      percent={activeStates[0].progress || 0}
-                      width={40}
-                      status="active"
-                    />
-                  ) : (
-                    <Badge count={activeStates.length} color="blue">
-                      <Progress
-                        type="circle"
-                        percent={Math.round(activeStates.reduce((s, x) => s + (x.progress || 0), 0) / activeStates.length)}
-                        width={40}
-                        status="active"
-                      />
-                    </Badge>
-                  )
+    return (
+      <List.Item
+        actions={[
+          isDownloading ? (
+            activeStates.length === 1 ? (
+              <Progress type="circle" percent={activeStates[0].progress || 0} width={40} status="active" />
+            ) : (
+              <Badge count={activeStates.length} color="blue">
+                <Progress type="circle" percent={Math.round(activeStates.reduce((s, x) => s + (x.progress || 0), 0) / activeStates.length)} width={40} status="active" />
+              </Badge>
+            )
+          ) : (
+            <Space>
+              {engine.installed ? (
+                hasNewerVersion ? (
+                  <Button type="primary" icon={<SyncOutlined />} onClick={() => handleDownloadEngine(engineApiId, latestVersion?.version)}>更新</Button>
                 ) : (
                   <Space>
-                    {!isDownloading && isTts && variantRuntimes.length > 0 && (
-                      <Select
-                        size="small"
-                        value={selectedRuntime}
-                        onChange={val => setEngineRuntimeSelections(prev => ({ ...prev, [runtimeKey]: val }))}
-                        style={{ width: 180 }}
-                        placeholder="运行时环境"
-                      >
-                        {variantRuntimes.map(rt => (
-                          <Option key={rt.id} value={rt.id}>{rt.name}</Option>
-                        ))}
-                      </Select>
-                    )}
-                    {engine.installed ? (
-                      hasNewerVersion ? (
-                        <Button
-                          type="primary"
-                          icon={<SyncOutlined />}
-                          onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version, selectedRuntime)}
-                        >
-                          更新
-                        </Button>
-                      ) : (
-                        <Space>
-                          <Tag icon={<CheckCircleOutlined />} color="success">{t('engines.installed')}</Tag>
-                          <Badge dot={hasNewerVersion} color="orange" offset={[-4, 4]}>
-                            <Button
-                              icon={<HistoryOutlined />}
-                              onClick={() => openVersionDrawer(engine)}
-                            >
-                              {t('engines.manageVersions')}
-                            </Button>
-                          </Badge>
-                        </Space>
-                      )
-                    ) : (
-                      <Button
-                        type="primary"
-                        icon={<DownloadOutlined />}
-                        onClick={() => handleDownloadEngine(engine.engine_api_id || engine.id, latestVersion?.version, selectedRuntime)}
-                      >
-                        {t('engines.download')}
-                      </Button>
-                    )}
+                    <Tag icon={<CheckCircleOutlined />} color="success">{t('engines.installed')}</Tag>
+                    <Button icon={<HistoryOutlined />} onClick={() => openVersionDrawer(engine)}>{t('engines.manageVersions')}</Button>
                   </Space>
                 )
-              ]}
-            >
-              <List.Item.Meta
-                title={<Space>
-                  {engine.name}
-                  {engine.default_version && <Tag color="blue">v{engine.default_version}</Tag>}
-                </Space>}
-                description={
-                  <div>
-                    <div>{engine.description}</div>
-                    {latestVersion && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: token.colorTextTertiary }}>
-                        {t('engines.latestVersion')}: {latestVersion.version} ({formatBytes(latestVersion.size)})
+              ) : (
+                <Button type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadEngine(engineApiId, latestVersion?.version)}>{t('engines.download')}</Button>
+              )}
+            </Space>
+          )
+        ]}
+      >
+        <List.Item.Meta
+          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>v{engine.default_version}</Tag>}</Space>}
+          description={
+            <div>
+              {latestVersion && (
+                <div style={{ fontSize: 12, color: token.colorTextTertiary }}>{t('engines.latestVersion')}: {latestVersion.version} ({formatBytes(latestVersion.size)})</div>
+              )}
+              {engine.dependencies?.length > 0 && (
+                <div style={{ fontSize: 12, color: token.colorTextTertiary }}>{t('engines.dependencies')}: {engine.dependencies.join(', ')}</div>
+              )}
+              {engine.installed_versions?.length > 0 && (
+                <div style={{ marginTop: 4 }}><Space size={4}>{engine.installed_versions.map(v => (<Tag key={v.version} color={v.is_default ? 'blue' : 'default'}>{v.version}</Tag>))}</Space></div>
+              )}
+              {isDownloading && (
+                <div style={{ marginTop: 8 }}>
+                  {activeStates.map(ds => (
+                    <div key={ds.targetQuantization} style={{ marginBottom: 4 }}>
+                      <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 2 }}>
+                        {ds.label || ds.targetQuantization}
+                        {ds.status === 'downloading' && ` · ${formatBytes(ds.speed)}/s`}
+                        {ds.status === 'unpacking' && ` · ${t('engines.unpacking')}`}
+                        {ds.status === 'installing' && ` · ${t('engines.installing')}`}
                       </div>
-                    )}
-                    {engine.dependencies?.length > 0 && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: token.colorTextTertiary }}>
-                        {t('engines.dependencies')}: {engine.dependencies.join(', ')}
-                      </div>
-                    )}
-                    {engine.installed_versions?.length > 0 && (
-                      <div style={{ marginTop: 4 }}>
-                        <Space size={4}>
-                          {engine.installed_versions.map(v => (
-                            <Tag key={v.version} color={v.is_default ? 'blue' : 'default'}>
-                              {v.version}
-                            </Tag>
-                          ))}
-                        </Space>
-                      </div>
-                    )}
-                    {isDownloading && (
-                      <div style={{ marginTop: 8 }}>
-                        {activeStates.map(ds => (
-                          <div key={ds.targetQuantization} style={{ marginBottom: 4 }}>
-                            <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 2 }}>
-                              {ds.targetQuantization}
-                              {ds.status === 'downloading' && t('engines.downloadingWithSpeed', { speed: ds.speed > 0 ? ` ${formatBytes(ds.speed)}/s` : '' })}
-                              {ds.status === 'unpacking' && t('engines.unpacking')}
-                              {ds.status === 'installing' && t('engines.installing')}
-                            </div>
-                            <Progress
-                              percent={ds.progress || 0}
-                              size="small"
-                              status="active"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                }
-              />
-            </List.Item>
+                      <Progress percent={ds.progress || 0} size="small" status="active" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          }
+        />
+      </List.Item>
+    );
+  };
+
+  // 合并：模块开关 + 关联引擎
+  const MODULE_ENGINE_MAP = { llm: 'llamacpp', comfyui: 'comfyui', tts: 'tts', asr: 'asr', ocr: 'ocr' };
+
+  const renderEnginesContent = () => {
+    const allRows = resolveEngineRows();
+    const engineByApiId = {};
+    for (const row of allRows) {
+      const apiId = row.engine_api_id || row.id;
+      if (!engineByApiId[apiId]) engineByApiId[apiId] = [];
+      engineByApiId[apiId].push(row);
+    }
+    const moduleEngineIds = new Set(Object.values(MODULE_ENGINE_MAP));
+    const standaloneRows = allRows.filter(r => !moduleEngineIds.has(r.engine_api_id || r.id));
+
+    return (
+      <>
+      <div className="gs-section-head">
+        <span className="gs-section-title">引擎管理</span>
+        <Button icon={<SyncOutlined />} onClick={() => { loadModules(); loadEngines(); }} loading={modulesLoading}>刷新</Button>
+      </div>
+      <div className="gs-section-body">
+        {modules.length === 0 && <Empty description="暂无数据" />}
+        {modules.map(mod => {
+          const isAlways = mod.alwaysEnabled;
+          const modEngines = [];
+          for (const reqId of mod.requiredEngines) {
+            if (engineByApiId[reqId]) modEngines.push(...engineByApiId[reqId]);
+          }
+          return (
+            <Card key={mod.id} className="gs-section-card" size="small">
+              {/* 模块头行（不用 title 属性，避免和主标题竞争） */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: mod.enabled && modEngines.length > 0 ? 12 : 0,
+                paddingLeft: 16
+              }}>
+                <Space size={6}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: token.colorText }}>{mod.name}</span>
+                  {isAlways && <Tag color="green" style={{ fontSize: 10 }}>常驻</Tag>}
+                </Space>
+                <Switch checked={mod.enabled} disabled={isAlways} loading={mod.toggling}
+                  onChange={checked => handleToggleModule(mod, checked)} />
+              </div>
+              {mod.enabled && modEngines.length > 0 && (
+                <List size="small" dataSource={modEngines} renderItem={e => renderEngineRow(e)} />
+              )}
+              {mod.enabled && modEngines.length === 0 && (
+                <div style={{ color: token.colorTextTertiary, fontSize: 13, paddingLeft: 16 }}>暂无可安装引擎</div>
+              )}
+              {!mod.enabled && (
+                <div style={{ color: token.colorTextTertiary, fontSize: 13, paddingLeft: 16 }}>模块已关闭，关联引擎已隐藏</div>
+              )}
+            </Card>
           );
-        }}
-      />
-    </Card>
-    </div>
-    </>
-  );
+        })}
+        {/* 独立引擎 */}
+        {standaloneRows.length > 0 && (
+          <Card className="gs-section-card" size="small">
+            <div style={{ fontSize: 14, fontWeight: 600, color: token.colorText, marginBottom: 12, paddingLeft: 16 }}>其它引擎</div>
+            <List size="small" dataSource={standaloneRows} renderItem={e => renderEngineRow(e)} />
+          </Card>
+        )}
+      </div>
+      </>
+    );
+  };
 
   const renderExportContent = () => {
     const visibleModels = exportModels.filter(m => exportTypes.includes(m.type));
@@ -1560,7 +1562,7 @@ const GlobalSettings = () => {
                       const displayPct = displayTotal > 0 ? Math.round((displayUsed / displayTotal) * 100) : 0;
                       return (
                         <div key={i} style={i > 0 ? { marginTop: 8 } : {}}>
-                          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}</div>
+                          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gpu.name}{gpu.archDisplay ? <Tag color="purple" style={{ marginLeft: 6, fontSize: 11 }}>{gpu.archDisplay}</Tag> : null}</div>
                           {gpu.amdSoftwareVersion ? (
                             <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4 }}>
                               {t('runtime.amdSoftware', { version: gpu.amdSoftwareVersion })}
@@ -1794,6 +1796,72 @@ const GlobalSettings = () => {
       </div>
     </>
   );
+
+  // === 模块开关功能 ===
+  const loadModules = async () => {
+    try {
+      setModulesLoading(true);
+      const res = await moduleService.getAll();
+      setLowEndDevice(res.lowEndDevice || false);
+      const list = (res.modules || []);
+      list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setModules(list);
+    } catch {
+      message.error('加载模块信息失败');
+    } finally {
+      setModulesLoading(false);
+    }
+  };
+
+  const handleToggleModule = async (mod, enabled) => {
+    // 乐观更新
+    setModules(prev => prev.map(m => m.id === mod.id ? { ...m, toggling: true } : m));
+
+    try {
+      await moduleService.update(mod.id, enabled);
+      setModules(prev => {
+        const next = prev.map(m => m.id === mod.id ? { ...m, enabled, toggling: false } : m);
+        // 同步更新 sessionStorage，Home 页面无需等待 API 即可无感渲染
+        const eList = next.filter(m => m.enabled).sort((a, b) => (a.order || 0) - (b.order || 0));
+        sessionStorage.setItem('novamax_modules', JSON.stringify(eList));
+        return next;
+      });
+      setEnginesReloadTrigger(c => c + 1); // 刷新引擎列表以同步模块开关
+      message.success(`${mod.nameZh || mod.name} ${enabled ? '已启用' : '已禁用'}`);
+    } catch (error) {
+      // 428 状态码表示需要二次确认
+      if (error.response?.status === 428 && error.response?.data?.requiresConfirmation) {
+        setModules(prev => prev.map(m => m.id === mod.id ? { ...m, toggling: false } : m));
+        Modal.confirm({
+          title: '确认启用',
+          content: '此模块不建议在低显存设备上启用，可能影响系统性能。确定要启用吗？',
+          okText: '确认启用',
+          cancelText: '取消',
+          onOk: async () => {
+            setModules(prev => prev.map(m => m.id === mod.id ? { ...m, toggling: true } : m));
+            try {
+              await moduleService.update(mod.id, enabled, true);
+              setModules(prev => {
+                const next = prev.map(m => m.id === mod.id ? { ...m, enabled, toggling: false } : m);
+                const eList = next.filter(m => m.enabled).sort((a, b) => (a.order || 0) - (b.order || 0));
+                sessionStorage.setItem('novamax_modules', JSON.stringify(eList));
+                return next;
+              });
+              setEnginesReloadTrigger(c => c + 1);
+              message.success(`${mod.nameZh || mod.name} 已启用`);
+            } catch (e) {
+              setModules(prev => prev.map(m => m.id === mod.id ? { ...m, toggling: false } : m));
+              message.error('启用失败');
+            }
+          },
+          onCancel: () => {}
+        });
+      } else {
+        setModules(prev => prev.map(m => m.id === mod.id ? { ...m, toggling: false } : m));
+        message.error(error.response?.data?.error || '操作失败');
+      }
+    }
+  };
 
   const renderContent = () => {
     switch (selectedMenu) {
@@ -2044,7 +2112,7 @@ const GlobalSettings = () => {
               { key: 'logs',    icon: <FileTextOutlined />,  label: t('menu.logs') },
               { key: 'appearance', icon: <BgColorsOutlined />, label: t('menu.appearance') },
               { key: 'storage', icon: <DatabaseOutlined />, label: t('menu.storage') },
-              { key: 'engines', icon: <AppstoreOutlined />, label: t('menu.engines') },
+              { key: 'engines', icon: <AppstoreOutlined />, label: '引擎管理' },
               { key: 'cache',   icon: <HddOutlined />,      label: t('menu.cache') },
               { key: 'export',  icon: <ExportOutlined />,   label: t('menu.export') },
               { key: 'update',  icon: <SyncOutlined />,     label: t('menu.update') }

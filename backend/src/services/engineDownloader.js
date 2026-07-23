@@ -19,7 +19,7 @@ class EngineDownloader {
   constructor() {
     this.pythonPath = getPythonPath();
     this.msScript = getPythonScriptPath('modelscope_downloader.py');
-    // _activeEngineDownloads: 记录正在下载的引擎，防止并发下载同一引擎（如 rocm 被多个链同时触发）
+    // _activeEngineDownloads: 记录正在下载的引擎，防止并发下载同一引擎被多个链同时触发
     this._activeEngineDownloads = new Map(); // `${engineId}::${version}` → Promise
   }
 
@@ -55,7 +55,7 @@ class EngineDownloader {
     const validMissing = depCheck.missing.filter(d => d.id && d.id.trim());
     for (const missing of validMissing) {
       const depEngine = engineManager.getEngine(missing.id);
-      const depVersion = versionInfo.rocm_version || engineManager.getEngineVersions(missing.id)[0]?.version;
+      const depVersion = engineManager.getEngineVersions(missing.id)[0]?.version;
       const taskId = `${missing.id}::${depVersion}`;
 
       // 若该依赖已在另一条链中下载，不重置其状态，仅加入任务等待
@@ -84,7 +84,14 @@ class EngineDownloader {
         const rtTaskId = `${effectiveEngineId}_runtime_${runtimeId}`;
         downloadStateManager.createState(rtTaskId, null, 'engine');
         const rtState = downloadStateManager.getFullState(rtTaskId);
-        if (rtState) { rtState._engineVersion = version; rtState._parentEngineId = engineId; }
+        if (rtState) {
+          rtState._engineVersion = version;
+          rtState._parentEngineId = engineId;
+          // 运行时标签，前端展示用
+          const backendLabel = runtime._backend ? runtime._backend.toUpperCase() : '';
+          const archLabel = runtime.arch || runtimeId;
+          rtState.label = `${engine.name} · ${backendLabel} ${archLabel} 运行环境`;
+        }
         const effEng = engineManager.getEngine(effectiveEngineId);
         runtimeTask = { taskId: rtTaskId, engineId: effectiveEngineId, version, isRuntime: true, runtimeFile: runtime.modelscope_file, runtimeRepo: effEng?.modelscope_repo || engine.modelscope_repo };
       }
@@ -209,7 +216,7 @@ class EngineDownloader {
   async _runSingleDownload(taskInfo, runtimeId, skipRuntimeDownload = false) {
       const lockKey = `${taskInfo.engineId}::${taskInfo.version}`;
 
-      // 若另一条链正在下载同一引擎（如 rocm），等待其完成后跳过重复下载
+      // 若另一条链正在下载同一引擎，等待其完成后跳过重复下载
       if (this._activeEngineDownloads.has(lockKey)) {
         console.log(`[engineDownloader] 等待已有下载任务: ${lockKey}`);
         try {
@@ -691,7 +698,6 @@ class EngineDownloader {
     downloadStateManager.setState(engineId, 'installing', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'installing' });
 
-    const rocmPath = engineManager.getEnginePath('rocm') || '';
     const installRoot = installPath;
 
     let cmd, args, spawnEnv;
@@ -699,10 +705,11 @@ class EngineDownloader {
     if (hasPy) {
       console.log(`Running Python install script: ci/install_${engineId}.py`);
       cmd = python313;
-      args = [pyScript, '--install-root', installRoot, '--rocm-path', rocmPath, '--project-root', PROJECT_ROOT];
+      args = [pyScript, '--install-root', installRoot, '--project-root', PROJECT_ROOT];
       if (skipRuntimeDownload) {
         args.push('--skip-runtime-download');
-      } else if (runtimeId) {
+      }
+      if (runtimeId) {
         args.push('--runtime-id', runtimeId);
       }
       spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' };
@@ -710,10 +717,11 @@ class EngineDownloader {
       console.log(`Running bat install script: ci/install_${engineId}.bat`);
       cmd = 'cmd.exe';
       args = ['/c', batScript];
-      spawnEnv = { ...process.env, INSTALL_ROOT: installRoot, ROCM_PATH: rocmPath, PROJECT_ROOT };
+      spawnEnv = { ...process.env, INSTALL_ROOT: installRoot, PROJECT_ROOT };
       if (skipRuntimeDownload) {
         spawnEnv.NOVAMAX_SKIP_RUNTIME_DOWNLOAD = '1';
-      } else if (runtimeId) {
+      }
+      if (runtimeId) {
         spawnEnv.NOVAMAX_RUNTIME_ID = runtimeId;
       }
     }

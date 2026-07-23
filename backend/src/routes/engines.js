@@ -7,6 +7,9 @@ import { normalizeEngineType } from '../utils/engineTypeHelper.js';
 import downloadStateManager from '../services/downloadStateManager.js';
 import processManager from '../services/processManager.js';
 import { getGpuInfo } from './system.js';
+import { getGpuArchInfo, recommendGpuBackend } from '../utils/gpuArchDetection.js';
+import configManager from '../services/configManager.js';
+import { getModuleForEngine } from '../config/modules.js';
 
 const router = express.Router();
 
@@ -43,35 +46,17 @@ function injectLocalTtsVariants(ttsEngine, installedVersions) {
   return { ...ttsEngine, variants };
 }
 
-// TTS 各 variant 的默认运行时环境（当远程配置未提供 runtimes 时兜底）
-const TTS_DEFAULT_RUNTIMES = {
-  indextts2: [
-    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts2_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
-  ],
-  indextts15: [
-    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/index_tts1.5_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
-  ],
-  omnivoice: [
-    { id: 'rocm', name: 'ROCm + PyTorch', modelscope_file: 'tts/engines/omnivoice_engine.zip', description: 'AMD GPU 加速 (ROCm)' }
-  ]
-};
-
-function ensureTtsRuntimes(ttsEngine) {
-  if (!ttsEngine || !Array.isArray(ttsEngine.variants)) return ttsEngine;
-  const variants = ttsEngine.variants.map(v => {
-    if (Array.isArray(v.runtimes) && v.runtimes.length > 0) return v;
-    const defaults = TTS_DEFAULT_RUNTIMES[v.id] || [];
-    return { ...v, runtimes: defaults };
-  });
-  return { ...ttsEngine, variants };
-}
-
 function getLlamacppVariantPriority(gpus) {
-  const gpuNames = Array.isArray(gpus)
-    ? gpus.map(gpu => String(gpu?.name || '').toLowerCase())
-    : [];
-  const preferRocm = gpuNames.some(name => name.includes('8060s'));
-  return preferRocm ? ['rocm', 'vulkan', 'other'] : ['vulkan', 'rocm', 'other'];
+  const primaryGpu = (Array.isArray(gpus) ? gpus : [])
+    .find(g => g?.vendor && g.vendor !== 'unknown') || null;
+
+  if (!primaryGpu) return ['vulkan', 'other'];
+
+  const backend = recommendGpuBackend(primaryGpu, 'llamacpp');
+  if (backend === 'rocm') return ['rocm', 'cuda', 'vulkan', 'other'];
+  if (backend === 'cuda') return ['cuda', 'vulkan', 'other'];
+
+  return ['vulkan', 'other'];
 }
 
 function orderLlamacppEngine(engine, gpus) {
@@ -91,10 +76,60 @@ function orderLlamacppEngine(engine, gpus) {
   };
 }
 
+/**
+ * 给 llama.cpp variants 标注 recommended（第一个 = 最优）
+ */
+function annotateLlamacppRecommendations(engine, gpus) {
+  if (!engine?.variants) return engine;
+  const primaryGpu = (Array.isArray(gpus) ? gpus : [])
+    .find(g => g?.vendor && g.vendor !== 'unknown') || null;
+  const backend = primaryGpu ? recommendGpuBackend(primaryGpu, 'llamacpp') : null;
+
+  const variants = engine.variants.map((v, i) => ({
+    ...v,
+    recommended: i === 0 || (backend && v.id === backend),
+  }));
+  return { ...engine, variants };
+}
+
+/**
+ * 给 ComfyUI runtimes 标注 recommended
+ * runtimes 结构: { rocm: [...], cuda: [...] }
+ */
+function annotateComfyuiRuntimes(engine, gpus) {
+  if (!engine?.runtimes) return engine;
+  const primaryGpu = (Array.isArray(gpus) ? gpus : [])
+    .find(g => g?.vendor && g.vendor !== 'unknown') || null;
+  if (!primaryGpu) return engine;
+
+  const backend = recommendGpuBackend(primaryGpu, 'comfyui');
+  const { arch: gpuArch } = getGpuArchInfo(primaryGpu);
+
+  const annotated = {};
+  for (const [key, runtimes] of Object.entries(engine.runtimes)) {
+    if (!Array.isArray(runtimes)) { annotated[key] = runtimes; continue; }
+    annotated[key] = runtimes.map((rt, idx) => ({
+      ...rt,
+      // AMD: 精确匹配 arch；NVIDIA: 推荐第一个（CUDA 向下兼容）
+      recommended: key === backend && (
+        backend === 'cuda' ? idx === 0 : (gpuArch && rt.arch === gpuArch)
+      ),
+    }));
+  }
+  return { ...engine, runtimes: annotated };
+}
+
 async function getOrderedEngine(engineId, engine) {
-  if (engineId !== 'llamacpp') return engine;
-  const gpus = await getGpuInfo({ namesOnly: true }).catch(() => null);
-  return orderLlamacppEngine(engine, gpus);
+  if (engineId === 'llamacpp' && engine?.variants) {
+    const gpus = await getGpuInfo({ namesOnly: false }).catch(() => null);
+    return annotateLlamacppRecommendations(orderLlamacppEngine(engine, gpus), gpus);
+  }
+  // ComfyUI: 给每个 runtime 标记 recommended
+  if (engineId === 'comfyui' && engine?.runtimes) {
+    const gpus = await getGpuInfo({ namesOnly: false }).catch(() => null);
+    return annotateComfyuiRuntimes(engine, gpus);
+  }
+  return engine;
 }
 
 /**
@@ -104,8 +139,18 @@ router.get('/engines', async (req, res) => {
   try {
     const engines = engineManager.getEngines();
     const result = {};
+    const modulesConfig = configManager.get().modules || {};
 
     for (const [id, rawEngine] of Object.entries(engines)) {
+      // 跳过已禁用模块的关联引擎
+      const engineModule = getModuleForEngine(id);
+      if (engineModule) {
+        if (modulesConfig[engineModule.id]?.enabled === false) {
+          console.log(`[engines] 跳过已禁用模块 "${engineModule.id}" 的引擎 "${id}"`);
+          continue;
+        }
+      }
+
       const engine = await getOrderedEngine(id, rawEngine);
       const installed = engineManager.getInstalledVersions(id);
       const broken = engineManager.getBrokenVersions(id);
@@ -114,17 +159,17 @@ router.get('/engines', async (req, res) => {
 
       const allStates = downloadStateManager.getAllStates();
       const downloadStates = Object.values(allStates).filter(
-        s => s.type === 'engine' && (s.engineId === id || s.id === id)
+        s => s.type === 'engine' && (
+          s.engineId === id ||
+          s.id === id ||
+          // 包含关联的 runtime 下载（如 comfyui_runtime_rocm:rdna35）
+          (s.id && s.id.startsWith(`${id}_runtime_`))
+        )
       );
 
       let engineWithLocalVariants = id === 'tts'
         ? injectLocalTtsVariants(engine, installed)
         : engine;
-
-      // TTS 兜底：远程配置缺少 runtimes 时注入默认值
-      if (id === 'tts') {
-        engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
-      }
 
       result[id] = {
         ...engineWithLocalVariants,
@@ -156,6 +201,15 @@ router.get('/engines/:id', async (req, res) => {
       return res.status(404).json({ error: 'Engine not found' });
     }
 
+    // 检查模块是否被禁用
+    const engineModule = getModuleForEngine(id);
+    if (engineModule) {
+      const modulesConfig = configManager.get().modules || {};
+      if (modulesConfig[engineModule.id]?.enabled === false) {
+        return res.status(404).json({ error: `模块 "${engineModule.nameZh || engineModule.id}" 已禁用` });
+      }
+    }
+
     const installed = engineManager.getInstalledVersions(id);
     const broken = engineManager.getBrokenVersions(id);
     const installedSet = new Set(installed.map(v => v.version));
@@ -164,10 +218,6 @@ router.get('/engines/:id', async (req, res) => {
     let engineWithLocalVariants = id === 'tts'
       ? injectLocalTtsVariants(engine, installed)
       : engine;
-
-    if (id === 'tts') {
-      engineWithLocalVariants = ensureTtsRuntimes(engineWithLocalVariants);
-    }
 
     res.json({
       ...engineWithLocalVariants,
@@ -196,6 +246,15 @@ router.get('/engines/:id/check', async (req, res) => {
 
     if (!engine) {
       return res.status(404).json({ error: 'Engine not found' });
+    }
+
+    // 检查模块是否被禁用
+    const engineModuleCheck = getModuleForEngine(id);
+    if (engineModuleCheck) {
+      const modulesConfig = configManager.get().modules || {};
+      if (modulesConfig[engineModuleCheck.id]?.enabled === false) {
+        return res.status(404).json({ error: `模块 "${engineModuleCheck.nameZh || engineModuleCheck.id}" 已禁用` });
+      }
     }
 
     const installed = engineManager.isInstalled(id);
@@ -259,13 +318,12 @@ router.delete('/engines/:id/versions/:version', async (req, res) => {
   try {
     const { id, version } = req.params;
 
-    // 引擎 → 关联模型类型（rocm 作为依赖，检查所有使用它的引擎对应的模型）
+    // 引擎 → 关联模型类型
     const engineModelTypes = {
       llamacpp: ['llm'],
       comfyui:  ['comfyui'],
       tts:      ['tts'],
-      asr:      ['whisper'],
-      rocm:     ['llm', 'comfyui']   // rocm 是 llamacpp/comfyui 的依赖
+      asr:      ['whisper']
     };
 
     const relatedTypes = engineModelTypes[id] || [];
@@ -294,7 +352,39 @@ router.post('/engines/:id/download', async (req, res) => {
     const { id } = req.params;
     const { version, runtime } = req.body;
 
-    const result = await engineDownloader.startDownloadWithDependencies(id, version, runtime || null);
+    // 如果引擎有 runtimes 但未指定，自动根据 GPU 选择推荐
+    let finalRuntime = runtime || null;
+    if (!finalRuntime) {
+      const eng = engineManager.getEngine(id);
+      if (eng?.runtimes) {
+        const gpus = await getGpuInfo({ namesOnly: false }).catch(() => null);
+        const primaryGpu = (Array.isArray(gpus) ? gpus : [])
+          .find(g => g?.vendor && g.vendor !== 'unknown') || null;
+        if (primaryGpu) {
+          const backend = recommendGpuBackend(primaryGpu, id);
+          if (backend) {
+            // NVIDIA/CUDA: 推荐第一个 runtime（向下兼容）
+            // AMD/ROCm: 精确匹配 GPU arch
+            if (backend === 'cuda') {
+              const cudaRuntimes = eng.runtimes?.cuda;
+              if (Array.isArray(cudaRuntimes) && cudaRuntimes.length > 0) {
+                finalRuntime = `cuda:${cudaRuntimes[0].arch}`;
+              }
+            } else {
+              const { arch: gpuArch } = getGpuArchInfo(primaryGpu);
+              if (gpuArch) {
+                finalRuntime = `${backend}:${gpuArch}`;
+              }
+            }
+            if (finalRuntime) {
+              console.log(`[engines] 自动选择 runtime: ${finalRuntime}（GPU: ${primaryGpu.name}）`);
+            }
+          }
+        }
+      }
+    }
+
+    const result = await engineDownloader.startDownloadWithDependencies(id, version, finalRuntime);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

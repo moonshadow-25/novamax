@@ -40,10 +40,21 @@ class ComfyUIRunner {
       args.push('--extra-model-paths-config', configPath);
     }
 
-    const venvPython = path.join(comfyuiPath, 'venv', 'Scripts', 'python.exe');
+    // 检测 Python 路径（预打包运行环境：runtime/python.exe，兼容旧版：venv/Scripts/python.exe）
+    const candidatePythons = [
+      path.join(comfyuiPath, 'runtime', 'python.exe'),
+      path.join(comfyuiPath, 'runtime', 'Scripts', 'python.exe'),
+      path.join(comfyuiPath, 'venv', 'Scripts', 'python.exe'),
+    ];
+    const pythonExe = candidatePythons.find(p => fs.existsSync(p));
+    if (!pythonExe) {
+      throw new Error(
+        `ComfyUI 运行环境 Python 不存在，已搜索:\n${candidatePythons.map(p => `  - ${p}`).join('\n')}`
+      );
+    }
 
     return {
-      command: venvPython,
+      command: pythonExe,
       args,
       cwd: comfyuiPath
     };

@@ -238,6 +238,11 @@ export const configService = {
   setUpdateSettings: (updateSettings) => api.put('/config/update-settings', { updateSettings })
 };
 
+export const moduleService = {
+  getAll: () => api.get('/modules'),
+  update: (moduleId, enabled, confirm) => api.put('/modules', { moduleId, enabled, confirm })
+};
+
 export const engineService = {
   getAll: () => api.get('/engines'),
   getById: (id) => api.get(`/engines/${id}`),

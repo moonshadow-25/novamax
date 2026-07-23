@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse, Alert, Card } from 'antd';
+import { Layout, Tabs, Input, Button, Space, Typography, message, Segmented, Badge, Collapse, Alert, Card, Tag } from 'antd';
 import { SearchOutlined, BulbOutlined, BulbFilled, ThunderboltOutlined, DownloadOutlined, SettingOutlined, PlusOutlined, GiftOutlined, CloseOutlined, ToolOutlined, WifiOutlined, SoundOutlined, ScanOutlined } from '@ant-design/icons';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { setLocale } from '../../i18n';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeEngineType } from '../../utils/engineType';
-import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService } from '../../services/api';
+import { modelService, backendService, configService, downloadService, comfyuiService, remoteConfigService, updateService, engineService, multiConnectService, moduleService } from '../../services/api';
 import ModelCard from '../../components/ModelCard/ModelCard';
 import AddModelModal from '../../components/AddModelModal/AddModelModal';
 import DownloadCenter from '../../components/DownloadCenter/DownloadCenter';
@@ -19,12 +19,13 @@ import './Home.css';
 const { Header, Content } = Layout;
 const { Title } = Typography;
 
-const MODEL_TYPES = [
-  { key: 'llm', label: 'LLM' },
-  { key: 'comfyui', label: 'ComfyUI' },
-  { key: 'tts', label: 'TTS' },
-  { key: 'asr', label: 'ASR' },
-  { key: 'ocr', label: 'OCR' }
+// 兜底模块列表（API 请求失败时使用）
+const FALLBACK_MODULES = [
+  { id: 'llm', name: 'LLM', order: 1 },
+  { id: 'comfyui', name: 'ComfyUI', order: 2 },
+  { id: 'tts', name: 'TTS', order: 3 },
+  { id: 'asr', name: 'ASR', order: 4 },
+  { id: 'ocr', name: 'OCR', order: 5 }
 ];
 
 const DEFAULT_FILTER_OPTIONS = (t, favorites, downloadedModels, customModels, cloudApiModels) => [
@@ -52,6 +53,20 @@ function Home() {
   const { t, i18n } = useTranslation(['home', 'common']);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  // 从 sessionStorage 恢复上次的模块列表，避免页面切换时的残影
+  const [availableModules, setAvailableModules] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('novamax_modules');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return FALLBACK_MODULES;
+  });
+  const enabledModuleIds = useMemo(() => new Set(availableModules.filter(m => m.enabled !== false).map(m => m.id)), [availableModules]);
+
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
     return ['llm', 'comfyui', 'tts', 'asr', 'ocr'].includes(tab) ? tab : 'llm';
@@ -78,6 +93,27 @@ function Home() {
       .then(d => d && (d.has_legacy_engine || d.has_legacy_models) ? setMigrateStatus(d) : null)
       .catch(() => {});
   }, []);
+
+  // 加载可用模块列表，结果缓存到 sessionStorage 避免页面切换残影
+  const loadAvailableModules = useCallback(() => {
+    moduleService.getAll().then(res => {
+      const enabledModules = (res.modules || []).filter(m => m.enabled);
+      enabledModules.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setAvailableModules(enabledModules);
+      sessionStorage.setItem('novamax_modules', JSON.stringify(enabledModules));
+      // 如果当前 activeTab 不在启用列表中，切换到第一个可用模块
+      if (enabledModules.length > 0 && !enabledModules.find(m => m.id === activeTabRef.current)) {
+        setActiveTab(enabledModules[0].id);
+      }
+    }).catch(() => {
+      // API 失败时保留缓存/兜底列表
+    });
+  }, []);
+
+  useEffect(() => {
+    loadAvailableModules();
+  }, []);
+
   const handleMigrateLegacy = async () => {
     setMigrating(true);
     try {
@@ -98,6 +134,8 @@ function Home() {
   const [updateInfo, setUpdateInfo] = useState(null);
   // 首页 banner 显示控制
   const [showBanner, setShowBanner] = useState(true);
+  // 更新通道（stable / beta）
+  const [channel, setChannel] = useState('stable');
   // 关闭所有 banner（仅当前会话，不持久化）
   const handleCloseAllBanners = () => {
     setShowBanner(false);
@@ -246,6 +284,7 @@ function Home() {
     configService.getUpdateSettings().then(res => {
       const s = res.updateSettings || {};
       setShowBanner(s.show_banner ?? true);
+      setChannel(s.channel || 'stable');
     }).catch(() => {});
 
     // 检查应用更新
@@ -449,7 +488,7 @@ function Home() {
       <Header className="home-header">
         <div className="home-header-inner">
           <div className="home-header-left">
-            <Title level={3} style={{ margin: 0, color: 'inherit' }}>NovaMax</Title>
+            <Title level={3} style={{ margin: 0, color: 'inherit' }}>NovaMax{channel === 'beta' && <Tag color="orange" style={{ marginLeft: 8, fontSize: 12, verticalAlign: 'middle' }}>测试版</Tag>}</Title>
           </div>
           <div className="home-header-center">
             <Input
@@ -619,7 +658,7 @@ function Home() {
                 onChange={(key) => {
                   setActiveTab(key);
                 }}
-                items={MODEL_TYPES.map(type => ({ key: type.key, label: type.label }))}
+                items={availableModules.filter(m => m.enabled !== false).map(mod => ({ key: mod.id, label: mod.name }))}
                 style={{ flex: 1 }}
               />
               {activeTab !== 'ocr' && (

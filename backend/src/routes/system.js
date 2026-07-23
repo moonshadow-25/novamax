@@ -13,6 +13,7 @@ import comfyuiInstanceManager from '../services/comfyuiInstanceManager.js';
 import logCollector from '../services/logCollector.js';
 import configManager from '../services/configManager.js';
 import { PROJECT_ROOT, MODELS_RUN_DIR, DATA_DIR, GPUINFO_PATH } from '../config/constants.js';
+import { detectGpuVendor, getGpuArchInfo } from '../utils/gpuArchDetection.js';
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -109,7 +110,7 @@ export async function getGpuInfo(options = {}) {
       if (lines.length > 0) {
         _nvidiaSmiAvailable = true;
         if (namesOnly) {
-          return lines.map(line => ({ name: line.trim() }));
+          return lines.map(line => ({ name: line.trim(), vendor: detectGpuVendor(line.trim()) }));
         }
         return lines.map(line => {
           const parts = line.split(',').map(s => s.trim());
@@ -117,8 +118,13 @@ export async function getGpuInfo(options = {}) {
           const total = parseInt(totalMB) * 1024 * 1024;
           const used = parseInt(usedMB) * 1024 * 1024;
           const free = parseInt(freeMB) * 1024 * 1024;
+          const vendor = detectGpuVendor(name);
+          const archInfo = getGpuArchInfo({ name, vendor });
           return {
             name,
+            vendor,
+            arch: archInfo.arch,
+            archDisplay: archInfo.display,
             preferredVersion: driverVersion || null,
             driverVersion: driverVersion || null,
             amdSoftwareVersion: null,
@@ -146,7 +152,7 @@ export async function getGpuInfo(options = {}) {
     const gpuList = Array.isArray(raw) ? raw : [raw];
 
     if (namesOnly) {
-      return gpuList.map(g => ({ name: g.name }));
+      return gpuList.map(g => ({ name: g.name, vendor: detectGpuVendor(g.name) }));
     }
 
     return gpuList.map(g => {
@@ -156,9 +162,14 @@ export async function getGpuInfo(options = {}) {
       const shrTotal = g.memory_sizes?.shared_system_memory_bytes || 0;
       const totalUsed = dedUsed + shrUsed;
       const totalAvail = total + shrTotal;
+      const vendor = detectGpuVendor(g.name);
+      const archInfo = getGpuArchInfo({ name: g.name, vendor });
 
       return {
         name: g.name,
+        vendor,
+        arch: archInfo.arch,
+        archDisplay: archInfo.display,
         luid: g.luid || null,
         total,
         used: dedUsed,
@@ -273,7 +284,7 @@ export async function getGpuInfo(options = {}) {
       const visibleGpus = gpus.filter(g => g && g.n);
 
       if (namesOnly) {
-        return visibleGpus.map(g => ({ name: g.n }));
+        return visibleGpus.map(g => ({ name: g.n, vendor: detectGpuVendor(g.n) }));
       }
 
       const perfs = Array.isArray(data.p) ? data.p : (data.p ? [data.p] : []);
@@ -285,8 +296,13 @@ export async function getGpuInfo(options = {}) {
         const total = g.t ? Number(g.t) : null;
         const usedFromPerf = Number(perfs[0]?.u || 0);
         const used = usedFromPerf > 0 ? usedFromPerf : (totalUsed > 0 ? totalUsed : null);
+        const vendor = detectGpuVendor(g.n);
+        const archInfo = getGpuArchInfo({ name: g.n, vendor });
         return [{
           name: g.n,
+          vendor,
+          arch: archInfo.arch,
+          archDisplay: archInfo.display,
           preferredVersion: g.pv || g.d || null,
           driverVersion: g.d || null,
           amdSoftwareVersion: g.asv || null,
@@ -301,8 +317,13 @@ export async function getGpuInfo(options = {}) {
         const total = g.t ? Number(g.t) : null;
         const usedValue = Number(perfs[i]?.u || 0);
         const used = usedValue > 0 ? usedValue : (i === 0 && totalUsed > 0 ? totalUsed : null);
+        const vendor = detectGpuVendor(g.n);
+        const archInfo = getGpuArchInfo({ name: g.n, vendor });
         return {
           name: g.n,
+          vendor,
+          arch: archInfo.arch,
+          archDisplay: archInfo.display,
           preferredVersion: g.pv || g.d || null,
           driverVersion: g.d || null,
           amdSoftwareVersion: g.asv || null,

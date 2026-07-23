@@ -117,7 +117,18 @@ class ComfyUIInstanceManager {
     const enginePath = engineManager.getEnginePath('comfyui', config.engine_version);
     if (!enginePath) throw new Error('ComfyUI engine not found');
 
-    const venvPython = path.join(enginePath, 'venv', 'Scripts', 'python.exe');
+    // 检测 Python 路径（预打包运行环境：runtime/python.exe，兼容旧版：venv/Scripts/python.exe）
+    const candidatePythons = [
+      path.join(enginePath, 'runtime', 'python.exe'),
+      path.join(enginePath, 'runtime', 'Scripts', 'python.exe'),
+      path.join(enginePath, 'venv', 'Scripts', 'python.exe'),
+    ];
+    const venvPython = candidatePythons.find(p => fs.existsSync(p));
+    if (!venvPython) {
+      throw new Error(
+        `ComfyUI 运行环境 Python 不存在，已搜索:\n${candidatePythons.map(p => `  - ${p}`).join('\n')}`
+      );
+    }
     const modelsDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'comfyui', 'models');
 
     // 生成 extra_model_paths.yaml

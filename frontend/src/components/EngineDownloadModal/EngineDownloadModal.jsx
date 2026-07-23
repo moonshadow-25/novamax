@@ -47,7 +47,23 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   const latestVariant = latestVersion
     ? versionGroups.find(g => g.id === latestVersion.variant_id)
     : null;
-  const runtimes = latestVariant?.runtimes || engineInfo?.runtimes || [];
+  const rawRuntimes = latestVariant?.runtimes || engineInfo?.runtimes || [];
+
+  // 归一化 runtimes：支持旧版 flat array 和新版 grouped object { rocm: [...], cuda: [...] }
+  const runtimes = React.useMemo(() => {
+    if (Array.isArray(rawRuntimes)) return rawRuntimes;
+    if (rawRuntimes && typeof rawRuntimes === 'object') {
+      const flat = [];
+      for (const [backend, items] of Object.entries(rawRuntimes)) {
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          flat.push({ ...item, _backend: backend, _id: `${backend}:${item.arch || item.id}` });
+        }
+      }
+      return flat;
+    }
+    return [];
+  }, [rawRuntimes]);
 
   const isLatestInstalled = latestVersion
     ? engineInfo?.installed_versions?.some(v => {
@@ -63,9 +79,10 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
   useEffect(() => {
     if (visible && engineInfo) {
       setSelectedVersion(latestVersion?.version || null);
-      // 自动选择第一个运行时
+      // 自动选择推荐的运行时，否则选第一个
       if (runtimes.length > 0) {
-        setSelectedRuntime(runtimes[0].id);
+        const recommended = runtimes.find(rt => rt.recommended);
+        setSelectedRuntime(recommended?._id || recommended?.id || runtimes[0]._id || runtimes[0].id || null);
       } else {
         setSelectedRuntime(null);
       }
@@ -226,11 +243,20 @@ const EngineDownloadModal = ({ visible, engineId, engineInfo, onComplete, onCanc
               onChange={setSelectedRuntime}
               style={{ width: '100%', marginTop: 8 }}
             >
-              {runtimes.map(rt => (
-                <Option key={rt.id} value={rt.id}>
-                  {rt.name}{rt.size > 0 ? ` (${formatBytes(rt.size)})` : ''}{rt.description ? ` — ${rt.description}` : ''}
-                </Option>
-              ))}
+              {runtimes.map(rt => {
+                const rtId = rt._id || rt.id;
+                const label = rt.name
+                  || (rt._backend && rt.arch ? `${rt._backend.toUpperCase()} ${rt.arch}` : rt.arch)
+                  || rtId;
+                return (
+                  <Option key={rtId} value={rtId}>
+                    {label}
+                    {rt.recommended && <Tag color="green" style={{ marginLeft: 6 }}>推荐</Tag>}
+                    {rt.size > 0 ? ` (${formatBytes(rt.size)})` : ''}
+                    {rt.description ? ` — ${rt.description}` : ''}
+                  </Option>
+                );
+              })}
             </Select>
           </div>
         )}

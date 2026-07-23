@@ -323,7 +323,7 @@ class ProcessManager {
       }
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
-      // 构建环境变量（添加引擎目录和 ROCm 等依赖）
+      // 构建环境变量（添加引擎目录到 PATH）
       const env = this._buildEngineEnv(actualVersion, llamacppPath);
 
       const process = spawn(llamaServerPath, cmd.args, { env });
@@ -634,7 +634,7 @@ class ProcessManager {
       }
       const llamaServerPath = this._getLlamaServerPath(llamacppPath);
 
-      // 构建环境变量（添加 ROCm 等依赖）
+      // 构建环境变量（添加引擎目录到 PATH）
       const env = this._buildEngineEnv(defaultVersion, llamacppPath);
 
       const process = spawn(llamaServerPath, cmd.args, { env });
@@ -1573,30 +1573,14 @@ class ProcessManager {
 
   /**
    * 构建引擎启动所需的环境变量
-   * 根据引擎版本添加必要的 PATH（如 ROCm）
+   * 添加引擎目录到 PATH（用于加载 ggml.dll 等）
    */
   _buildEngineEnv(engineVersion, enginePath) {
     const env = { ...process.env };
 
-    // 1. 添加引擎自己的目录到 PATH（用于加载 ggml.dll 等）
     if (enginePath && fs.existsSync(enginePath)) {
       env.PATH = `${enginePath};${env.PATH}`;
       console.log(`Added engine path to PATH: ${enginePath}`);
-    }
-
-    // 2. 如果指定了引擎版本，查找对应的 ROCm 版本
-    if (engineVersion) {
-      const versionInfo = engineManager.getEngineVersionInfo('llamacpp', engineVersion);
-      if (versionInfo && versionInfo.rocm_version) {
-        const rocmBasePath = path.join(PROJECT_ROOT, 'external', 'rocm', versionInfo.rocm_version);
-        const rocmBinPath = path.join(rocmBasePath, 'Lib', 'site-packages', 'torch', 'lib', 'rocm', 'bin');
-        if (fs.existsSync(rocmBinPath)) {
-          env.PATH = `${rocmBinPath};${env.PATH}`;
-          console.log(`Added ROCm ${versionInfo.rocm_version} to PATH: ${rocmBinPath}`);
-        } else {
-          console.warn(`ROCm bin not found at ${rocmBinPath}`);
-        }
-      }
     }
 
     return env;

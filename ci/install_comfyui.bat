@@ -2,77 +2,38 @@
 setlocal enabledelayedexpansion
 
 :: ============================================
-:: ComfyUI 安装脚本（bat 版本）
-:: 路径由 NovaMax 后端通过环境变量传入：
-::   COMFYUI_ROOT    ComfyUI 解压目录
-::   ROCM_PATH       ROCm 环境目录（含 python.exe）
-::   MODELS_TARGET   模型目录（将被 junction 链接）
+:: ComfyUI 安装脚本 v2.0（bat 版本）
+:: 预打包运行环境，无需 venv / pip install
+::
+:: 环境变量（由 NovaMax 后端传入）：
+::   INSTALL_ROOT    ComfyUI 解压目录
+::   PROJECT_ROOT    项目根目录
+::   NOVAMAX_RUNTIME_ID         运行时 ID（如 rocm:rdna35）
+::   NOVAMAX_SKIP_RUNTIME_DOWNLOAD  1 = 跳过运行时下载
 :: ============================================
 
 echo ========================================
-echo ComfyUI Auto Installation Script
+echo ComfyUI Installation (v2.0 pre-packaged)
 echo ========================================
-echo   ComfyUI Root:  %COMFYUI_ROOT%
-echo   ROCm Python:   %ROCM_PATH%\python.exe
-echo   Models Target: %MODELS_TARGET%
+echo   Install Root: %INSTALL_ROOT%
+echo   Runtime ID:   %NOVAMAX_RUNTIME_ID%
 echo.
 
-set VENV_PATH=%COMFYUI_ROOT%\venv
-set VENV_PYTHON=%VENV_PATH%\Scripts\python.exe
-set REQUIREMENTS=%COMFYUI_ROOT%\requirements.txt
-set MODELS_LINK=%COMFYUI_ROOT%\models
-
-:: [1/4] 检查 ROCm
-echo [1/4] Checking ROCm environment...
-if not exist "%ROCM_PATH%\python.exe" (
-    echo [ERROR] ROCm Python not found: %ROCM_PATH%\python.exe
-    exit /b 1
-)
-echo   [OK] Found: %ROCM_PATH%\python.exe
-echo.
-
-:: [2/4] 创建 venv
-echo [2/4] Creating virtual environment...
-if exist "%VENV_PYTHON%" (
-    echo   [SKIP] venv already exists
+if "%NOVAMAX_SKIP_RUNTIME_DOWNLOAD%"=="1" (
+    echo   [OK] 运行时由引擎下载器处理，安装脚本跳过下载/解压
 ) else (
-    "%ROCM_PATH%\python.exe" -m venv "%VENV_PATH%" --system-site-packages
-    if errorlevel 1 ( echo [ERROR] Failed to create venv & exit /b 1 )
-    echo   [OK] venv created
+    echo   [SKIP] 旧版 install 路径，仅写标记
 )
-echo.
 
-:: [3/4] 安装依赖
-echo [3/4] Installing dependencies...
-if exist "%REQUIREMENTS%" (
-    "%VENV_PYTHON%" -m pip install --no-cache-dir -r "%REQUIREMENTS%"
-    if errorlevel 1 ( echo [ERROR] Failed to install dependencies & exit /b 1 )
-    "%VENV_PYTHON%" -m pip uninstall -y torch torchvision torchaudio 2>nul
-    echo   [OK] Dependencies installed, ROCm torch preserved
-) else (
-    echo   [SKIP] requirements.txt not found
-)
-echo.
+:: 写入 .installed 标记
+set MARKER_PATH=%INSTALL_ROOT%\.installed
+set TS=%DATE:~0,4%-%DATE:~5,2%-%DATE:~8,2%T%TIME:~0,2%:%TIME:~3,2%:%TIME:~6,2%Z
+echo {"installed_at":"%TS%","engine":"comfyui","runtime_id":"%NOVAMAX_RUNTIME_ID%","version":"%INSTALL_ROOT%"} > "%MARKER_PATH%"
+echo   [OK] .installed marker written
 
-:: [4/4] 链接模型目录
-echo [4/4] Setting up models directory junction...
-if not exist "%MODELS_TARGET%" mkdir "%MODELS_TARGET%"
-if exist "%MODELS_LINK%" (
-    dir "%COMFYUI_ROOT%" | findstr /C:"<JUNCTION>" | findstr /C:"models" >nul
-    if not errorlevel 1 (
-        echo   [SKIP] Junction already exists
-        goto done
-    )
-    rmdir /s /q "%MODELS_LINK%"
-)
-mklink /J "%MODELS_LINK%" "%MODELS_TARGET%"
-if errorlevel 1 ( echo [ERROR] Failed to create junction & exit /b 1 )
-echo   [OK] Junction created
-
-:done
 echo.
 echo ========================================
-echo Installation completed successfully!
+echo ComfyUI installation completed!
 echo ========================================
 endlocal
 exit /b 0

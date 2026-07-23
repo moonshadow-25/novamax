@@ -275,15 +275,6 @@ class EngineManager {
       const depVersions = this.getInstalledVersions(depId);
       if (depVersions.length === 0) {
         missing.push({ id: depId, reason: '未安装' });
-      } else if (versionInfo.rocm_version) {
-        // 检查特定版本依赖
-        const hasMatch = depVersions.some(v => v.version === versionInfo.rocm_version);
-        if (!hasMatch) {
-          missing.push({
-            id: depId,
-            reason: `需要版本 ${versionInfo.rocm_version}`
-          });
-        }
       }
     }
 
@@ -367,18 +358,58 @@ class EngineManager {
   }
 
   /**
-   * 重新加载引擎定义（远程配置更新后调用）
+   * 获取引擎运行时定义
+   *
+   * 支持两种 runtimes 格式：
+   *   - 旧：flat array [{ id, name, modelscope_file, ... }]（TTS/ASR/OCR）
+   *   - 新：grouped object { rocm: [{ arch, version, modelscope_file }], cuda: [...], ... }（ComfyUI）
+   *
+   * @param {string} engineId
+   * @param {string} runtimeId - runtime 标识（id 或 arch）
    */
   getEngineRuntime(engineId, runtimeId) {
     const engine = this.getEngine(engineId);
     if (!engine) return null;
-    const runtimes = engine.runtimes || [];
-    // 也检查 variants
-    const variants = engine.variants || [];
-    for (const v of variants) {
-      runtimes.push(...(v.runtimes || []));
+
+    const flat = this._flattenRuntimes(engine);
+    if (flat.length === 0) return null;
+
+    return flat.find(r =>
+      r.id === runtimeId ||
+      r.arch === runtimeId ||
+      (r._backend && `${r._backend}:${r.arch}` === runtimeId)
+    ) || null;
+  }
+
+  /**
+   * 将 engine 的 runtimes 归一化为 flat array
+   * 旧格式 [{ id, ... }] 原样返回
+   * 新格式 { rocm: [...], cuda: [...] } → 展开并注入 _backend
+   */
+  _flattenRuntimes(engine) {
+    if (!engine) return [];
+
+    const raw = engine.runtimes;
+    if (!raw) return [];
+
+    // 旧格式：flat array
+    if (Array.isArray(raw)) {
+      const variants = engine.variants || [];
+      for (const v of variants) {
+        if (Array.isArray(v.runtimes)) raw.push(...v.runtimes);
+      }
+      return raw;
     }
-    return runtimes.find(r => r.id === runtimeId) || null;
+
+    // 新格式：grouped object { rocm: [...], cuda: [...] }
+    const flat = [];
+    for (const [backend, items] of Object.entries(raw)) {
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        flat.push({ ...item, _backend: backend });
+      }
+    }
+    return flat;
   }
 
   reload(data) {

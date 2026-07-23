@@ -1,6 +1,6 @@
 {
   "version": "1.0.1",
-  "last_updated": "2026-05-21T12:56:33.889890+00:00",
+  "last_updated": "2026-07-02T10:46:59.688910+00:00",
   "engines": {
     "rocm": {
       "id": "rocm",
@@ -29,6 +29,12 @@
           "name": "ROCm",
           "gpu_backend": "rocm",
           "versions": [
+            {
+              "version": "202607021720",
+              "modelscope_file": "llamacpp/llamacpp_202607021720.tar.gz",
+              "size": 127742047,
+              "rocm_version": "7.12+2.12"
+            },
             {
               "version": "202605212000",
               "modelscope_file": "llamacpp/llamacpp_202605212000.tar.gz",
@@ -79,6 +85,11 @@
           "gpu_backend": "vulkan",
           "versions": [
             {
+              "version": "vulkan_202607021729",
+              "modelscope_file": "llamacpp/llamacpp_vulkan_202607021729.tar.gz",
+              "size": 33007263
+            },
+            {
               "version": "vulkan_202605072158",
               "modelscope_file": "llamacpp/llamacpp_vulkan_202605072158.tar.gz",
               "size": 34735267
@@ -90,6 +101,12 @@
           "name": "Other",
           "gpu_backend": "other",
           "versions": [
+            {
+              "version": "dflash_202606111851",
+              "modelscope_file": "llamacpp/llamacpp_dflash_202606111851.tar.gz",
+              "size": 560966256,
+              "rocm_version": "7.12+2.12"
+            },
             {
               "version": "mtp_202605111200",
               "modelscope_file": "llamacpp/llamacpp_mtp_202605111200.tar.gz",
@@ -139,9 +156,14 @@
           "modelscope_repo": "shoujiekeji/Novastudio3.0",
           "versions": [
             {
+              "version": "20260602-index-tts2",
+              "modelscope_file": "tts/index_tts2/20260602-index-tts2.zip",
+              "size": 35942693
+            },
+            {
               "version": "202605281759-index-tts2",
               "modelscope_file": "tts/index_tts2/index_tts2_202605281759.tar.gz",
-              "size": 35461549  
+              "size": 35461549
             },
             {
               "version": "202605131733-index-tts2",
@@ -172,13 +194,22 @@
               "description": "AMD Radeon 8060S iGPU Pytorch运行环境"
             }
           ]
-
         },
         {
           "id": "indextts1.5",
           "name": "IndexTTS 1.5",
           "modelscope_repo": "shoujiekeji/Novastudio3.0",
           "versions": [
+            {
+              "version": "20260618-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/20260618-index-tts1.5.zip",
+              "size": 22986752
+            },
+            {
+              "version": "20260602-index-tts1.5",
+              "modelscope_file": "tts/index_tts1.5/20260602-index-tts1.5.zip",
+              "size": 22825866
+            },
             {
               "version": "202605281738-index-tts1.5",
               "modelscope_file": "tts/index_tts1.5/index_tts1.5_202605281738.tar.gz",
@@ -208,13 +239,17 @@
               "description": "AMD Radeon 8060S iGPU Pytorch运行环境"
             }
           ]
-
         },
         {
           "id": "omnivoice",
           "name": "OmniVoice",
           "modelscope_repo": "shoujiekeji/Novastudio3.0",
           "versions": [
+            {
+              "version": "20260602-omnivoice",
+              "modelscope_file": "tts/omnivoice/20260602-omnivoice.zip",
+              "size": 250344
+            },
             {
               "version": "202605280000-omnivoice",
               "modelscope_file": "tts/omnivoice/omnivoice_202605280000.tar.gz",
@@ -246,6 +281,11 @@
           "name": "Whisper.cpp",
           "versions": [
             {
+              "version": "20260602",
+              "modelscope_file": "asr/whisper_20260602_updated.zip",
+              "size": 90085800
+            },
+            {
               "version": "202605292100",
               "modelscope_file": "asr/whisper_202605292100_updated.zip",
               "size": 90090616
@@ -268,6 +308,11 @@
           "description": "阿里通义千问语音识别引擎 (PyTorch/transformers)",
           "versions": [
             {
+              "version": "20260602",
+              "modelscope_file": "asr/qwen3_asr_engine_20260602.zip",
+              "size": 4910260
+            },
+            {
               "version": "20260529",
               "modelscope_file": "asr/qwen3_asr_engine_20260529.zip",
               "size": 4910300
@@ -282,9 +327,44 @@
             {
               "id": "rocm",
               "name": "AMD ROCm + PyTorch",
-              "modelscope_file": "asr/qwen3_asr_rocm_runtime_20260529.zip",
-              "size": 1296134754,
+              "modelscope_file": "asr/qwen3_asr_rocm_runtime_20260602.zip",
+              "size": 1295742871,
               "description": "AMD ROCm + PyTorch 运行环境"
+            }
+          ]
+        }
+      ]
+    },
+    "ocr": {
+      "id": "ocr",
+      "name": "OCR",
+      "category": "engine",
+      "description": "光学字符识别 / 文档解析引擎",
+      "modelscope_repo": "shoujiekeji/Novastudio3.0",
+      "dependencies": [],
+      "variants": [
+        {
+          "id": "mineru",
+          "name": "MinerU",
+          "description": "MinerU 文档解析引擎，支持 PDF/图片 转 Markdown",
+          "versions": [
+            {
+              "version": "mineru_202606261840",
+              "modelscope_file": "ocr/mineru/mineru_202606261840.tar.gz",
+              "size": 1845174
+            },
+            {
+              "version": "mineru_202606261645",
+              "modelscope_file": "ocr/mineru/mineru_202606261645.tar.gz",
+              "size": 18545086
+            }
+          ],
+          "runtimes": [
+            {
+              "id": "8060S",
+              "name": "AMD 395+ 8060S",
+              "modelscope_file": "ocr/engines/mineru_engine.zip",
+              "description": "AMD Radeon 8060S GPU Pytorch运行环境"
             }
           ]
         }
@@ -312,12 +392,12 @@
       "description": "NovaMax 主程序",
       "versions": [
         {
-          "version": "2.1.2",
-          "size": 81784008,
+          "version": "2.2.12",
+          "size": 98013105,
           "release_notes": "",
           "min_version": "1.0.0",
-          "release_date": "2026-05-28T12:56:33Z",
-          "download_url": "https://www.firstarpc.com/download/novamax/test/novamax-2.1.2-update.tar.gz"
+          "release_date": "2026-07-02T10:46:59Z",
+          "download_url": "https://www.firstarpc.com/download/novamax/test/novamax-2.2.12-update.tar.gz"
         }
       ],
       "dependencies": []

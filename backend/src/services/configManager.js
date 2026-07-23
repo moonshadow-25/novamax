@@ -101,6 +101,13 @@ class ConfigManager {
         show_banner: true
       },
       installed_engines: {},
+      modules: {
+        llm: { enabled: true },
+        comfyui: { enabled: true },
+        tts: { enabled: true },
+        asr: { enabled: true },
+        ocr: { enabled: true }
+      },
       favorites: []
     };
   }

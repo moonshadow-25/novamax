@@ -1,80 +1,62 @@
 """
 ComfyUI 安装脚本
 由 NovaMax 后端调用，路径通过参数传入。
-支持热更新：可从服务器独立下发，无需重新发布 Node 服务。
+v2.0: 预打包运行环境，无需 venv / pip install。
 
 参数：
-  --install-root   ComfyUI 解压目录（external/comfyui/{version}/）
-  --rocm-path      ROCm 环境目录（含 python.exe），由 JS 查找后传入
-  --project-root   项目根目录
+  --install-root     ComfyUI 解压目录（external/comfyui/{version}/）
+  --project-root     项目根目录
+  --runtime-id       运行时 ID（如 rocm:rdna35 / cuda:cu130）
+  --skip-runtime-download  跳过运行时下载（由 engineDownloader 处理）
 """
 
 import argparse
-import subprocess
-import sys
 import os
 import json
 from datetime import datetime, timezone
 
 
-def run(cmd, cwd=None, check=True):
-    print(f"  > {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    if result.stderr.strip():
-        print(result.stderr.strip())
-    if check and result.returncode != 0:
-        raise RuntimeError(f"命令失败，退出码: {result.returncode}")
-    return result
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--install-root', required=True)
-    parser.add_argument('--rocm-path', required=True)
     parser.add_argument('--project-root', required=True)
+    parser.add_argument('--runtime-id', default='')
+    parser.add_argument('--skip-runtime-download', action='store_true', default=False)
     args = parser.parse_args()
 
     install_root = args.install_root
-    rocm_python = os.path.join(args.rocm_path, 'python.exe')
-    venv_path = os.path.join(install_root, 'venv')
-    venv_python = os.path.join(venv_path, 'Scripts', 'python.exe')
-    requirements = os.path.join(install_root, 'requirements.txt')
+
     print("========================================")
-    print("ComfyUI Installation")
+    print("ComfyUI Installation (v2.0 pre-packaged)")
     print("========================================")
-    print(f"  Install Root:  {install_root}")
-    print(f"  ROCm Python:   {rocm_python}")
+    print(f"  Install Root: {install_root}")
+    print(f"  Runtime ID:   {args.runtime_id or '(none)'}")
     print()
 
-    # [1/3] 检查 ROCm
-    print("[1/3] Checking ROCm environment...")
-    if not os.path.exists(rocm_python):
-        raise RuntimeError(f"ROCm Python not found: {rocm_python}")
-    print(f"  [OK] {rocm_python}")
-
-    # [2/3] 创建 venv
-    print("[2/3] Creating virtual environment...")
-    if os.path.exists(venv_python):
-        print("  [SKIP] venv already exists")
+    if args.skip_runtime_download:
+        print("  [OK] 运行环境由引擎下载器处理（已下载并解压）")
     else:
-        run([rocm_python, '-m', 'venv', venv_path, '--system-site-packages'])
-        print("  [OK] venv created")
+        print("  [OK] 运行环境已内置（预打包）")
 
-    # [3/3] 安装依赖
-    print("[3/3] Installing dependencies...")
-    if os.path.exists(requirements):
-        run([venv_python, '-m', 'pip', 'install', '--no-cache-dir', '-r', requirements])
-        run([venv_python, '-m', 'pip', 'uninstall', '-y', 'torch', 'torchvision', 'torchaudio'], check=False)
-        print("  [OK] Dependencies installed, ROCm torch preserved")
+    # 验证 ComfyUI 源码已解压（main.py 应存在）
+    main_py = os.path.join(install_root, 'main.py')
+    if os.path.isfile(main_py):
+        print(f"  [OK] ComfyUI 入口: main.py")
     else:
-        print("  [SKIP] requirements.txt not found")
+        print("  [INFO] 未在根目录找到 main.py（可能在子目录中）")
 
-    # 写入安装标记
+    # 写入 .installed 标记
     marker_path = os.path.join(install_root, '.installed')
+    marker_data = {
+        'installed_at': datetime.now(timezone.utc).isoformat(),
+        'engine': 'comfyui',
+    }
+    if args.runtime_id:
+        marker_data['runtime_id'] = args.runtime_id
+    version_dir = os.path.basename(install_root)
+    marker_data['version'] = version_dir
     with open(marker_path, 'w', encoding='utf-8') as f:
-        json.dump({'installed_at': datetime.now(timezone.utc).isoformat(), 'engine': 'comfyui'}, f)
+        json.dump(marker_data, f)
     print("  [OK] .installed marker written")
 
     print()
@@ -87,5 +69,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as e:
-        print(f"\n[ERROR] {e}", file=sys.stderr)
+        print(f"\n[ERROR] {e}")
+        import sys
         sys.exit(1)
