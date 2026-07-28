@@ -198,6 +198,8 @@
     "save": "Save",
     "whisperEngineNotInstalled": "No Whisper engine is installed",
     "installWhisperEngine": "Install Whisper Engine",
+    "engineNotInstalled": "No {{engineName}} engine is installed",
+    "installEngine": "Install {{engineName}} Engine",
     "ttsEngineNotInstalled": "No TTS engine is installed",
     "installTtsEngine": "Install TTS Engine",
     "engineVersion": "Engine Version",
@@ -290,7 +292,8 @@
     "whisperCardDeleted": "Whisper card deleted",
     "ttsCardDeleted": "TTS card deleted",
     "whisperEngineInstalled": "Whisper engine installed",
-    "ttsEngineInstalled": "TTS engine installed"
+    "ttsEngineInstalled": "TTS engine installed",
+    "engineInstalled": "{{engineName}} engine installed"
   },
   "whisperModelsPanel": {
     "downloadFailed": "Download failed",

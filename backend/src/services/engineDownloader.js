@@ -67,7 +67,7 @@ class EngineDownloader {
 
     // 下载主引擎
     const taskId = `${engineId}::${version}`;
-    downloadStateManager.createState(engineId, version, 'engine');
+    downloadStateManager.createState(engineId, version, 'engine', versionInfo.variant_id || null);
     // 记录恢复所需的版本和运行时 ID
     const engineState = downloadStateManager.getFullState(engineId, version);
     if (engineState) {
@@ -144,7 +144,7 @@ class EngineDownloader {
     }
 
     const taskId = `${engineId}::${version}`;
-    downloadStateManager.createState(engineId, version, 'engine');
+    downloadStateManager.createState(engineId, version, 'engine', vInfo?.variant_id || null);
     downloadStateManager.setState(engineId, 'installing', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'installing' });
 
@@ -703,7 +703,7 @@ class EngineDownloader {
     let cmd, args, spawnEnv;
 
     if (hasPy) {
-      console.log(`Running Python install script: ci/install_${engineId}.py`);
+      console.log(`Running Python install script: ci/${path.basename(pyScript)}`);
       cmd = python313;
       args = [pyScript, '--install-root', installRoot, '--project-root', PROJECT_ROOT];
       if (skipRuntimeDownload) {
@@ -714,7 +714,7 @@ class EngineDownloader {
       }
       spawnEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' };
     } else {
-      console.log(`Running bat install script: ci/install_${engineId}.bat`);
+      console.log(`Running bat install script: ci/${path.basename(batScript)}`);
       cmd = 'cmd.exe';
       args = ['/c', batScript];
       spawnEnv = { ...process.env, INSTALL_ROOT: installRoot, PROJECT_ROOT };

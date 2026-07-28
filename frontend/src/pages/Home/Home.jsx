@@ -170,32 +170,59 @@ function Home() {
     for (const [id, engine] of Object.entries(allEngines)) {
       if (engine.category === 'app') continue;
 
-      if (id === 'tts' && Array.isArray(engine.variants) && engine.variants.length > 0) {
-        for (const variant of engine.variants) {
+      // 有 variants 的引擎：逐 variant 检查（TTS、ASR、OCR 等）
+      if (Array.isArray(engine.variants) && engine.variants.length > 0) {
+        // 确定需要检查的 variant 列表
+        let variantsToCheck = engine.variants;
+        if (engine.variant_mode === 'single') {
+          // 互斥模式（如 llama.cpp 的 GPU 后端）：只提示已安装的或推荐的
+          const installedVariant = engine.variants.find(v => {
+            const vId = String(v.id || '').toLowerCase();
+            const vVersionSet = new Set((v.versions || []).map(vv => vv.version));
+            return (engine.installed_versions || []).some(iv => {
+              if (iv.variant_id && String(iv.variant_id).toLowerCase() === vId) return true;
+              if (vVersionSet.has(iv.version)) return true;
+              return normalizeEngineType(iv.version).includes(normalizeEngineType(vId));
+            });
+          });
+          if (installedVariant) {
+            variantsToCheck = [installedVariant];
+          } else {
+            variantsToCheck = engine.variants.filter(v => v.recommended);
+          }
+        }
+        for (const variant of variantsToCheck) {
           const variantId = String(variant.id || '').toLowerCase();
           const variantVersions = Array.isArray(variant.versions) ? variant.versions : [];
           const latestVersion = variantVersions[0]?.version;
           if (!latestVersion) continue;
 
+          const variantIdLower = variantId;
           const variantNorm = normalizeEngineType(variantId);
-          const variantInstalled = (engine.installed_versions || []).filter(v =>
-            normalizeEngineType(v.version).includes(variantNorm)
-          );
+          const variantVersionSet = new Set((variant.versions || []).map(v => v.version));
+          const variantInstalled = (engine.installed_versions || []).filter(v => {
+            if (v.variant_id && String(v.variant_id).toLowerCase() === variantIdLower) return true;
+            if (variantVersionSet.has(v.version)) return true;
+            return normalizeEngineType(v.version).includes(variantNorm);
+          });
           const variantDownloading = (engine.download_states || []).some(s => {
+            if (s.variant_id) return String(s.variant_id).toLowerCase() === variantIdLower && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
+            // 旧下载状态无 variant_id → 用版本列表 + normalizeEngineType 兜底
+            if (variantVersionSet.has(s.targetQuantization)) return ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
             const stateKey = normalizeEngineType(s.targetQuantization || '');
             return stateKey.includes(variantNorm) && ['downloading', 'paused', 'unpacking', 'installing', 'restarting'].includes(s.status);
           });
           if (variantDownloading) continue;
 
-          const dismissKey = `tts:${variantId}`;
+          const dismissKey = `${id}:${variantId}`;
           if (dismissedEngineUpdates.has(dismissKey)) continue;
 
           if (variantInstalled.length === 0) {
             updates.push({
               id: dismissKey,
               dismissKey,
-              engineApiId: 'tts',
-              name: `TTS / ${variant.name}`,
+              engineApiId: id,
+              name: `${engine.name} / ${variant.name}`,
               latestVersion,
               installed: false,
               dependencies: engine.dependencies || []
@@ -204,8 +231,8 @@ function Home() {
             updates.push({
               id: dismissKey,
               dismissKey,
-              engineApiId: 'tts',
-              name: `TTS / ${variant.name}`,
+              engineApiId: id,
+              name: `${engine.name} / ${variant.name}`,
               latestVersion,
               installed: true,
               dependencies: engine.dependencies || []
@@ -215,13 +242,12 @@ function Home() {
         continue;
       }
 
+      // 无 variants 的引擎：整体检查
       if (downloadingIds.has(id)) continue;
 
       if (dismissedEngineUpdates.has(id)) continue;
 
-      const latestVersion = Array.isArray(engine.variants) && engine.variants.length > 0
-        ? engine.variants.flatMap(variant => variant.versions || [])[0]?.version
-        : engine.versions?.[0]?.version;
+      const latestVersion = engine.versions?.[0]?.version;
       if (!latestVersion) continue;
 
       if (!engine.installed) {

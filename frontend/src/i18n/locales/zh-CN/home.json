@@ -198,6 +198,8 @@
     "save": "保存",
     "whisperEngineNotInstalled": "未检测到已安装的 Whisper 引擎",
     "installWhisperEngine": "安装 Whisper 引擎",
+    "engineNotInstalled": "未检测到已安装的 {{engineName}} 引擎",
+    "installEngine": "安装 {{engineName}} 引擎",
     "ttsEngineNotInstalled": "未检测到已安装的 TTS 引擎",
     "installTtsEngine": "安装 TTS 引擎",
     "engineVersion": "引擎版本",
@@ -290,7 +292,8 @@
     "whisperCardDeleted": "Whisper 卡片已删除",
     "ttsCardDeleted": "TTS 卡片已删除",
     "whisperEngineInstalled": "Whisper 引擎安装完成",
-    "ttsEngineInstalled": "TTS 引擎安装完成"
+    "ttsEngineInstalled": "TTS 引擎安装完成",
+    "engineInstalled": "{{engineName}} 引擎安装完成"
   },
   "whisperModelsPanel": {
     "downloadFailed": "下载失败",

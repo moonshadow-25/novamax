@@ -148,7 +148,7 @@ class DownloadStateManager {
    * @param {string} targetQuantization - 量化版本（模型）或版本号（引擎）
    * @param {string} type - 下载类型：'model' 或 'engine'
    */
-  createState(id, targetQuantization, type = 'model') {
+  createState(id, targetQuantization, type = 'model', variantId = null) {
     const state = {
       id,
       modelId: type === 'model' ? id : null, // 兼容旧代码
@@ -158,6 +158,7 @@ class DownloadStateManager {
       progress: 0,
       error: null,
       targetQuantization,
+      variant_id: variantId,
       speed: 0,
       startTime: Date.now(),
       pythonProcess: null,
@@ -252,6 +253,7 @@ class DownloadStateManager {
         progress: state.progress,
         error: state.error,
         targetQuantization: state.targetQuantization,
+        variant_id: state.variant_id || null,
         speed: state.speed,
         startTime: state.startTime,
         downloadedBytes: state.downloadedBytes,

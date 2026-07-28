@@ -8,11 +8,19 @@ import { spawn } from 'child_process';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
+import { Agent } from 'undici';
 
 // 内联常量 — 此文件同时被构建时 esbuild 打包和运行时引擎 adapter 直接加载，不依赖外部模块
 const HEALTH_POLL_MAX_MS = 90000;
 const HEALTH_POLL_INTERVAL_MS = 1000;
 const TRANSCRIBE_TIMEOUT_MS = 7200000;
+
+// 为长时间转录请求创建专用 Agent，禁用默认的 300s headersTimeout
+// undici 默认 headersTimeout=300s，长音频（>5分钟）的 HTTP 响应头迟迟不发会被断连
+const longRunAgent = new Agent({
+  headersTimeout: TRANSCRIBE_TIMEOUT_MS,
+  bodyTimeout: TRANSCRIBE_TIMEOUT_MS,
+});
 
 export default class BaseAsrAdapter {
   constructor(contract, config = {}) {
@@ -118,6 +126,7 @@ export default class BaseAsrAdapter {
     const fd = this._buildTranscribeFormData(audioPath, params);
     const res = await fetch(`${this._baseUrl}${this._transcribeEndpoint()}`, {
       method: 'POST', body: fd, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      dispatcher: longRunAgent,
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
@@ -140,6 +149,7 @@ export default class BaseAsrAdapter {
     fd.append('stream', 'true');
     const res = await fetch(`${this._baseUrl}${this._transcribeEndpoint()}`, {
       method: 'POST', body: fd, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      dispatcher: longRunAgent,
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
@@ -174,6 +184,7 @@ export default class BaseAsrAdapter {
     const fd = this._buildTranslateFormData(audioPath, params);
     const res = await fetch(`${this._baseUrl}${this._translateEndpoint()}`, {
       method: 'POST', body: fd, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      dispatcher: longRunAgent,
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
@@ -187,6 +198,7 @@ export default class BaseAsrAdapter {
     fd.append('stream', 'true');
     const res = await fetch(`${this._baseUrl}${this._translateEndpoint()}`, {
       method: 'POST', body: fd, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      dispatcher: longRunAgent,
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');

@@ -280,21 +280,36 @@ const GlobalSettings = () => {
     }
   };
 
-  const resolveTtsVariantRow = (engine, variantId) => {
-    if (!engine || engine.id !== 'tts' || !variantId || !Array.isArray(engine.variants)) return null;
+  const resolveVariantRow = (engine, variantId) => {
+    if (!engine || !variantId || !Array.isArray(engine.variants)) return null;
     const variant = engine.variants.find(v => String(v.id || '').toLowerCase() === String(variantId).toLowerCase());
     if (!variant) return null;
 
+    const variantIdLower = String(variant.id).toLowerCase();
     const variantNorm = normalizeEngineType(variant.id);
-    const variantInstalled = (engine.installed_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm));
-    const variantBroken = (engine.broken_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm));
-    const variantDownloadStates = (engine.download_states || []).filter(s => normalizeEngineType(s.targetQuantization || '').includes(variantNorm));
+    const variantVersionSet = new Set((variant.versions || []).map(v => v.version));
+    const variantInstalled = (engine.installed_versions || []).filter(v => {
+      if (v.variant_id && String(v.variant_id).toLowerCase() === variantIdLower) return true;
+      if (variantVersionSet.has(v.version)) return true;
+      return normalizeEngineType(v.version).includes(variantNorm);
+    });
+    const variantBroken = (engine.broken_versions || []).filter(v => {
+      if (v.variant_id && String(v.variant_id).toLowerCase() === variantIdLower) return true;
+      if (variantVersionSet.has(v.version)) return true;
+      return normalizeEngineType(v.version).includes(variantNorm);
+    });
+    const variantDownloadStates = (engine.download_states || []).filter(s => {
+      if (s.variant_id) return String(s.variant_id).toLowerCase() === variantIdLower;
+      // 旧下载状态无 variant_id → 用版本列表 + normalizeEngineType 兜底
+      if (variantVersionSet.has(s.targetQuantization)) return true;
+      return normalizeEngineType(s.targetQuantization || '').includes(variantNorm);
+    });
 
     return {
       ...engine,
-      id: `tts:${variant.id}`,
-      engine_api_id: 'tts',
-      name: `TTS / ${variant.name}`,
+      id: `${engine.id}:${variant.id}`,
+      engine_api_id: engine.id,
+      name: `${engine.name} / ${variant.name}`,
       description: `${engine.description}（${variant.name}）`,
       variants: [variant],
       installed: variantInstalled.length > 0,
@@ -312,9 +327,14 @@ const GlobalSettings = () => {
       setEngines(result);
       setSelectedEngine(prev => {
         if (!prev) return null;
-        if (String(prev.id || '').startsWith('tts:')) {
-          const variantId = String(prev.id).split(':')[1];
-          return resolveTtsVariantRow(result.tts, variantId) || prev;
+        const colonIdx = String(prev.id || '').indexOf(':');
+        if (colonIdx > 0) {
+          const parentId = String(prev.id).slice(0, colonIdx);
+          const variantId = String(prev.id).slice(colonIdx + 1);
+          const parentEngine = result[parentId];
+          if (parentEngine?.variants) {
+            return resolveVariantRow(parentEngine, variantId) || prev;
+          }
         }
         const latest = result[prev.engine_api_id || prev.id];
         return latest ? { ...prev, ...latest } : prev;
@@ -777,32 +797,15 @@ const GlobalSettings = () => {
   const resolveEngineRows = () => {
     const rows = [];
     for (const engine of Object.values(engines).filter(e => e.category !== 'app')) {
-      if (engine.id !== 'tts' || !Array.isArray(engine.variants) || engine.variants.length === 0) {
+      // 没有 variants 的引擎直接作为一行
+      if (!Array.isArray(engine.variants) || engine.variants.length === 0) {
         rows.push(engine);
         continue;
       }
 
+      // 有 variants 的引擎：每个 variant 拆成独立行（TTS、ASR、OCR 等）
       for (const variant of engine.variants) {
-        const variantVersions = Array.isArray(variant.versions) ? variant.versions : [];
-        const variantNorm2 = normalizeEngineType(variant.id);
-        const variantInstalled = (engine.installed_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm2));
-        const variantBroken = (engine.broken_versions || []).filter(v => normalizeEngineType(v.version).includes(variantNorm2));
-        const variantDownloadStates = (engine.download_states || []).filter(s => normalizeEngineType(s.targetQuantization || '').includes(variantNorm2));
-
-        rows.push({
-          ...engine,
-          id: `tts:${variant.id}`,
-          engine_api_id: 'tts',
-          name: `TTS / ${variant.name}`,
-          description: `${engine.description}（${variant.name}）`,
-          variants: [variant],
-          installed: variantInstalled.length > 0,
-          installed_versions: variantInstalled,
-          broken_versions: variantBroken,
-          default_version: variantInstalled[0]?.version || null,
-          download_states: variantDownloadStates,
-          download_state: variantDownloadStates[0] || null
-        });
+        rows.push(resolveVariantRow(engine, variant.id));
       }
     }
     return rows;
@@ -1013,7 +1016,7 @@ const GlobalSettings = () => {
         ]}
       >
         <List.Item.Meta
-          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>v{engine.default_version}</Tag>}</Space>}
+          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.variants?.[0]?.recommended && <Tag color="green" style={{ fontSize: 10 }}>推荐</Tag>}{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>v{engine.default_version}</Tag>}</Space>}
           description={
             <div>
               {latestVersion && (

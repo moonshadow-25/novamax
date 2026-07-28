@@ -1,39 +1,33 @@
-feat: GPU 架构智能检测 + ComfyUI 预打包运行环境 + 引擎推荐系统
+feat: ASR multi-variant engine support + variant-aware UI + Qwen3-ASR install script
 
-== GPU 架构检测 (backend/src/utils/gpuArchDetection.js, 新增) ==
-- 基于 GPU 名称识别 AMD RDNA 1/2/3/3.5/4 和 NVIDIA 计算能力架构
-- 集成显卡检测: AMD 核显 (xxxM/xxxS 无 RX 前缀) 需 VRAM >16GB 才推荐 ROCm
-- 导出 recommendGpuBackend(): NVIDIA→cuda, AMD独显RDNA3+→rocm, AMD核显低显存→vulkan
+## ASR engine variant system
 
-== ComfyUI 预打包运行环境 (engines.json + ci/install_comfyui.*) ==
-- engines.json: ComfyUI 增加 runtimes 字段, 按 GPU 后端+架构分组版本
-  {rocm: [{arch: rdna3|rdna35|rdna4, version, modelscope_file}], cuda: [...]}
-- engines.json: llama.cpp 新增 CUDA variant
-- ci/install_comfyui.py|bat: v2.0 预打包模式, 去掉 venv/pip install, 仅写 .installed
+[Backend] downloadStateManager.createState 新增 variantId 参数，下载状态携带 variant_id
+[Backend] engineDownloader 主下载/重装流程传递 variant_id，修复安装脚本日志显示实际文件名
+[Frontend] GlobalSettings: resolveTtsVariantRow → 泛化 resolveVariantRow，所有多 variant 引擎
+  （TTS/ASR/OCR）统一拆分为独立卡片；llama.cpp 推荐 variant 加绿色"推荐"标签
+[Frontend] Home banner: engineUpdates 泛化为所有 variant 引擎逐 variant 检查；
+  新增 variant_mode="single" 互斥模式（llama.cpp GPU 后端），已安装则只检查该 variant，
+  未安装则只提示 recommended（后端根据 GPU 标注）
+[Frontend] variant 匹配三层优先级：s.variant_id 精确 > variant.versions 列表 > normalize 兜底
+  （修复 llama.cpp / ASR 版本号不含 variant 名导致匹配失败的问题）
+[Frontend] 下载状态匹配：s.variant_id 存在时只精确匹配，不走 fallback
+  （修复版本号 20260602 在 whisper/qwen3-asr 中重复导致的下载进度串扰）
 
-== 引擎下载 & 安装 (engineDownloader + engineManager + engines 路由) ==
-- engineManager.getEngineRuntime(): 支持新 grouped runtimes 格式 {rocm: [...], cuda: [...]}
-- engineManager._flattenRuntimes(): 新旧格式归一化
-- engineDownloader: 运行时自动下载, if/else 改独立 if (同时传 --skip + --runtime-id)
-- engineDownloader: 运行时任务增加 label 字段, 前端展示下载内容
-- engines 路由: 下载未传 runtime 时自动检测 GPU 选择推荐
-- engines 路由: ComfyUI runtimes 标注 recommended (AMD 精确匹配 arch, NVIDIA 取第一个 CUDA)
-- engines 路由: 关联的 runtime 下载状态纳入 download_states 展示
-- engines 路由: 去掉 当前模块配置 刷屏日志
+## Qwen3-ASR engine
 
-== ComfyUI 启动 (comfyuiInstanceManager + comfyuiRunner) ==
-- Python 路径检测: runtime/python.exe → runtime/Scripts/python.exe → 旧版 venv/Scripts/python.exe
+[Install] 新增 ci/install_qwen3-asr.py：4 步安装 — 验证 serve.py/contract.json →
+  从 engines.json 解析运行时包 → ModelScope 下载 ROCm+PyTorch 运行环境 ~1.2 GB →
+  解压到 runtime/ 并验证 torch 可 import → 写 .installed
+  支持 --skip-runtime-download（由 engineDownloader 处理运行时）
+  修复：之前无专属脚本，fallback 到 install_whisper.py 找 whisper-server.exe 导致失败
 
-== 模块系统 (modules.js, 新增) ==
-- 首次启动 GPU 检测可能未就绪, getMaxVram() 增加重试 3 次 (间隔 2 秒)
-- isLowEndDevice(): VRAM 为 0 时保守判定为低配, 关闭非推荐模块
+## ASR Settings Drawer
 
-== 前端 ==
-- 首页: 测试通道时标题显示 [测试版] Tag
-- 全局设置: 引擎与模块 改名为 引擎管理, GPU 名称旁显示架构标签, 下载进度显示运行环境名称
-- EngineDownloadModal: 支持 grouped runtimes, 自动选中推荐 runtime, 显示 [推荐] 标签
-- GlobalSettings 代码清理
+[Frontend] AsrSettingsDrawer: 新增 resolveAsrVariant() 根据 model.engine_id 识别 variant
+  （whisper/qwen3-asr），fetch 父引擎后过滤为单 variant 视图，安装/版本提示精确到具体引擎
+[i18n] whisperEngineNotInstalled → engineNotInstalled ({{engineName}} 参数化)
 
-== API 响应变更 ==
-- /api/system/gpu + /api/system/info: GPU 对象增加 arch 和 archDisplay 字段
-- /api/engines: llama.cpp variants + ComfyUI runtimes 增加 recommended 布尔字段
+## engines.json
+
+[Data] llamacpp 新增 "variant_mode": "single"（标记 GPU 后端互斥，区别于 TTS/ASR 的并行模式）

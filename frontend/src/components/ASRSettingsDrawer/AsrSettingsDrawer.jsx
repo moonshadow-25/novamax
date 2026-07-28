@@ -4,6 +4,7 @@ import { Drawer, Form, InputNumber, Select, Button, Space, message, Alert, Popco
 import { QuestionCircleOutlined, DeleteOutlined, UndoOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { engineService, modelService, backendService, asrStudioService } from '../../services/api';
 import { resolveVersionOrder } from '../../services/engineVersionOrder';
+import { normalizeEngineType } from '../../utils/engineType';
 import EngineDownloadModal from '../EngineDownloadModal/EngineDownloadModal';
 
 const { Text } = Typography;
@@ -20,6 +21,13 @@ const ASR_LANGUAGES = [
   { value: 'ru', label: 'Russian' },
 ];
 
+function resolveAsrVariant(model) {
+  // model.engine_id 可能是具体的 variant ID（'whisper', 'qwen3-asr'）或父引擎 ID（'asr'）
+  const rawId = model?.engine_id || model?.engine_type || '';
+  if (rawId && rawId !== 'asr') return rawId;
+  return 'whisper'; // 兜底：向后兼容旧模型（默认 whisper）
+}
+
 function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const { t } = useTranslation('home');
   const [form] = Form.useForm();
@@ -33,6 +41,7 @@ function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
   const [engineUpdateAvailable, setEngineUpdateAvailable] = useState(false);
   const [latestAvailableVersion, setLatestAvailableVersion] = useState(null);
   const [idleInfo, setIdleInfo] = useState(null);
+  const engineName = engineInfo?.name || resolveAsrVariant(model);
 
   // 引擎空闲倒计时（每秒轮询）
   useEffect(() => {
@@ -59,15 +68,46 @@ function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
   const refreshEngineStatus = useCallback(async () => {
     try {
-      const engineId = model?.engine_id || model?.engine_type || 'asr';
-      const res = await engineService.getById(engineId);
-      const installedVersions = res.installed_versions || [];
-      const availableVersions = res.versions || [];
-      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
-        availableVersions,
-        installedVersions
+      const variantId = resolveAsrVariant(model);
+      const parentEngineId = 'asr';
+
+      // 获取父引擎（含所有 variant 的完整信息）
+      const res = await engineService.getById(parentEngineId);
+
+      // 找到对应的 variant
+      const variant = (res.variants || []).find(v =>
+        String(v.id || '').toLowerCase() === String(variantId).toLowerCase()
       );
-      setEngineInfo(res);
+
+      let availableVersions, installedVersions;
+      if (variant) {
+        // 仅该 variant 的可用版本
+        availableVersions = (variant.versions || []).map(v => ({
+          ...v, variant_id: variant.id, variant_name: variant.name
+        }));
+        // 仅该 variant 的已安装版本
+        const variantIdLower = String(variant.id).toLowerCase();
+        const variantVersionSet = new Set((variant.versions || []).map(v => v.version));
+        const variantNorm = normalizeEngineType(variant.id);
+        installedVersions = (res.installed_versions || []).filter(v => {
+          if (v.variant_id && String(v.variant_id).toLowerCase() === variantIdLower) return true;
+          if (variantVersionSet.has(v.version)) return true;
+          return normalizeEngineType(v.version).includes(variantNorm);
+        });
+      } else {
+        availableVersions = res.versions || [];
+        installedVersions = res.installed_versions || [];
+      }
+
+      const { orderedInstalledVersions, latestInstalledVersion } = resolveVersionOrder(
+        availableVersions, installedVersions
+      );
+
+      setEngineInfo({
+        ...res,
+        variants: variant ? [variant] : res.variants,
+        name: variant ? `${variant.name}` : res.name
+      });
       setEngines(orderedInstalledVersions);
       setLatestEngineVersion(latestInstalledVersion);
       setEngineInstalled(installedVersions.length > 0);
@@ -84,7 +124,7 @@ function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
       setEngines([]);
       setEngineInstalled(false);
     }
-  }, []);
+  }, [model]);
 
   useEffect(() => {
     if (!visible || !model) return;
@@ -194,8 +234,8 @@ function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
           <div>
             <Text strong>引擎版本</Text>
             {!engineInstalled ? (
-              <Alert type="warning" showIcon message={t('settingsDrawer.whisperEngineNotInstalled')} style={{ marginTop: 8 }}
-                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>{t('settingsDrawer.installWhisperEngine')}</Button>} />
+              <Alert type="warning" showIcon message={t('settingsDrawer.engineNotInstalled', { engineName })} style={{ marginTop: 8 }}
+                action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>{t('settingsDrawer.installEngine', { engineName })}</Button>} />
             ) : engineUpdateAvailable ? (
               <Alert type="info" showIcon message={`新版本可用: ${latestAvailableVersion}（当前: ${latestEngineVersion}）`} style={{ marginTop: 8 }}
                 action={<Button size="small" type="primary" onClick={() => setShowEngineModal(true)}>更新引擎</Button>} />
@@ -255,12 +295,12 @@ function AsrSettingsDrawer({ visible, model, onClose, onSave, onDelete }) {
 
       <EngineDownloadModal
         visible={showEngineModal}
-        engineId={model?.engine_id || model?.engine_type || 'asr'}
+        engineId="asr"
         engineInfo={engineInfo}
         onComplete={async () => {
           setShowEngineModal(false);
           await refreshEngineStatus();
-          message.success(t('settingsDrawer.whisperEngineInstalled'));
+          message.success(t('settingsDrawer.engineInstalled', { engineName }));
         }}
         onCancel={() => setShowEngineModal(false)}
       />
