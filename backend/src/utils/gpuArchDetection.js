@@ -27,8 +27,13 @@ export function detectGpuVendor(gpuName) {
  */
 const AMD_ARCH_RULES = [
   {
-    // RDNA 4 (gfx120X): RX 9000 系列
-    patterns: [/rx\s*90[67]0/i],
+    // RDNA 4 (gfx120X): RX 9000 系列 + Radeon AI PRO R9600/R9700
+    patterns: [
+      /rx\s*90[67]0/i,
+      /r\s*97\d{2}/i,
+      /r\s*96\d{2}/i,
+      /radeon\s*AI\s*PRO/i,
+    ],
     arch: 'rdna4',
     display: 'RDNA 4',
   },
@@ -43,29 +48,34 @@ const AMD_ARCH_RULES = [
     display: 'RDNA 3.5',
   },
   {
-    // RDNA 3 (gfx110X): RX 7000 系列 + Phoenix iGPU
+    // RDNA 3 (gfx110X): RX 7000 系列 + W7000 系列 + Phoenix iGPU
     patterns: [
       /rx\s*79[05]0/i,
       /rx\s*78[05]0/i,
       /rx\s*77[05]0/i,
       /rx\s*76[05]0/i,
+      /w\s*79\d{2}/i,
+      /w\s*78\d{2}/i,
+      /w\s*77\d{2}/i,
       /7[468]0M/i,
     ],
     arch: 'rdna3',
     display: 'RDNA 3',
   },
   {
-    // RDNA 2 (gfx103X): RX 6000 系列 + Rembrandt iGPU
+    // RDNA 2 (gfx103X): RX 6000 系列 + W6000 系列 + Rembrandt iGPU
     patterns: [
       /rx\s*6[4-9]\d{2}/i,
+      /w\s*6[89]\d{2}/i,
+      /w\s*66\d{2}/i,
       /6[86]0M/i,
     ],
     arch: 'rdna2',
     display: 'RDNA 2',
   },
   {
-    // RDNA 1 (gfx101X): RX 5000 系列
-    patterns: [/rx\s*5[3-7]\d{2}/i],
+    // RDNA 1 (gfx101X): RX 5000 系列 + W5000 系列
+    patterns: [/rx\s*5[3-7]\d{2}/i, /w\s*5[5-7]\d{2}/i],
     arch: 'rdna1',
     display: 'RDNA 1',
   },
