@@ -281,7 +281,7 @@ function generateModelConfig(modelId, type, modelData, files, description) {
         parallel: 2,
         batch: 512,
         ubatch: 512,
-        temperature: 0.7,
+        temperature: 0.8,
         top_p: 0.9,
         top_k: 40,
         repeat_penalty: 1.1

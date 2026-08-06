@@ -6,6 +6,10 @@ import fs from 'fs';
 import { DEFAULT_PORTS, MODEL_STATUS, PROJECT_ROOT, MODELS_RUN_DIR } from '../config/constants.js';
 import { getAuxiliaryScriptPath } from '../utils/pathHelper.js';
 import { decrypt } from '../utils/crypto.js';
+
+// 各引擎 runtime 目录名（runtime zip 解压后的子目录）
+const OCR_RUNTIME_DIR = 'engine';
+const TTS_RUNTIME_DIR = 'engine';
 import modelManager from './modelManager.js';
 import configManager from './configManager.js';
 import engineManager from './engineManager.js';
@@ -968,10 +972,14 @@ class ProcessManager {
       throw new Error(`OCR 引擎版本 ${engineVersion} 未找到`);
     }
 
-    // 查找 Python 解释器：engine/python.exe (runtime zip 解压后)
-    const pythonExe = path.join(enginePath, 'engine', 'python.exe');
-    if (!fs.existsSync(pythonExe)) {
-      throw new Error(`OCR 运行环境 Python 不存在: ${pythonExe}`);
+    // 查找 Python 解释器：engine/python.exe 或 engine/Scripts/python.exe
+    const pythonCandidates = [
+      path.join(enginePath, OCR_RUNTIME_DIR, 'python.exe'),
+      path.join(enginePath, OCR_RUNTIME_DIR, 'Scripts', 'python.exe'),
+    ];
+    const pythonExe = pythonCandidates.find(p => fs.existsSync(p));
+    if (!pythonExe) {
+      throw new Error(`OCR 运行环境 Python 不存在: ${pythonCandidates.join(' 或 ')}`);
     }
 
     const startScript = path.join(enginePath, 'start_services.py');
@@ -1189,15 +1197,15 @@ class ProcessManager {
         }
 
         // conda 环境: engine/python.exe；venv 环境: engine/Scripts/python.exe；Unix venv: engine/bin/python
-        const engineDir = path.join(ttsEnginePath, 'engine');
-        const condaPython = path.join(engineDir, 'python.exe');
-        const venvPythonWin = path.join(engineDir, 'Scripts', 'python.exe');
-        const venvPythonUnix = path.join(engineDir, 'bin', 'python');
-        const venvPython = fs.existsSync(condaPython) ? condaPython
-          : fs.existsSync(venvPythonWin) ? venvPythonWin
-          : venvPythonUnix;
-        if (!fs.existsSync(venvPython)) {
-          throw new Error(`TTS 运行环境 Python 不存在: ${engineDir}\n请重新安装 TTS 引擎`);
+        const ttsEngineDir = path.join(ttsEnginePath, TTS_RUNTIME_DIR);
+        const ttsPythonCandidates = [
+          path.join(ttsEngineDir, 'python.exe'),
+          path.join(ttsEngineDir, 'Scripts', 'python.exe'),
+          path.join(ttsEngineDir, 'bin', 'python'),
+        ];
+        const venvPython = ttsPythonCandidates.find(p => fs.existsSync(p));
+        if (!venvPython) {
+          throw new Error(`TTS 运行环境 Python 不存在: ${ttsEngineDir}\n请重新安装 TTS 引擎`);
         }
 
         const startScript = path.join(ttsEnginePath, 'start.py');

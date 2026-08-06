@@ -7,6 +7,10 @@ import engineManager from './engineManager.js';
 import openaiProxyService from './openaiProxyService.js';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
 
+// ComfyUI runtime 目录名
+const RUNTIME_DIR = 'runtime';
+const VENV_DIR = 'venv';
+
 /**
  * ComfyUI 多实例管理器
  * 管理多个 ComfyUI 进程，每个实例独立运行在不同端口
@@ -117,11 +121,11 @@ class ComfyUIInstanceManager {
     const enginePath = engineManager.getEnginePath('comfyui', config.engine_version);
     if (!enginePath) throw new Error('ComfyUI engine not found');
 
-    // 检测 Python 路径（预打包运行环境：runtime/python.exe，兼容旧版：venv/Scripts/python.exe）
+    // 检测 Python 路径（预打包运行环境：RUNTIME_DIR/python.exe 或 RUNTIME_DIR/Scripts/python.exe，兼容旧版：VENV_DIR/...）
     const candidatePythons = [
-      path.join(enginePath, 'runtime', 'python.exe'),
-      path.join(enginePath, 'runtime', 'Scripts', 'python.exe'),
-      path.join(enginePath, 'venv', 'Scripts', 'python.exe'),
+      path.join(enginePath, RUNTIME_DIR, 'python.exe'),
+      path.join(enginePath, RUNTIME_DIR, 'Scripts', 'python.exe'),
+      path.join(enginePath, VENV_DIR, 'Scripts', 'python.exe'),
     ];
     const venvPython = candidatePythons.find(p => fs.existsSync(p));
     if (!venvPython) {
@@ -131,34 +135,39 @@ class ComfyUIInstanceManager {
     }
     const modelsDir = path.join(PROJECT_ROOT, 'data', 'models_dir', 'comfyui', 'models');
 
-    // 生成 extra_model_paths.yaml
+    // 生成 extra_model_paths.yaml（动态扫描，不再硬编码子目录列表）
     const configDir = path.join(DATA_DIR, 'comfyui_config');
     const configPath = path.join(configDir, `${instanceId}.yaml`);
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(configDir, { recursive: true });
+
+    // 收集模型子目录：引擎模板 + 用户已创建的
+    const modelDirs = new Set();
+
+    // 1. 引擎包自带的模板目录（作为占位基线同步到用户 models/）
+    const srcModelsDir = path.join(enginePath, 'models');
+    if (fs.existsSync(srcModelsDir)) {
+      for (const d of fs.readdirSync(srcModelsDir, { withFileTypes: true })) {
+        if (!d.isDirectory() || d.name.startsWith('.') || d.name.startsWith('_')) continue;
+        modelDirs.add(d.name);
+        const dst = path.join(modelsDir, d.name);
+        if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
+      }
     }
-    const yamlContent = `comfyui:
-  base_path: ${modelsDir.replace(/\\/g, '/')}
-  checkpoints: checkpoints
-  clip: clip
-  clip_vision: clip_vision
-  configs: configs
-  controlnet: controlnet
-  diffusers: diffusers
-  diffusion_models: diffusion_models
-  embeddings: embeddings
-  gligen: gligen
-  hypernetworks: hypernetworks
-  latent_upscale_models: latent_upscale_models
-  loras: loras
-  photomaker: photomaker
-  style_models: style_models
-  text_encoders: text_encoders
-  unet: unet
-  upscale_models: upscale_models
-  vae: vae
-  vae_approx: vae_approx
-`;
+
+    // 2. 用户 models/ 下已有的目录（引擎未定义的新类型或有模型文件就保留）
+    if (fs.existsSync(modelsDir)) {
+      for (const d of fs.readdirSync(modelsDir, { withFileTypes: true })) {
+        if (!d.isDirectory() || d.name.startsWith('.') || d.name.startsWith('_')) continue;
+        modelDirs.add(d.name);
+      }
+    }
+
+    // 生成 YAML（排序保证一致性）
+    const yamlLines = ['comfyui:', `  base_path: ${modelsDir.replace(/\\/g, '/')}`];
+    for (const name of [...modelDirs].sort()) {
+      yamlLines.push(`  ${name}: ${name}`);
+    }
+    const yamlContent = yamlLines.join('\n') + '\n';
     fs.writeFileSync(configPath, yamlContent, 'utf-8');
 
     // 构建启动参数
@@ -212,9 +221,21 @@ class ComfyUIInstanceManager {
     });
 
     childProc.stderr.on('data', (data) => {
-      const line = data.toString().trim();
-      pushLog(`[ERROR] ${line}`);
-      console.error(`[ComfyUI ${instanceId} ERROR] ${line}`);
+      const raw = data.toString().trim();
+      if (!raw) return;
+      const match = raw.match(/^\[(INFO|WARNING|WARN|ERROR|DEBUG)\]\s*(.*)/i);
+      if (match) {
+        let level = match[1].toUpperCase();
+        const msg = match[2];
+        if (level === 'WARN') level = 'WARNING';
+        pushLog(`[${level}] ${msg}`);
+        if (level === 'ERROR') console.error(`[ComfyUI ${instanceId}] ${raw}`);
+        else if (level === 'WARNING') console.warn(`[ComfyUI ${instanceId}] ${raw}`);
+        else console.log(`[ComfyUI ${instanceId}] ${raw}`);
+      } else {
+        pushLog(raw);
+        console.log(`[ComfyUI ${instanceId}] ${raw}`);
+      }
     });
 
     childProc.on('exit', (code) => {

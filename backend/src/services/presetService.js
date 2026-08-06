@@ -3,7 +3,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { PRESETS_DIR, MODELS_RUN_DIR, MODEL_TYPES } from '../config/constants.js';
+import { PRESETS_DIR, MODELS_RUN_DIR, MODEL_TYPES, DEPRECATED_LLM_PARAMS } from '../config/constants.js';
 import modelManager from './modelManager.js';
 import parameterService from './parameterService.js';
 import { getModelPath } from '../utils/pathHelper.js';
@@ -65,7 +65,7 @@ class PresetService {
       lines.push('flash-attn = auto');
       lines.push('');
       lines.push('; 采样参数');
-      lines.push('temperature = 0.7');
+      lines.push('temperature = 0.8');
       lines.push('top-p = 0.9');
       lines.push('top-k = 40');
       lines.push('repeat-penalty = 1.1');
@@ -145,7 +145,7 @@ class PresetService {
       const standardKeys = ['context_length', 'port', 'parallel',
                             'temperature', 'top_p', 'top_k', 'repeat_penalty', 'reasoning'];
       Object.entries(params).forEach(([key, value]) => {
-        if (!standardKeys.includes(key)) {
+        if (!standardKeys.includes(key) && !DEPRECATED_LLM_PARAMS.has(key)) {
           lines.push(`${key} = ${value}`);
         }
       });

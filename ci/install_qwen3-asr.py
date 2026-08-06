@@ -292,9 +292,8 @@ def main():
             json.dump(marker_data, f)
         print("  [OK] .installed marker written")
 
-    # 无 runtime 时的标记写入
-    if not runtime or args.skip_runtime_download:
-        # 上面可能已经写了，确保标记存在
+    # 无 runtime 定义的引擎：标记完成
+    if not runtime:
         marker_path = os.path.join(install_root, '.installed')
         if not os.path.exists(marker_path):
             marker_data = {

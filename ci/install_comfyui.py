@@ -34,7 +34,7 @@ def main():
     print()
 
     if args.skip_runtime_download:
-        print("  [OK] 运行环境由引擎下载器处理（已下载并解压）")
+        print("  [OK] 运行环境由引擎下载器处理")
     else:
         print("  [OK] 运行环境已内置（预打包）")
 
@@ -45,19 +45,22 @@ def main():
     else:
         print("  [INFO] 未在根目录找到 main.py（可能在子目录中）")
 
-    # 写入 .installed 标记
-    marker_path = os.path.join(install_root, '.installed')
-    marker_data = {
-        'installed_at': datetime.now(timezone.utc).isoformat(),
-        'engine': 'comfyui',
-    }
-    if args.runtime_id:
-        marker_data['runtime_id'] = args.runtime_id
-    version_dir = os.path.basename(install_root)
-    marker_data['version'] = version_dir
-    with open(marker_path, 'w', encoding='utf-8') as f:
-        json.dump(marker_data, f)
-    print("  [OK] .installed marker written")
+    # skip 模式：engineDownloader 会在两阶段提交时写入 .installed
+    if not args.skip_runtime_download:
+        marker_path = os.path.join(install_root, '.installed')
+        marker_data = {
+            'installed_at': datetime.now(timezone.utc).isoformat(),
+            'engine': 'comfyui',
+        }
+        if args.runtime_id:
+            marker_data['runtime_id'] = args.runtime_id
+        version_dir = os.path.basename(install_root)
+        marker_data['version'] = version_dir
+        with open(marker_path, 'w', encoding='utf-8') as f:
+            json.dump(marker_data, f)
+        print("  [OK] .installed marker written")
+    else:
+        print("  [OK] .installed 由引擎下载器统一提交")
 
     print()
     print("========================================")

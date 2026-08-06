@@ -524,8 +524,10 @@
     "dependenciesHint": "Dependencies",
     "dependenciesDescription": "This engine depends on the following components and will download them together:",
     "downloadProgress": "Download Progress",
+    "verifying": "Verifying...",
     "unpacking": "Unpacking...",
     "installing": "Installing...",
+    "committing": "Committing installation...",
     "completed": "✓ Completed",
     "failedWithError": "✗ Failed: {{error}}"
   },

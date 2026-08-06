@@ -1016,7 +1016,7 @@ const GlobalSettings = () => {
         ]}
       >
         <List.Item.Meta
-          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.variants?.[0]?.recommended && <Tag color="green" style={{ fontSize: 10 }}>推荐</Tag>}{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>v{engine.default_version}</Tag>}</Space>}
+          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.variants?.[0]?.recommended && <Tag color="green" style={{ fontSize: 10 }}>推荐</Tag>}{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>{engine.default_version}</Tag>}</Space>}
           description={
             <div>
               {latestVersion && (

@@ -524,8 +524,10 @@
     "dependenciesHint": "依赖提示",
     "dependenciesDescription": "此引擎依赖以下组件，将一起下载：",
     "downloadProgress": "下载进度",
+    "verifying": "正在校验...",
     "unpacking": "正在解压...",
     "installing": "正在安装...",
+    "committing": "正在提交安装...",
     "completed": "✓ 完成",
     "failedWithError": "✗ 失败: {{error}}"
   },

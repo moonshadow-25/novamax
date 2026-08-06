@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import { DATA_DIR, PROJECT_ROOT } from '../config/constants.js';
 import { normalizeEngineType } from '../utils/engineTypeHelper.js';
@@ -181,6 +182,9 @@ class EngineManager {
    */
   _isValidEngineDir(engineId, dirPath) {
     if (!fs.existsSync(dirPath)) return false;
+    // 排除临时/暂存目录（如 .staging_0.28.0_..., _temp_...）
+    const name = path.basename(dirPath);
+    if (name.startsWith('.') || name.startsWith('_temp_')) return false;
     return fs.existsSync(path.join(dirPath, '.installed'));
   }
 
@@ -297,7 +301,7 @@ class EngineManager {
     let lastError = null;
     for (let i = 0; i <= maxRetries; i++) {
       try {
-        fs.rmSync(dirPath, { recursive: true, force: true });
+        await fsp.rm(dirPath, { recursive: true, force: true });
         return true;
       } catch (err) {
         lastError = err;

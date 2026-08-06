@@ -2,14 +2,13 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
-import * as tar from 'tar';
-import StreamZip from 'node-stream-zip';
 import axios from 'axios';
 import { PROJECT_ROOT, DATA_DIR } from '../config/constants.js';
 import { getPythonPath, getPythonScriptPath } from '../utils/pathHelper.js';
 import engineManager from './engineManager.js';
 import downloadStateManager from './downloadStateManager.js';
 import eventBus from './eventBus.js';
+import { verifyArchiveIntegrity } from '../utils/archiveIntegrity.js';
 
 /**
  * 引擎下载服务
@@ -93,11 +92,21 @@ class EngineDownloader {
           rtState.label = `${engine.name} · ${backendLabel} ${archLabel} 运行环境`;
         }
         const effEng = engineManager.getEngine(effectiveEngineId);
-        runtimeTask = { taskId: rtTaskId, engineId: effectiveEngineId, version, isRuntime: true, runtimeFile: runtime.modelscope_file, runtimeRepo: effEng?.modelscope_repo || engine.modelscope_repo };
+        runtimeTask = {
+          taskId: rtTaskId,
+          engineId: effectiveEngineId,
+          version,
+          isRuntime: true,
+          runtimeFile: runtime.modelscope_file,
+          runtimeRepo: effEng?.modelscope_repo || engine.modelscope_repo,
+          artifact: { size: runtime.size, sha256: runtime.sha256 }
+        };
       }
     }
-    // 标记引擎任务：若有独立的运行时下载任务，安装脚本跳过自己的运行时下载
-    tasks.unshift({ taskId, engineId, version, skipRuntimeDownload: !!runtimeTask });
+    // 标记引擎任务：有独立 runtime 时只准备 staging，全部通过后统一提交。
+    const parentTask = { taskId, engineId, version, skipRuntimeDownload: !!runtimeTask };
+    tasks.unshift(parentTask);
+    if (runtimeTask) runtimeTask.parentTask = parentTask;
 
     // 后台执行下载
     this._runDownloadChain(tasks, runtimeId, runtimeTask);
@@ -189,26 +198,31 @@ class EngineDownloader {
    * 执行下载链（依赖 -> 主引擎）
    */
   async _runDownloadChain(tasks, runtimeId = null, runtimeTask = null) {
-    // 引擎任务：若 runtimeTask 存在则标记跳过安装脚本的运行时下载（避免重复）
     for (const taskInfo of tasks) {
       await this._runSingleDownload(taskInfo, null, taskInfo.skipRuntimeDownload);
     }
-    // 再下载运行时（引擎已安装完毕，合并不会丢）
-    if (runtimeTask) {
-      try {
-        await this._runSingleDownload(runtimeTask, null, false);
-      } catch (err) {
-        downloadStateManager.setState(runtimeTask.taskId, 'failed', err.message, null);
+
+    if (!runtimeTask) return;
+
+    try {
+      await this._runSingleDownload(runtimeTask, null, false);
+      const parent = runtimeTask.parentTask;
+      await this._commitPreparedInstall(parent);
+      downloadStateManager.setState(runtimeTask.taskId, 'completed', null, null);
+      eventBus.broadcast('download-progress', { engineId: runtimeTask.taskId, status: 'completed' });
+      downloadStateManager.setState(parent.engineId, 'completed', null, parent.version);
+      downloadStateManager.updateProgress(parent.engineId, 100, 0, parent.version);
+      eventBus.broadcast('download-progress', { engineId: parent.engineId, status: 'completed' });
+    } catch (err) {
+      const error = err?.message || '运行环境下载或安装失败';
+      const parent = runtimeTask.parentTask;
+      if (parent?._preparedInstall?.stagingPath) {
+        await fsp.rm(parent._preparedInstall.stagingPath, { recursive: true, force: true }).catch(() => {});
       }
-      // 运行时下载完成，将关联的引擎任务统一标记为 completed
-      for (const taskInfo of tasks) {
-        if (!taskInfo.isRuntime && taskInfo.skipRuntimeDownload) {
-          const stateId = taskInfo.engineId;
-          const stateVer = taskInfo.version;
-          downloadStateManager.setState(stateId, 'completed', null, stateVer);
-          downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
-          eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
-        }
+      downloadStateManager.setState(runtimeTask.taskId, 'failed', error, null);
+      if (parent) {
+        downloadStateManager.setState(parent.engineId, 'failed', error, parent.version);
+        eventBus.broadcast('download-progress', { engineId: parent.engineId, status: 'failed', error });
       }
     }
   }
@@ -245,11 +259,11 @@ class EngineDownloader {
 
         await this._downloadEngine(taskInfo.engineId, taskInfo.version, runtimeId, taskInfo, skipRuntimeDownload);
 
-        // 引擎包已安装但运行时还需下载 → 保持 installing 状态，等运行时完成后由 _runDownloadChain 统一标记 completed
+        // 有独立 runtime 时，主任务只准备 staging；由 _runDownloadChain 在 runtime 成功后提交。
         if (!taskInfo.isRuntime && skipRuntimeDownload) {
           downloadStateManager.setState(stateId, 'installing', null, stateVer);
           eventBus.broadcast('download-progress', { engineId: stateId, status: 'installing' });
-        } else {
+        } else if (!taskInfo.isRuntime) {
           downloadStateManager.setState(stateId, 'completed', null, stateVer);
           downloadStateManager.updateProgress(stateId, 100, 0, stateVer);
           eventBus.broadcast('download-progress', { engineId: stateId, status: 'completed' });
@@ -297,18 +311,23 @@ class EngineDownloader {
       }
       await this._execDownload(taskInfo.taskId, '', repo, taskInfo.runtimeFile, downloadDir);
 
+      downloadStateManager.setState(taskInfo.taskId, 'verifying', null, null);
+      eventBus.broadcast('download-progress', { engineId: taskInfo.taskId, status: 'verifying' });
+      try {
+        await verifyArchiveIntegrity(filePath, taskInfo.artifact);
+      } catch (error) {
+        await fsp.unlink(filePath).catch(() => {});
+        throw error;
+      }
+
       // 更新状态：解压中
       downloadStateManager.setState(taskInfo.taskId, 'unpacking', null, null);
       eventBus.broadcast('download-progress', { engineId: taskInfo.taskId, status: 'unpacking' });
 
-      // 解压到临时目录，解包后合并到引擎目录
-      const realEngineId = engineId.split('::')[0];
-      const eng = engineManager.getEngine(realEngineId);
-      const enginePath = engineManager.getEnginePath(realEngineId, version);
-      const installPath = enginePath || (eng?._parentKey
-        ? path.join(PROJECT_ROOT, 'external', eng._parentKey, realEngineId, version)
-        : path.join(PROJECT_ROOT, 'external', realEngineId, version));
-      const tmpExtract = installPath + '___runtime_tmp';
+      const parent = taskInfo.parentTask;
+      const prepared = parent?._preparedInstall;
+      if (!prepared) throw new Error('运行环境缺少待提交的引擎安装目录');
+      const tmpExtract = path.join(prepared.stagingPath, '.runtime_unpack');
       await fsp.rm(tmpExtract, { recursive: true, force: true }).catch(() => {});
       await fsp.mkdir(tmpExtract, { recursive: true });
       await this._extract(filePath, tmpExtract);
@@ -322,22 +341,22 @@ class EngineDownloader {
       }
       if (runtimeDir) {
         const srcDir = path.join(tmpExtract, runtimeDir);
-        const destDir = path.join(installPath, runtimeDir);
+        const destDir = path.join(prepared.stagingPath, runtimeDir);
         await fsp.rm(destDir, { recursive: true, force: true }).catch(() => {});
-        await fsp.mkdir(installPath, { recursive: true });
+        await fsp.mkdir(prepared.stagingPath, { recursive: true });
         await fsp.rename(srcDir, destDir).catch(async () => {
           await fsp.cp(srcDir, destDir, { recursive: true });
         });
       } else {
-        // 兼容：zip 内容不是单一文件夹时，合并到引擎目录
-        await fsp.mkdir(installPath, { recursive: true });
+        // 兼容：归档内容不是单一文件夹时，合并到同一个 staging。
         for (const f of entries) {
-          await fsp.rename(path.join(tmpExtract, f), path.join(installPath, f)).catch(async () => {
-            await fsp.cp(path.join(tmpExtract, f), path.join(installPath, f), { recursive: true });
+          await fsp.rename(path.join(tmpExtract, f), path.join(prepared.stagingPath, f)).catch(async () => {
+            await fsp.cp(path.join(tmpExtract, f), path.join(prepared.stagingPath, f), { recursive: true });
           });
         }
       }
       await fsp.rm(tmpExtract, { recursive: true, force: true }).catch(() => {});
+      await fsp.unlink(filePath).catch(() => {});
       return;
     }
 
@@ -383,12 +402,22 @@ class EngineDownloader {
       throw new Error(`下载失败：文件不存在或大小为0，请重试`);
     }
 
+    // 校验制品完整性：size 必须匹配；发布配置提供 sha256 时同时验证摘要。
+    downloadStateManager.setState(engineId, 'verifying', null, version);
+    eventBus.broadcast('download-progress', { engineId, status: 'verifying' });
+    try {
+      await verifyArchiveIntegrity(filePath, versionInfo);
+    } catch (error) {
+      await fsp.unlink(filePath).catch(() => {});
+      throw error;
+    }
+
     // 解压到临时目录（与最终安装目录同层级，避免 rename 跨目录失败）
     const vInfo2 = engineManager.getEngineVersionInfo(engineId, version);
     let tempDir = engineId;
     if (vInfo2?.variant_id) tempDir = path.join(engineId, vInfo2.variant_id);
     else if (engine?._parentKey) tempDir = path.join(engine._parentKey, engineId);
-    const tempExtractPath = path.join(PROJECT_ROOT, 'external', tempDir, `_temp_${version}`);
+    const tempExtractPath = path.join(PROJECT_ROOT, 'external', tempDir, `.staging_${version}_${Date.now()}`);
     downloadStateManager.setState(engineId, 'unpacking', null, version);
     eventBus.broadcast('download-progress', { engineId, status: 'unpacking' });
     try {
@@ -416,58 +445,97 @@ class EngineDownloader {
     }
     const installPath = path.join(PROJECT_ROOT, 'external', installDirName);
 
-    // 解包顶层单目录（在 temp 中完成，不受 installPath 已有文件影响）
+    // 解包顶层单目录：将内容提升至 staging 根目录，确保可整体原子提交。
     let sourcePath = tempExtractPath;
     const tempEntries = await fsp.readdir(tempExtractPath).catch(() => []);
     if (tempEntries.length === 1) {
       const singleDir = path.join(tempExtractPath, tempEntries[0]);
       const stat = await fsp.stat(singleDir).catch(() => null);
       if (stat?.isDirectory()) {
-        sourcePath = singleDir;
+        const nestedEntries = await fsp.readdir(singleDir);
+        for (const entry of nestedEntries) {
+          await fsp.rename(path.join(singleDir, entry), path.join(tempExtractPath, entry));
+        }
+        await fsp.rmdir(singleDir);
       }
     }
 
-    // 合并到安装目录（覆盖同名文件，保留已有文件如运行时）
-    await fsp.mkdir(installPath, { recursive: true });
-    await this._mergeDir(sourcePath, installPath);
-    await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
-
-    // 安装步骤
     if (engine.category === 'app') {
-      const updateSource = this._resolveAppUpdateSource(installPath);
+      const updateSource = this._resolveAppUpdateSource(sourcePath);
       if (!this._isValidAppUpdateSource(updateSource)) {
+        await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
         throw new Error(`更新包结构无效: ${updateSource}`);
       }
-      // App 更新：写 pending 文件，然后自动重启
-      const PENDING_FILE = path.join(DATA_DIR, 'updates', 'pending');
-      await fsp.mkdir(path.dirname(PENDING_FILE), { recursive: true });
-      await fsp.writeFile(PENDING_FILE, updateSource, 'utf8');
+      const pendingFile = path.join(DATA_DIR, 'updates', 'pending');
+      await fsp.mkdir(path.dirname(pendingFile), { recursive: true });
+      await fsp.writeFile(pendingFile, updateSource, 'utf8');
       await fsp.unlink(filePath).catch(() => {});
-      // 通知前端进入重启状态
       downloadStateManager.setState(engineId, 'restarting', null, version);
       eventBus.broadcast('download-progress', { engineId, status: 'restarting' });
-      console.log(`[engineDownloader] App update ready, auto-restarting...`);
-      // 自动触发重启
       const updateService = (await import('./updateService.js')).default;
       await updateService.applyUpdate();
       return;
     }
 
-    // 普通引擎：运行安装脚本（脚本负责写 .installed）
-    await this._runInstallScript(engineId, version, installPath, runtimeId, skipRuntimeDownload);
-
-    // 安装脚本可能未写 version，统一补充
-    const markerPath = path.join(installPath, '.installed');
+    downloadStateManager.setState(engineId, 'installing', null, version);
+    eventBus.broadcast('download-progress', { engineId, status: 'installing' });
     try {
-      const m = JSON.parse(await fsp.readFile(markerPath, 'utf-8'));
-      if (!m.version) {
-        m.version = version;
-        await fsp.writeFile(markerPath, JSON.stringify(m));
-      }
-    } catch {}
+      await this._runInstallScript(engineId, version, sourcePath, runtimeId, skipRuntimeDownload);
+      const prepared = {
+        stagingPath: tempExtractPath,
+        installPath,
+        engineId,
+        version,
+        variant: vInfo?.variant_id || null,
+        runtimeId,
+        archiveSha256: versionInfo.sha256 || null,
+        archivePath: filePath
+      };
 
-    // 清理下载文件
+      if (skipRuntimeDownload && taskInfo) {
+        taskInfo._preparedInstall = prepared;
+        return;
+      }
+
+      await this._commitPreparedInstall({ _preparedInstall: prepared });
+    } catch (error) {
+      await fsp.rm(tempExtractPath, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+
     await fsp.unlink(filePath).catch(() => {});
+  }
+
+  async _commitPreparedInstall(taskInfo) {
+    const prepared = taskInfo?._preparedInstall;
+    if (!prepared) throw new Error('缺少待提交的引擎安装目录');
+
+    const { stagingPath, installPath, engineId, version, variant, runtimeId, archiveSha256, archivePath } = prepared;
+    downloadStateManager.setState(engineId, 'committing', null, version);
+    eventBus.broadcast('download-progress', { engineId, status: 'committing' });
+
+    const backupPath = `${installPath}.backup_${Date.now()}`;
+    const existingInstall = await fsp.stat(installPath).then(() => true).catch(() => false);
+    if (existingInstall) await fsp.rename(installPath, backupPath);
+
+    try {
+      await fsp.mkdir(path.dirname(installPath), { recursive: true });
+      await fsp.rename(stagingPath, installPath);
+      await fsp.writeFile(path.join(installPath, '.installed'), JSON.stringify({
+        engine: engineId,
+        version,
+        variant,
+        runtime: runtimeId || null,
+        archiveSha256,
+        installed_at: new Date().toISOString()
+      }, null, 2));
+      if (existingInstall) await fsp.rm(backupPath, { recursive: true, force: true });
+      await fsp.unlink(archivePath).catch(() => {});
+    } catch (error) {
+      await fsp.rm(installPath, { recursive: true, force: true }).catch(() => {});
+      if (existingInstall) await fsp.rename(backupPath, installPath).catch(() => {});
+      throw error;
+    }
   }
 
   _resolveUpdateBundleRoot(installPath) {
@@ -624,22 +692,21 @@ class EngineDownloader {
    */
   async _extract(filePath, targetPath) {
     await fsp.mkdir(targetPath, { recursive: true });
-    const name = filePath.toLowerCase();
+    const lower = filePath.toLowerCase();
 
-    if (name.endsWith('.tar.gz') || name.endsWith('.tgz') || name.endsWith('.tar')) {
-      console.log(`Extracting tar archive: ${filePath} -> ${targetPath}`);
-      await tar.extract({ file: filePath, cwd: targetPath });
-    } else if (name.endsWith('.zip')) {
-      console.log(`Extracting zip: ${filePath} -> ${targetPath}`);
-      const zip = new StreamZip.async({ file: filePath });
-      const count = await zip.extract(null, targetPath);
-      await zip.close();
-      console.log(`  zip extracted ${count} entries`);
-    } else {
+    if (!(lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar') || lower.endsWith('.zip'))) {
       throw new Error(`不支持的压缩格式: ${path.basename(filePath)}`);
     }
 
-    console.log('Extraction complete');
+    const startTime = Date.now();
+    console.log(`Extracting: ${path.basename(filePath)} -> ${targetPath}`);
+    await new Promise((resolve, reject) => {
+      const proc = spawn('tar', ['-xf', filePath, '-C', targetPath], { windowsHide: true });
+      proc.stderr.on('data', d => console.log(`  ${d.toString().trim()}`));
+      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`)));
+      proc.on('error', reject);
+    });
+    console.log(`Extraction complete (${((Date.now() - startTime) / 1000).toFixed(1)}s)`);
   }
 
   /**
@@ -730,7 +797,7 @@ class EngineDownloader {
       const proc = spawn(cmd, args, { cwd: installPath, env: spawnEnv, windowsHide: true });
 
       proc.stdout.on('data', (data) => console.log(`  [${engineId}] ${data.toString().trim()}`));
-      proc.stderr.on('data', (data) => console.error(`  [${engineId}] ${data.toString().trim()}`));
+      proc.stderr.on('data', (data) => console.log(`  [${engineId}] ${data.toString().trim()}`));
 
       proc.on('close', (code) => {
         if (code === 0) resolve();

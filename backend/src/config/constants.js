@@ -115,11 +115,22 @@ export const DEFAULT_LLM_PARAMETERS = {
   context_length: 0,
   port: 1234,
   parallel: 1,
-  'no-mmap': true,
+  'load-mode': 'none',
   'n-gpu-layers': 100,
-  temperature: 0.7,
+  temperature: 0.8,
   top_p: 0.9,
   top_k: 40,
   repeat_penalty: 1.1,
   reasoning: 'off'
 };
+
+/**
+ * 已弃用的 llama-server 参数（被新参数替代）
+ *
+ * 加入此集合的参数会被 presetService（INI 生成）和 llmRunner（CLI 构建）
+ * 两处输出端自动跳过，不会写入 llm.ini 或命令行。
+ *
+ * INI 文件每次是全量重建后覆盖写入，旧参数不会残留。
+ * 数据库里存的旧值无需清理，输出时被拦截即可。
+ */
+export const DEPRECATED_LLM_PARAMS = new Set(['no-mmap']);

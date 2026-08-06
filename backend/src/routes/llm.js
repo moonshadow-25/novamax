@@ -16,7 +16,7 @@ router.post('/llm/:modelId/chat', async (req, res) => {
       {
         messages: req.body.messages,
         stream: req.body.stream || false,
-        temperature: req.body.temperature || 0.7,
+        temperature: req.body.temperature ?? 0.8,
         max_tokens: req.body.max_tokens || 2000
       }
     );
@@ -38,7 +38,7 @@ router.post('/llm/:modelId/complete', async (req, res) => {
       `http://localhost:${status.port}/completion`,
       {
         prompt: req.body.prompt,
-        temperature: req.body.temperature || 0.7,
+        temperature: req.body.temperature ?? 0.8,
         max_tokens: req.body.max_tokens || 2000
       }
     );

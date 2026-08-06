@@ -182,7 +182,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       // 标准参数键（与后端 parameterService 保持一致）
       const standardKeys = isCloudApi
         ? ['port']
-        : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
+        : ['context_length', 'port', 'parallel', 'load-mode', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
            'repeat_penalty', 'version', 'reasoning', 'rpc_enable', 'rpc_devices'];
 
@@ -243,7 +243,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       // 标准参数键（确保所有标准参数都被保存）
       const standardKeys = isCloudApi
         ? ['port']
-        : ['context_length', 'port', 'parallel', 'no-mmap', 'n-gpu-layers',
+        : ['context_length', 'port', 'parallel', 'load-mode', 'n-gpu-layers',
            'temperature', 'top_p', 'top_k',
            'repeat_penalty', 'reasoning'];
       // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
@@ -255,12 +255,6 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           allParams[key] = parameters[key];
         }
       });
-
-      // no-mmap 字符串转布尔值
-      if (allParams['no-mmap'] !== undefined) {
-        const v = String(allParams['no-mmap']).toLowerCase();
-        allParams['no-mmap'] = v !== 'false' && v !== '0' && v !== '';
-      }
 
       // 云 API 模型不允许自定义参数
       if (!isCloudApi) {
@@ -399,7 +393,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
   const runtimeKeys = isCloudApi
     ? ['port']
-    : ['context_length', 'parallel', 'no-mmap', 'n-gpu-layers', 'port'];
+    : ['context_length', 'parallel', 'load-mode', 'n-gpu-layers', 'port'];
 
   const samplingKeys = isCloudApi
     ? []
@@ -421,7 +415,13 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
           </Space>
         }
       >
-        {meta.type === 'boolean' ? (
+        {meta.options ? (
+          <Select placeholder={t('settingsDrawer.defaultWithValue', { value: meta.default })}>
+            {meta.options.map(opt => (
+              <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+            ))}
+          </Select>
+        ) : meta.type === 'string' || meta.type === 'boolean' ? (
           <Input placeholder={t('settingsDrawer.defaultWithValue', { value: meta.default })} />
         ) : (
           <InputNumber

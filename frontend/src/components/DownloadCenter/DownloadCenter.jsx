@@ -40,8 +40,10 @@ const summarizeDownloadError = (raw = '', t) => {
 
 const statusMap = {
   downloading: { color: 'processing', label: 'downloading' },
+  verifying: { color: 'processing', label: 'verifying' },
   unpacking: { color: 'processing', label: 'unpacking' },
   installing: { color: 'processing', label: 'installing' },
+  committing: { color: 'processing', label: 'committing' },
   paused: { color: 'warning', label: 'paused' },
   completed: { color: 'success', label: 'completed' },
   failed: { color: 'error', label: 'failed' }
@@ -78,7 +80,7 @@ function DownloadCenter({ visible, onClose }) {
   const handlePause = async (dl) => {
     try {
       if (dl.type === 'engine') {
-        await engineService.pauseDownload(dl.id);
+        await engineService.pauseDownload(dl.taskId || dl.id);
       } else if (dl.type === 'comfyui') {
         await comfyuiService.pauseDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {
@@ -99,7 +101,7 @@ function DownloadCenter({ visible, onClose }) {
   const handleResume = async (dl) => {
     try {
       if (dl.type === 'engine') {
-        await engineService.resumeDownload(dl.id);
+        await engineService.resumeDownload(dl.taskId || dl.id);
       } else if (dl.type === 'comfyui') {
         await comfyuiService.resumeDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {
@@ -120,7 +122,7 @@ function DownloadCenter({ visible, onClose }) {
   const handleCancel = async (dl) => {
     try {
       if (dl.type === 'engine') {
-        await engineService.cancelDownload(dl.id);
+        await engineService.cancelDownload(dl.taskId || dl.id);
       } else if (dl.type === 'comfyui') {
         await comfyuiService.cancelDownload(dl.comfyuiTaskId);
       } else if (dl.type === 'asr') {

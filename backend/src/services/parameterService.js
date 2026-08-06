@@ -12,19 +12,25 @@ class ParameterService {
 
   /**
    * 获取模型的有效参数（用户参数优先，带版本控制）
+   * 合并优先级：user_parameters > model.parameters > DEFAULT_LLM_PARAMETERS
    */
   getEffectiveParameters(model) {
     const deletedKeys = new Set(model.deleted_parameters || []);
     const rawDefault = model.parameters || {};
-    // 过滤掉用户主动删除的 key
+    // 过滤掉用户主动删除的 key 和已弃用的 key（如 no-mmap → load-mode）
+    const skipKeys = new Set([...deletedKeys, 'no-mmap']);
     const defaultParams = Object.fromEntries(
-      Object.entries(rawDefault).filter(([k]) => !deletedKeys.has(k))
+      Object.entries(rawDefault).filter(([k]) => !skipKeys.has(k))
     );
     const defaultVersion = rawDefault.version || '1.0.0';
 
-    // 如果没有用户参数，返回默认参数
+    // 系统默认参数（兜底，去 version 字段）
+    const { version: _sysVer, ...sysDefaults } = DEFAULT_LLM_PARAMETERS;
+
+    // 如果没有用户参数，返回默认参数（合并系统默认值）
     if (!model.user_parameters) {
       return {
+        ...sysDefaults,
         ...defaultParams,
         _source: 'default',
         _version: defaultVersion
@@ -37,6 +43,7 @@ class ParameterService {
     // 如果默认参数版本号更新了，使用默认参数
     if (this._compareVersions(defaultVersion, userParamsVersion) > 0) {
       return {
+        ...sysDefaults,
         ...defaultParams,
         _source: 'default',
         _version: defaultVersion,
@@ -44,10 +51,14 @@ class ParameterService {
       };
     }
 
-    // 使用用户参数（合并默认参数作为后备）
+    // 使用用户参数（合并默认参数作为后备，同时过滤用户参数中的弃用 key）
+    const userParams = Object.fromEntries(
+      Object.entries(model.user_parameters || {}).filter(([k]) => !skipKeys.has(k))
+    );
     return {
+      ...sysDefaults,
       ...defaultParams,
-      ...model.user_parameters,
+      ...userParams,
       version: defaultVersion, // 保留版本号
       _source: 'user',
       _version: userParamsVersion
@@ -261,11 +272,12 @@ class ParameterService {
         max: 16,
         default: 1
       },
-      'no-mmap': {
-        type: 'boolean',
-        label: 'no-mmap',
-        description: '禁用内存映射，避免模型文件被映射到内存',
-        default: true
+      'load-mode': {
+        type: 'string',
+        label: 'load-mode',
+        description: '模型加载模式，替代已弃用的 --no-mmap',
+        default: 'none',
+        options: ['mmap', 'none', 'mlock', 'mmap+mlock']
       },
       'n-gpu-layers': {
         type: 'number',
@@ -284,7 +296,7 @@ class ParameterService {
         min: 0,
         max: 2,
         step: 0.1,
-        default: 0.7
+        default: 0.8
       },
       top_p: {
         type: 'number',

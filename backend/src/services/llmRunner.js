@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
+import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS, DEPRECATED_LLM_PARAMS } from '../config/constants.js';
 import presetService from './presetService.js';
 import parameterService from './parameterService.js';
 import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
@@ -106,14 +106,15 @@ export function generateSingleModelCommand(model, port, options = {}) {
   const samplingParams = ['temperature', 'top_p', 'top_k', 'repeat_penalty', 'min_p', 'typical_p', 'tfs_z', 'mirostat', 'mirostat_tau', 'mirostat_eta'];
 
   for (const [key, value] of Object.entries(effectiveParams)) {
-    // 跳过内部字段、已处理的参数、采样参数
+    // 跳过内部字段、已处理的参数、采样参数、弃用参数
     if (
       key.startsWith('_') ||
       key === 'version' ||
       key === 'rpc_enable' ||
       key === 'rpc_devices' ||
       defaults.hasOwnProperty(key) ||
-      samplingParams.includes(key)
+      samplingParams.includes(key) ||
+      DEPRECATED_LLM_PARAMS.has(key)
     ) {
       continue;
     }
