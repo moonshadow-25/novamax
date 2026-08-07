@@ -115,7 +115,7 @@ export const DEFAULT_LLM_PARAMETERS = {
   context_length: 0,
   port: 1234,
   parallel: 1,
-  'load-mode': 'none',
+  'load-mode': 'nommap',
   'n-gpu-layers': 100,
   temperature: 0.8,
   top_p: 0.9,

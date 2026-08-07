@@ -90,6 +90,12 @@ export function generateSingleModelCommand(model, port, options = {}) {
     // 获取命令行参数名
     const paramName = PARAM_MAPPING[key] || `--${key.replace(/_/g, '-')}`;
 
+    // load-mode=nommap → --no-mmap（兼容老版本 llama.cpp）
+    if (key === 'load-mode' && value === 'nommap') {
+      args.push('--no-mmap');
+      continue;
+    }
+
     // 布尔标志处理
     if (typeof value === 'boolean') {
       if (value === true) {

@@ -51,4 +51,5 @@ __pycache__/
 *.tmp
 *.temp
 .claude/
+.easier-code/
 /47.116.221.35_id_ed25519

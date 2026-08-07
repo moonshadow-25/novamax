@@ -146,6 +146,11 @@ class PresetService {
                             'temperature', 'top_p', 'top_k', 'repeat_penalty', 'reasoning'];
       Object.entries(params).forEach(([key, value]) => {
         if (!standardKeys.includes(key) && !DEPRECATED_LLM_PARAMS.has(key)) {
+          // load-mode=nommap → no-mmap=true（兼容老版本 llama.cpp INI 格式）
+          if (key === 'load-mode' && value === 'nommap') {
+            lines.push('no-mmap = true');
+            return;
+          }
           lines.push(`${key} = ${value}`);
         }
       });

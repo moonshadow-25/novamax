@@ -276,8 +276,8 @@ class ParameterService {
         type: 'string',
         label: 'load-mode',
         description: '模型加载模式，替代已弃用的 --no-mmap',
-        default: 'none',
-        options: ['mmap', 'none', 'mlock', 'mmap+mlock']
+        default: 'nommap',
+        options: ['nommap', 'mmap', 'none', 'mlock', 'mmap+mlock']
       },
       'n-gpu-layers': {
         type: 'number',
