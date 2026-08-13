@@ -16,7 +16,7 @@ if (!port) {
 
 async function shutdown() {
   console.log('\nDeregistering Embeddings service...');
-  await stopServiceRegistration(port, true);
+  await stopServiceRegistration(port, 'embedding');
   process.exit(0);
 }
 

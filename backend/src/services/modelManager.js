@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { generateId } from '../utils/fileHelper.js';
 import { DB_PATH, MODELS_RUN_DIR } from '../config/constants.js';
 import { getModelPath } from '../utils/pathHelper.js';
-import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
+import { isEmbeddingModelData, isRerankerModelData } from '../utils/modelTypeHelper.js';
 import { isAuxiliaryLlmFile } from '../utils/llmFileHelper.js';
 
 class ModelManager {
@@ -159,12 +159,29 @@ class ModelManager {
 
     if (type === 'llm') {
       if (normalizedModelData.parameters && typeof normalizedModelData.parameters === 'object' && !Array.isArray(normalizedModelData.parameters)) {
+        if (normalizedModelData.parameters.reranker === true) {
+          normalizedModelData.reranker = true;
+        }
         if (normalizedModelData.parameters.embedding === true) {
           normalizedModelData.embedding = true;
         }
       }
 
-      if (this._isEmbeddingModel(type, normalizedModelData)) {
+      // Reranker 优先于 Embedding 判断（含 bge/jina 的 reranker 不能被误判为 embedding）
+      if (isRerankerModelData(normalizedModelData)) {
+        const baseParams =
+          normalizedModelData.parameters &&
+          typeof normalizedModelData.parameters === 'object' &&
+          !Array.isArray(normalizedModelData.parameters)
+            ? normalizedModelData.parameters
+            : {};
+
+        normalizedModelData.parameters = {
+          ...baseParams,
+          ...(baseParams.reranker === undefined ? { reranker: true } : {})
+        };
+        normalizedModelData.reranker = true;
+      } else if (this._isEmbeddingModel(type, normalizedModelData)) {
         const baseParams =
           normalizedModelData.parameters &&
           typeof normalizedModelData.parameters === 'object' &&
@@ -204,6 +221,12 @@ class ModelManager {
         };
 
         if (type === 'llm') {
+          if (isRerankerModelData(updated)) {
+            updated.reranker = true;
+          } else {
+            delete updated.reranker;
+          }
+
           if (this._isEmbeddingModel(type, updated)) {
             updated.embedding = true;
           } else {

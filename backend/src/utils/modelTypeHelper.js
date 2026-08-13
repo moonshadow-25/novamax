@@ -59,3 +59,27 @@ export function isEmbeddingModelData(modelData) {
 
   return keywords.some(v => EMBEDDING_PATTERN.test(v));
 }
+
+// ── 子类型（chat / embedding / reranker）───────────────────────────────────────
+
+/**
+ * LLM 模型的默认服务端口（按子类型区分）。
+ * reranker 单独使用 1245，embedding 使用 1278，普通 chat 使用 1234。
+ */
+export const MODEL_SUBTYPE_PORTS = {
+  chat: 1234,
+  embedding: 1278,
+  reranker: 1245,
+};
+
+/**
+ * 获取 LLM 模型的子类型（与模型 type 无关，仅对 llm 有意义）。
+ * 判断优先级：reranker > embedding > chat。
+ * @param {object} modelData
+ * @returns {'chat'|'embedding'|'reranker'}
+ */
+export function getModelSubtype(modelData) {
+  if (isRerankerModelData(modelData)) return 'reranker';
+  if (isEmbeddingModelData(modelData)) return 'embedding';
+  return 'chat';
+}

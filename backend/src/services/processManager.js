@@ -19,13 +19,18 @@ import { checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
 import eventBus from './eventBus.js';
 import presetService from './presetService.js';
 import comfyuiRunner from './comfyuiRunner.js';
-import { registerChatCompletionService, registerEmbeddingsService, stopServiceRegistration, deregisterAllServices, ensureServiceRegistration } from '../utils/serviceRegistrar.js';
-import { isEmbeddingModelData } from '../utils/modelTypeHelper.js';
+import { registerChatCompletionService, registerEmbeddingsService, registerRerankService, stopServiceRegistration, deregisterAllServices, ensureServiceRegistration } from '../utils/serviceRegistrar.js';
+import { getModelSubtype, MODEL_SUBTYPE_PORTS } from '../utils/modelTypeHelper.js';
 import multiConnectService from './multiConnectService.js';
 
 const CLOUD_API_PROXY_SCRIPT = getAuxiliaryScriptPath('utils/cloudApiProxy.js');
 
-const isEmbeddingModel = isEmbeddingModelData;
+/** 根据模型子类型选择对应的服务注册函数 */
+function getRegisterFn(subtype) {
+  if (subtype === 'embedding') return registerEmbeddingsService;
+  if (subtype === 'reranker') return registerRerankService;
+  return registerChatCompletionService;
+}
 
 class ProcessManager {
   constructor() {
@@ -211,8 +216,7 @@ class ProcessManager {
         processInfo.ready = true;
         console.log(`[cloudapi:${modelId}] 代理已就绪`);
         eventBus.broadcast('model-updated', { modelId });
-        const embedding = isEmbeddingModel(model);
-        const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+        const register = getRegisterFn(getModelSubtype(model));
         const maxConc = effectiveParams.parallel || 1;
         register(port, maxConc).catch((err) =>
           console.warn(`[service-registrar] CloudAPI registration failed: ${err.message}`)
@@ -251,10 +255,9 @@ class ProcessManager {
     const processInfo = this.processes.get(modelId);
     if (!processInfo) throw new Error('Backend not running');
     const model = modelManager.getById(modelId);
-    const embedding = isEmbeddingModel(model);
     processInfo.process.kill();
     this.cleanup(modelId);
-    await stopServiceRegistration(processInfo.port, embedding);
+    await stopServiceRegistration(processInfo.port, getModelSubtype(model));
     return { status: MODEL_STATUS.STOPPED };
   }
 
@@ -275,8 +278,8 @@ class ProcessManager {
 
     // 从模型参数中读取端口
     const effectiveParams = parameterService.getEffectiveParameters(model);
-    const isEmbedding = isEmbeddingModel(model);
-    const port = effectiveParams.port || (isEmbedding ? 1278 : 1234);
+    const subtype = getModelSubtype(model);
+    const port = effectiveParams.port || MODEL_SUBTYPE_PORTS[subtype];
 
     // 检查端口是否本地可用
     if (!(await this.isPortAvailable(port))) {
@@ -407,7 +410,7 @@ class ProcessManager {
           processInfo.logStream.write(`\n=== 进程退出，退出码: ${code}，时间: ${new Date().toISOString()} ===\n`);
         }
         console.log(`[${modelId}] Process exited with code ${code}`);
-        stopServiceRegistration(processInfo.port, isEmbedding).catch(() => {});
+        stopServiceRegistration(processInfo.port, subtype).catch(() => {});
         this.cleanup(modelId);
         eventBus.broadcast('model-updated', { modelId });
       });
@@ -455,8 +458,7 @@ class ProcessManager {
       });
 
       await startupResult;
-      const embedding = isEmbeddingModel(model);
-      const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+      const register = getRegisterFn(subtype);
       const maxConc = effectiveParams.parallel || 1;
       register(port, maxConc).catch((err) =>
         console.warn(`[service-registrar] Single model registration failed: ${err.message}`)
@@ -476,7 +478,7 @@ class ProcessManager {
           try {
             const alive = await this._isLocalPortListening(latest.port);
             if (!alive) return;
-            await ensureServiceRegistration(latest.port, embedding);
+            await ensureServiceRegistration(latest.port, subtype);
           } catch (err) {
             console.warn(`[service-registrar] Single model watchdog failed: ${err.message}`);
           }
@@ -527,8 +529,10 @@ class ProcessManager {
       }
     }
 
-    const hasEmbedding = downloadedModels.some(isEmbeddingModel);
-    const hasChat = downloadedModels.some((model) => !isEmbeddingModel(model));
+    const subtypes = downloadedModels.map(m => getModelSubtype(m));
+    const hasEmbedding = subtypes.includes('embedding');
+    const hasReranker = subtypes.includes('reranker');
+    const hasChat = subtypes.includes('chat');
     // 路由并发 = 所有已加载模型的 parallel 之和
     const routerMaxConc = downloadedModels.reduce((sum, m) => {
       const params = parameterService.getEffectiveParameters(m);
@@ -537,6 +541,11 @@ class ProcessManager {
     if (hasEmbedding) {
       registerEmbeddingsService(router.port, routerMaxConc).catch((err) =>
         console.warn(`[service-registrar] Router embeddings registration failed: ${err.message}`)
+      );
+    }
+    if (hasReranker) {
+      registerRerankService(router.port, routerMaxConc).catch((err) =>
+        console.warn(`[service-registrar] Router rerank registration failed: ${err.message}`)
       );
     }
     if (hasChat) {
@@ -581,8 +590,7 @@ class ProcessManager {
       const loadedModel = response.data.data.find(m => m.id === modelId);
 
       if (loadedModel?.status?.value === 'loaded') {
-        const embedding = isEmbeddingModel(model);
-        const register = embedding ? registerEmbeddingsService : registerChatCompletionService;
+        const register = getRegisterFn(getModelSubtype(model));
         const params = parameterService.getEffectiveParameters(model);
         register(router.port, params.parallel || 1).catch((err) =>
           console.warn(`[service-registrar] Router model registration failed: ${err.message}`)
@@ -677,9 +685,10 @@ class ProcessManager {
         console.log(`[Router-${type}] Process exited with code ${code}`);
         this.routers.delete(type);
         this.allocatedPorts.delete(port);
-        // 注销该路由端口上注册的所有服务（chat + embedding）
-        stopServiceRegistration(port, false).catch(() => {});
-        stopServiceRegistration(port, true).catch(() => {});
+        // 注销该路由端口上注册的所有服务（chat + embedding + reranker）
+        stopServiceRegistration(port, 'chat').catch(() => {});
+        stopServiceRegistration(port, 'embedding').catch(() => {});
+        stopServiceRegistration(port, 'reranker').catch(() => {});
       });
 
       // 等待服务器启动
@@ -754,13 +763,12 @@ class ProcessManager {
     }
 
     const model = modelManager.getById(modelId);
-    const embedding = isEmbeddingModel(model);
     const port = processInfo.port;
     processInfo.process.kill();
     this.cleanup(modelId);
     // 停止对应的 RPC server（如果有）
     multiConnectService.stopRpcServer(modelId);
-    await stopServiceRegistration(port, embedding);
+    await stopServiceRegistration(port, getModelSubtype(model));
 
     return { status: MODEL_STATUS.STOPPED };
   }

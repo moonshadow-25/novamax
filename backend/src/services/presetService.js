@@ -8,6 +8,7 @@ import modelManager from './modelManager.js';
 import parameterService from './parameterService.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
+import { getModelSubtype } from '../utils/modelTypeHelper.js';
 
 class PresetService {
   constructor() {
@@ -62,7 +63,6 @@ class PresetService {
       lines.push('parallel = 1');
       lines.push('batch = 512');
       lines.push('ubatch = 512');
-      lines.push('flash-attn = auto');
       lines.push('');
       lines.push('; 采样参数');
       lines.push('temperature = 0.8');
@@ -144,16 +144,32 @@ class PresetService {
       // 自定义参数（所有其他非标准参数）
       const standardKeys = ['context_length', 'port', 'parallel',
                             'temperature', 'top_p', 'top_k', 'repeat_penalty', 'reasoning'];
+      // 内部分类标志，不作为 llama.cpp 运行时参数输出
+      const internalFlags = new Set(['embedding', 'reranker']);
       Object.entries(params).forEach(([key, value]) => {
-        if (!standardKeys.includes(key) && !DEPRECATED_LLM_PARAMS.has(key)) {
+        if (!standardKeys.includes(key) && !DEPRECATED_LLM_PARAMS.has(key) && !internalFlags.has(key)) {
           // load-mode=nommap → no-mmap=true（兼容老版本 llama.cpp INI 格式）
           if (key === 'load-mode' && value === 'nommap') {
             lines.push('no-mmap = true');
             return;
           }
+          // jinja on/off → jinja = true/false（INI 布尔值）
+          if (key === 'jinja') {
+            lines.push(`jinja = ${value === 'on' ? 'true' : 'false'}`);
+            return;
+          }
           lines.push(`${key} = ${value}`);
         }
       });
+
+      // 子类型专属参数：embedding → embedding=true；reranker → rerank=true + pooling=rank
+      const subtype = getModelSubtype(model);
+      if (subtype === 'embedding') {
+        lines.push('embedding = true');
+      } else if (subtype === 'reranker') {
+        lines.push('rerank = true');
+        lines.push('pooling = rank');
+      }
 
       // 默认不自动加载（按需加载）
       lines.push('load-on-startup = false');

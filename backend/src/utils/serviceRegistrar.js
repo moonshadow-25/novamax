@@ -153,22 +153,34 @@ export function registerEmbeddingsService(port, maxConcurrent = 1) {
   ], 'embedding');
 }
 
+/** 注册 Rerank 端点（/v1/rerank + /v1/models） */
+export function registerRerankService(port, maxConcurrent = 1) {
+  return registerEndpoints(port, [
+    { nodePath: '/v1/rerank', maxConcurrent },
+    { nodePath: '/v1/models', maxConcurrent: 100 },
+  ], 'rerank');
+}
+
 /** 返回当前所有已注册服务的快照列表 */
 export function getRegisteredServices() {
   return Array.from(registeredServices.values());
 }
 
 /**
- * 确保指定端口+类型已注册；若本地缓存缺失则自动补注册。
+ * 确保指定端口+子类型已注册；若本地缓存缺失则自动补注册。
+ * @param {number} port
+ * @param {'chat'|'embedding'|'reranker'} subtype
  */
-export async function ensureServiceRegistration(port, isEmbedding = false) {
-  const cacheKey = isEmbedding ? 'embedding' : 'chat';
-  const key = `${port}:${cacheKey}`;
+export async function ensureServiceRegistration(port, subtype = 'chat') {
+  const key = `${port}:${subtype}`;
   if (registeredServices.has(key)) {
     return registeredServices.get(key);
   }
-  if (isEmbedding) {
+  if (subtype === 'embedding') {
     return registerEmbeddingsService(port);
+  }
+  if (subtype === 'reranker') {
+    return registerRerankService(port);
   }
   return registerChatCompletionService(port);
 }
@@ -183,11 +195,12 @@ async function deregisterEndpoint(serviceId) {
 }
 
 /**
- * 停止指定端口+类型的服务注册。
+ * 停止指定端口+子类型的服务注册。
+ * @param {number} port
+ * @param {'chat'|'embedding'|'reranker'} subtype
  */
-export async function stopServiceRegistration(port, isEmbedding = false) {
-  const cacheKey = isEmbedding ? 'embedding' : 'chat';
-  const key = `${port}:${cacheKey}`;
+export async function stopServiceRegistration(port, subtype = 'chat') {
+  const key = `${port}:${subtype}`;
   const info = registeredServices.get(key);
   if (!info) return false;
   if (info.heartbeatTimer) clearInterval(info.heartbeatTimer);

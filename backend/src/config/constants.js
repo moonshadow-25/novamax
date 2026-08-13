@@ -117,6 +117,8 @@ export const DEFAULT_LLM_PARAMETERS = {
   parallel: 1,
   'load-mode': 'nommap',
   'n-gpu-layers': 100,
+  'flash-attn': 'auto',
+  jinja: 'on',
   temperature: 0.8,
   top_p: 0.9,
   top_k: 40,

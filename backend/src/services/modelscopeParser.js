@@ -5,7 +5,7 @@
 
 import axios from 'axios';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
-import { EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
+import { EMBEDDING_PATTERN, RERANKER_PATTERN, MODEL_SUBTYPE_PORTS } from '../utils/modelTypeHelper.js';
 import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 // 量化类型元数据
@@ -545,7 +545,11 @@ class ModelscopeParser {
 
         parameters: {
           ...DEFAULT_LLM_PARAMETERS,
-          port: EMBEDDING_PATTERN.test(baseConfig.name) || EMBEDDING_PATTERN.test(modelId) ? 1278 : DEFAULT_LLM_PARAMETERS.port
+          port: RERANKER_PATTERN.test(baseConfig.name) || RERANKER_PATTERN.test(modelId)
+            ? MODEL_SUBTYPE_PORTS.reranker
+            : EMBEDDING_PATTERN.test(baseConfig.name) || EMBEDDING_PATTERN.test(modelId)
+              ? MODEL_SUBTYPE_PORTS.embedding
+              : DEFAULT_LLM_PARAMETERS.port
         },
 
         user_parameters: null,

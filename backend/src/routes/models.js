@@ -14,7 +14,7 @@ import { getModelPath } from '../utils/pathHelper.js';
 import { checkActiveFileIntegrity, calcPartFileProgress } from '../utils/fileIntegrity.js';
 import remoteConfigService from '../services/remoteConfigService.js';
 import modelscopeParser from '../services/modelscopeParser.js';
-import { isEmbeddingModelData, EMBEDDING_PATTERN } from '../utils/modelTypeHelper.js';
+import { EMBEDDING_PATTERN, RERANKER_PATTERN, MODEL_SUBTYPE_PORTS, getModelSubtype } from '../utils/modelTypeHelper.js';
 import { isAuxiliaryLlmFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 const router = express.Router();
@@ -235,7 +235,11 @@ router.post('/models/custom', async (req, res) => {
       files: { model: downloaded_files[0], mmproj: null, dflash: null },
       parameters: {
         ...DEFAULT_LLM_PARAMETERS,
-        port: EMBEDDING_PATTERN.test(trimmedName) ? 1278 : DEFAULT_LLM_PARAMETERS.port
+        port: RERANKER_PATTERN.test(trimmedName)
+          ? MODEL_SUBTYPE_PORTS.reranker
+          : EMBEDDING_PATTERN.test(trimmedName)
+            ? MODEL_SUBTYPE_PORTS.embedding
+            : DEFAULT_LLM_PARAMETERS.port
       },
       user_parameters: null,
       user_parameters_version: null
@@ -449,16 +453,14 @@ router.put('/models/:id', async (req, res) => {
 
     // 开启自动启动时检查端口是否已被其他模型占用
     if (updates.auto_start === true) {
-      const isEmbedding = isEmbeddingModelData(currentModel);
       const currentParams = parameterService.getEffectiveParameters(currentModel);
-      const currentPort = currentParams.port || (isEmbedding ? 1278 : 1234);
+      const currentPort = currentParams.port || MODEL_SUBTYPE_PORTS[getModelSubtype(currentModel)];
 
       const conflictModel = modelManager.getAll().find(m => {
         if (m.id === req.params.id || !m.auto_start) return false;
         if (m.type !== 'llm') return false;
-        const isEmb = isEmbeddingModelData(m);
         const p = parameterService.getEffectiveParameters(m);
-        return (p.port || (isEmb ? 1278 : 1234)) === currentPort;
+        return (p.port || MODEL_SUBTYPE_PORTS[getModelSubtype(m)]) === currentPort;
       });
 
       if (conflictModel) {

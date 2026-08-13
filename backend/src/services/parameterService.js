@@ -274,18 +274,32 @@ class ParameterService {
       },
       'load-mode': {
         type: 'string',
-        label: 'load-mode',
-        description: '模型加载模式，替代已弃用的 --no-mmap',
+        label: '模型加载模式',
+        description: '模型加载模式：nommap=禁用内存映射(默认，兼容老版本)，auto=自动，none=无特殊模式，mmap=内存映射，mlock=强制驻留内存，mmap+mlock=映射+驻留，dio=DirectIO',
         default: 'nommap',
-        options: ['nommap', 'mmap', 'none', 'mlock', 'mmap+mlock']
+        options: ['nommap', 'auto', 'none', 'mmap', 'mlock', 'mmap+mlock', 'dio']
       },
       'n-gpu-layers': {
         type: 'number',
-        label: 'n-gpu-layers',
+        label: 'GPU 层数',
         description: '加载到 GPU 的层数',
         min: -1,
         max: 9999,
         default: 100
+      },
+      'flash-attn': {
+        type: 'string',
+        label: 'Flash Attention',
+        description: 'Flash Attention 加速注意力计算（on/off/auto，默认 auto）',
+        default: 'auto',
+        options: ['on', 'off', 'auto']
+      },
+      jinja: {
+        type: 'string',
+        label: 'Jinja 模板',
+        description: '是否使用 Jinja 模板引擎渲染聊天模板（默认开启）',
+        default: 'on',
+        options: ['on', 'off']
       },
 
       // 采样参数

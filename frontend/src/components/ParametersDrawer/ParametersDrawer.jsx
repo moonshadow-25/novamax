@@ -183,6 +183,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       const standardKeys = isCloudApi
         ? ['port']
         : ['context_length', 'port', 'parallel', 'load-mode', 'n-gpu-layers',
+           'flash-attn', 'jinja',
            'temperature', 'top_p', 'top_k',
            'repeat_penalty', 'version', 'reasoning', 'rpc_enable', 'rpc_devices'];
 
@@ -199,14 +200,18 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
         }
       });
 
-      // 如果 port 没有值，或 Embedding 模型使用了非 Embedding 默认端口，填入正确默认值
+      // 如果 port 没有值，或模型类型与默认端口不匹配，填入正确默认值
       const EMBEDDING_PATTERN = /(?:embedding|embed|sentence[-_ ]?transformer|text2vec|semantic|vector|dpr|contriever|simcse|sbert)/i;
+      const RERANKER_PATTERN = /(?:rerank|re-rank|cross[-_ ]?encoder|bge-?reranker|jina-?reranker|colbert)/i;
+      const hasRerankerFlag = model?.reranker === true || model?.parameters?.reranker === true;
+      const hasRerankerKeyword = RERANKER_PATTERN.test(model?.name || model?.id || '');
+      const isReranker = hasRerankerFlag || hasRerankerKeyword;
       const hasEmbeddingFlag = model?.embedding === true || model?.parameters?.embedding === true;
       const hasEmbeddingKeyword = EMBEDDING_PATTERN.test(model?.name || model?.id || '');
-      const isEmbedding = hasEmbeddingFlag || hasEmbeddingKeyword;
-      const DEFAULT_PORT = isEmbedding ? 1278 : 1234;
-      if (formValues.port === undefined || (isEmbedding && formValues.port === 1234)) {
-        formValues.port = DEFAULT_PORT;
+      const isEmbedding = !isReranker && (hasEmbeddingFlag || hasEmbeddingKeyword);
+      const DEFAULT_PORT = isReranker ? 1245 : isEmbedding ? 1278 : 1234;
+      if (formValues.port === undefined || formValues.port === 1234) {
+        if (isReranker || isEmbedding) formValues.port = DEFAULT_PORT;
       }
 
       setCustomParams(isCloudApi ? [] : custom);
@@ -244,6 +249,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
       const standardKeys = isCloudApi
         ? ['port']
         : ['context_length', 'port', 'parallel', 'load-mode', 'n-gpu-layers',
+           'flash-attn', 'jinja',
            'temperature', 'top_p', 'top_k',
            'repeat_penalty', 'reasoning'];
       // 合并标准参数（从 form 获取，如果没有则从当前 parameters 获取）
@@ -393,7 +399,7 @@ function ParametersDrawer({ visible, modelId, model, onClose }) {
 
   const runtimeKeys = isCloudApi
     ? ['port']
-    : ['context_length', 'parallel', 'load-mode', 'n-gpu-layers', 'port'];
+    : ['port', 'context_length', 'parallel', 'load-mode', 'n-gpu-layers', 'flash-attn', 'jinja'];
 
   const samplingKeys = isCloudApi
     ? []

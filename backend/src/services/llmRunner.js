@@ -4,6 +4,7 @@ import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS, DEP
 import presetService from './presetService.js';
 import parameterService from './parameterService.js';
 import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
+import { getModelSubtype } from '../utils/modelTypeHelper.js';
 
 /**
  * 生成 llama-server 路由模式启动命令
@@ -96,6 +97,12 @@ export function generateSingleModelCommand(model, port, options = {}) {
       continue;
     }
 
+    // jinja on/off → --jinja / --no-jinja
+    if (key === 'jinja') {
+      args.push(value === 'on' ? '--jinja' : '--no-jinja');
+      continue;
+    }
+
     // 布尔标志处理
     if (typeof value === 'boolean') {
       if (value === true) {
@@ -118,6 +125,8 @@ export function generateSingleModelCommand(model, port, options = {}) {
       key === 'version' ||
       key === 'rpc_enable' ||
       key === 'rpc_devices' ||
+      key === 'embedding' ||      // 内部分类标志，由下方 --embedding 显式处理
+      key === 'reranker' ||       // 内部分类标志，由下方 --rerank 显式处理
       defaults.hasOwnProperty(key) ||
       samplingParams.includes(key) ||
       DEPRECATED_LLM_PARAMS.has(key)
@@ -155,6 +164,15 @@ export function generateSingleModelCommand(model, port, options = {}) {
   const dflashPath = _findDflashFile(model.local_path);
   if (dflashPath) {
     args.push('--spec-draft-model', dflashPath);
+  }
+
+  // 子类型专属参数：embedding → --embedding；reranker → --rerank + --pooling rank
+  const subtype = getModelSubtype(model);
+  if (subtype === 'embedding') {
+    args.push('--embedding');
+  } else if (subtype === 'reranker') {
+    args.push('--rerank');
+    args.push('--pooling', 'rank');
   }
 
   // RPC 多机互联：如果传入了 rpcArg，附加 --rpc 参数
