@@ -433,8 +433,28 @@ class CommonDownloader {
         responseType: 'stream',
         timeout: 30000,
         headers,
-        signal: abortSignal || undefined
+        signal: abortSignal || undefined,
+        validateStatus: () => true // 显式处理 200/206/416，避免 axios 默认抛非 2xx
       });
+
+      // 416 Range Not Satisfiable：.part 已完整（Range 起点 >= 文件末尾），直接 rename 完成
+      if (response.status === 416) {
+        response.data?.destroy?.();
+        if (fs.existsSync(tempPath) && fs.statSync(tempPath).size > 0) {
+          fs.renameSync(tempPath, targetPath);
+          console.log(`  ✅ 文件已完整（416），续传完成`);
+          return true;
+        }
+        console.log('  416 但无 .part 文件，视为下载失败');
+        return false;
+      }
+
+      // 其它非 2xx（404/403/500 等）视为该源失败
+      if (response.status < 200 || response.status >= 300) {
+        response.data?.destroy?.();
+        console.log(`  HTTP 下载失败: 状态码 ${response.status}`);
+        return false;
+      }
 
       // 服务器返回 206 表示支持 Range，否则从头下载
       const isResume = response.status === 206 && resumeBytes > 0;

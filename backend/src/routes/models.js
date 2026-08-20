@@ -492,7 +492,8 @@ router.put('/models/:id', async (req, res) => {
             updates.files = {
               model: selectedQuant.file,
               mmproj: pickAuxiliaryFile(model.mmproj_options, model.selected_mmproj),
-              dflash: pickAuxiliaryFile(model.dflash_options, model.selected_dflash)
+              dflash: pickAuxiliaryFile(model.dflash_options, model.selected_dflash),
+              dspark: pickAuxiliaryFile(model.dspark_options, model.selected_dspark)
             };
             console.log('📂 更新 files 字段:', updates.files.model?.name || updates.files.model);
           } else {
@@ -771,18 +772,21 @@ router.post('/models/:id/refresh-remote', async (req, res) => {
     const quantizations = modelscopeParser.generateQuantizations(files, model.modelscope_id, model.filter_folder || null);
     const mmprojOptions = modelscopeParser.generateMmprojOptions(files, model.modelscope_id);
     const dflashOptions = modelscopeParser.generateDflashOptions(files, model.modelscope_id);
+    const dsparkOptions = modelscopeParser.generateDsparkOptions(files, model.modelscope_id);
 
     const selectedQuant = quantizations.find(q => q.name === model.selected_quantization) || quantizations.find(q => q.recommended) || quantizations[0];
     const filesField = selectedQuant && !selectedQuant.is_folder ? {
       model: selectedQuant.file,
       mmproj: pickAuxiliaryFile(mmprojOptions, model.files?.mmproj?.name),
-      dflash: pickAuxiliaryFile(dflashOptions, model.files?.dflash?.name)
+      dflash: pickAuxiliaryFile(dflashOptions, model.files?.dflash?.name),
+      dspark: pickAuxiliaryFile(dsparkOptions, model.files?.dspark?.name)
     } : model.files;
 
     await modelManager.update(model.id, {
       quantizations,
       mmproj_options: mmprojOptions,
       dflash_options: dflashOptions,
+      dspark_options: dsparkOptions,
       files: filesField,
       modelscope_refreshed: true
     });

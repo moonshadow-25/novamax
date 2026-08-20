@@ -393,6 +393,14 @@ class LlmDownloader extends EventEmitter {
       }
     };
 
+    const addDspark = () => {
+      const chosen = model.dspark_options?.[0] || model.files?.dspark || null;
+      if (chosen?.download_url) {
+        files.push({ name: chosen.name, url: chosen.download_url, size: chosen.size || 0, sha256: chosen.sha256 || null });
+        console.log(`添加 DSpark 文件: ${chosen.name}`);
+      }
+    };
+
     if (targetQuantization) {
       const quantInfo = model.quantizations?.find(q => q.name === targetQuantization);
       if (quantInfo?.is_folder && quantInfo.folder_files?.length > 0) {
@@ -408,6 +416,7 @@ class LlmDownloader extends EventEmitter {
       }
       addMmproj();
       addDflash();
+      addDspark();
     } else if (model.files?.model?.download_url) {
       files.push({ name: model.files.model.name, url: model.files.model.download_url, size: model.files.model.size, sha256: model.files.model.sha256 || null });
       if (model.files.mmproj?.download_url) {
@@ -415,6 +424,9 @@ class LlmDownloader extends EventEmitter {
       }
       if (model.files.dflash?.download_url) {
         files.push({ name: model.files.dflash.name, url: model.files.dflash.download_url, size: model.files.dflash.size, sha256: model.files.dflash.sha256 || null });
+      }
+      if (model.files.dspark?.download_url) {
+        files.push({ name: model.files.dspark.name, url: model.files.dspark.download_url, size: model.files.dspark.size, sha256: model.files.dspark.sha256 || null });
       }
     }
 
@@ -486,13 +498,21 @@ class LlmDownloader extends EventEmitter {
       signal: downloadState.controller?.signal,
       timeout: 60000,
       maxRedirects: 10,
+      validateStatus: () => true, // 显式处理 200/206/416，避免 axios 默认抛非 2xx
     });
 
     if (response.status === 416) {
-      // Range Not Satisfiable：文件已完整
+      // Range Not Satisfiable：.part 已完整（Range 起点 >= 文件末尾），rename 完成
+      response.data?.destroy?.();
       if (fs.existsSync(partPath)) fs.renameSync(partPath, finalPath);
       console.log(`✓ 文件已完整（416）: ${fileInfo.name}`);
-      return { sha256: null, wasResumed: false, skipped: false };
+      return { sha256: null, wasResumed: true, skipped: false };
+    }
+
+    // 其它非 2xx（404/403/500 等）视为下载失败
+    if (response.status < 200 || response.status >= 300) {
+      response.data?.destroy?.();
+      throw new Error(`下载失败: HTTP ${response.status} (${fileInfo.name})`);
     }
 
     // 全新下载且有期望 sha256 时，边下边算——零额外读盘开销

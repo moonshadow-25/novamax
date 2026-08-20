@@ -6,7 +6,7 @@
 import axios from 'axios';
 import { DEFAULT_LLM_PARAMETERS } from '../config/constants.js';
 import { EMBEDDING_PATTERN, RERANKER_PATTERN, MODEL_SUBTYPE_PORTS } from '../utils/modelTypeHelper.js';
-import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
+import { isAuxiliaryLlmFile, isDflashFile, isDsparkFile, isMmprojFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 // 量化类型元数据
 const QUANTIZATION_INFO = {
@@ -419,7 +419,7 @@ class ModelscopeParser {
           name: file.Name,
           size: fileSize,
           sha256: file.Sha256,
-          download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
+          download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Path || file.Name}`
         }
       });
     }
@@ -458,7 +458,7 @@ class ModelscopeParser {
       name: file.Name,
       size: this.getFileSize(file),
       sha256: file.Sha256,
-      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
+      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Path || file.Name}`
     }));
   }
 
@@ -472,7 +472,21 @@ class ModelscopeParser {
       name: file.Name,
       size: this.getFileSize(file),
       sha256: file.Sha256,
-      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Name}`
+      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Path || file.Name}`
+    }));
+  }
+
+  generateDsparkOptions(files, modelId) {
+    const dsparkFiles = files.filter(f =>
+      f.Type === 'blob' &&
+      isDsparkFile(f.Name)
+    );
+
+    return dsparkFiles.map(file => ({
+      name: file.Name,
+      size: this.getFileSize(file),
+      sha256: file.Sha256,
+      download_url: `https://www.modelscope.cn/models/${modelId}/resolve/master/${file.Path || file.Name}`
     }));
   }
 
@@ -505,6 +519,7 @@ class ModelscopeParser {
       const quantizations = this.generateQuantizations(files, modelId, filterFolder);
       const mmprojOptions = this.generateMmprojOptions(files, modelId);
       const dflashOptions = this.generateDflashOptions(files, modelId);
+      const dsparkOptions = this.generateDsparkOptions(files, modelId);
 
       // 验证是否有量化版本
       if (quantizations.length === 0) {
@@ -516,6 +531,7 @@ class ModelscopeParser {
 
       const defaultMmproj = pickAuxiliaryFile(mmprojOptions);
       const defaultDflash = pickAuxiliaryFile(dflashOptions);
+      const defaultDspark = pickAuxiliaryFile(dsparkOptions);
 
       return {
         ...baseConfig,
@@ -529,12 +545,15 @@ class ModelscopeParser {
         selected_mmproj: defaultMmproj?.name || null,
         dflash_options: dflashOptions,
         selected_dflash: defaultDflash?.name || null,
+        dspark_options: dsparkOptions,
+        selected_dspark: defaultDspark?.name || null,
 
         // 向后兼容：保留 files 字段（指向当前选择的量化版本）
         files: defaultQuant && !defaultQuant.is_folder ? {
           model: defaultQuant.file,
           mmproj: defaultMmproj,
-          dflash: defaultDflash
+          dflash: defaultDflash,
+          dspark: defaultDspark
         } : null,
 
         capabilities: {

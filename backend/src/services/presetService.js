@@ -7,7 +7,7 @@ import { PRESETS_DIR, MODELS_RUN_DIR, MODEL_TYPES, DEPRECATED_LLM_PARAMS } from 
 import modelManager from './modelManager.js';
 import parameterService from './parameterService.js';
 import { getModelPath } from '../utils/pathHelper.js';
-import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
+import { isAuxiliaryLlmFile, isDflashFile, isDsparkFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
 import { getModelSubtype } from '../utils/modelTypeHelper.js';
 
 class PresetService {
@@ -104,6 +104,13 @@ class PresetService {
         const dflashPath = this._getDflashPath(model);
         if (dflashPath) {
           lines.push(`spec-draft-model = ${dflashPath}`);
+        }
+      }
+
+      if (model.files?.dspark) {
+        const dsparkPath = this._getDsparkPath(model);
+        if (dsparkPath) {
+          lines.push(`spec-draft-model = ${dsparkPath}`);
         }
       }
 
@@ -234,6 +241,11 @@ class PresetService {
   _getDflashPath(model) {
     const modelDir = getModelPath(MODELS_RUN_DIR, model);
     return findAuxiliaryFilePath(modelDir, isDflashFile);
+  }
+
+  _getDsparkPath(model) {
+    const modelDir = getModelPath(MODELS_RUN_DIR, model);
+    return findAuxiliaryFilePath(modelDir, isDsparkFile);
   }
 
   /**

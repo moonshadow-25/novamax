@@ -27,7 +27,7 @@ const USER_FIELDS = [
 const REMOTE_FIELDS = [
   'name', 'description', 'modelscope_id', 'quantizations',
   'required_models', 'workflow', 'parameter_mapping', 'default_parameters',
-  'mmproj_options', 'selected_mmproj', 'dflash_options', 'selected_dflash', 'capabilities',
+  'mmproj_options', 'selected_mmproj', 'dflash_options', 'selected_dflash', 'dspark_options', 'selected_dspark', 'capabilities',
   'models', 'config', 'backend', 'model_type',
   'engine_id', 'engine_version'
 ];
@@ -157,7 +157,7 @@ async function syncModels() {
             const skipFileFields = !!existing.modelscope_refreshed;
             const refresh = {};
             REMOTE_FIELDS.forEach(f => {
-              if (skipFileFields && (f === 'quantizations' || f === 'mmproj_options' || f === 'dflash_options')) return;
+              if (skipFileFields && (f === 'quantizations' || f === 'mmproj_options' || f === 'dflash_options' || f === 'dspark_options')) return;
               if (remoteFields[f] !== undefined) refresh[f] = remoteFields[f];
             });
             const localRefresh = mapRemoteToLocal(refresh);

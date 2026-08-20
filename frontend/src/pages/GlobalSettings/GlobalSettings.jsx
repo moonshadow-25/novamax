@@ -813,7 +813,7 @@ const GlobalSettings = () => {
 
   const REMOTE_FIELDS = ['name', 'description', 'modelscope_id', 'quantizations',
     'required_models', 'workflow', 'parameter_mapping', 'mmproj_options', 'selected_mmproj',
-    'dflash_options', 'selected_dflash', 'files', 'capabilities'];
+    'dflash_options', 'selected_dflash', 'dspark_options', 'selected_dspark', 'files', 'capabilities'];
 
   const buildExportJson = () => {
     const filtered = exportModels.filter(m => exportTypes.includes(m.type));

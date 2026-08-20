@@ -11,8 +11,13 @@ export function isDflashFile(name = '') {
   return lowerName.endsWith('.gguf') && lowerName.includes('dflash');
 }
 
+export function isDsparkFile(name = '') {
+  const lowerName = name.toLowerCase();
+  return lowerName.endsWith('.gguf') && lowerName.includes('dspark');
+}
+
 export function isAuxiliaryLlmFile(name = '') {
-  return isMmprojFile(name) || isDflashFile(name);
+  return isMmprojFile(name) || isDflashFile(name) || isDsparkFile(name);
 }
 
 export function pickAuxiliaryFile(options = [], selectedName = null) {

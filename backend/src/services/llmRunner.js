@@ -3,7 +3,7 @@ import fs from 'fs';
 import { MODELS_RUN_DIR, PRESETS_DIR, DEFAULT_PORTS, DEFAULT_LLM_PARAMETERS, DEPRECATED_LLM_PARAMS } from '../config/constants.js';
 import presetService from './presetService.js';
 import parameterService from './parameterService.js';
-import { isAuxiliaryLlmFile, isDflashFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
+import { isAuxiliaryLlmFile, isDflashFile, isDsparkFile, isMmprojFile, findAuxiliaryFilePath } from '../utils/llmFileHelper.js';
 import { getModelSubtype } from '../utils/modelTypeHelper.js';
 
 /**
@@ -166,6 +166,11 @@ export function generateSingleModelCommand(model, port, options = {}) {
     args.push('--spec-draft-model', dflashPath);
   }
 
+  const dsparkPath = _findDsparkFile(model.local_path);
+  if (dsparkPath) {
+    args.push('--spec-draft-model', dsparkPath);
+  }
+
   // 子类型专属参数：embedding → --embedding；reranker → --rerank + --pooling rank
   const subtype = getModelSubtype(model);
   if (subtype === 'embedding') {
@@ -232,6 +237,10 @@ function _findMmprojFile(localPath) {
 
 function _findDflashFile(localPath) {
   return findAuxiliaryFilePath(localPath, isDflashFile);
+}
+
+function _findDsparkFile(localPath) {
+  return findAuxiliaryFilePath(localPath, isDsparkFile);
 }
 
 /**
