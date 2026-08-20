@@ -165,7 +165,9 @@
     "uninstallConfirmDesc": "Uninstall version {{version}}?",
     "installedAt": "Installed at: {{time}}",
     "path": "Path: {{path}}",
-    "size": "Size: {{size}}"
+    "size": "Size: {{size}}",
+    "incompatible": "Incompatible",
+    "incompatibleWithGpu": "Incompatible with current GPU"
   },
   "export": {
     "copied": "Copied to clipboard",

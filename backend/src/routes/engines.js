@@ -53,8 +53,9 @@ function getLlamacppVariantPriority(gpus) {
   if (!primaryGpu) return ['vulkan', 'other'];
 
   const backend = recommendGpuBackend(primaryGpu, 'llamacpp');
-  if (backend === 'rocm') return ['rocm', 'cuda', 'vulkan', 'other'];
-  if (backend === 'cuda') return ['cuda', 'vulkan', 'other'];
+  // 不兼容的 GPU 后端排到最后（AMD 不可用 CUDA，NVIDIA 不可用 ROCm）
+  if (backend === 'rocm') return ['rocm', 'vulkan', 'other', 'cuda'];
+  if (backend === 'cuda') return ['cuda', 'vulkan', 'other', 'rocm'];
 
   return ['vulkan', 'other'];
 }
@@ -77,19 +78,42 @@ function orderLlamacppEngine(engine, gpus) {
 }
 
 /**
- * 给 llama.cpp variants 标注 recommended（第一个 = 最优）
+ * 根据 GPU 厂商返回不可用的 GPU 后端列表
+ * CUDA 仅 NVIDIA 可用，ROCm 仅 AMD 可用
+ * @param {string|null} vendor
+ * @returns {string[]}
+ */
+function getIncompatibleBackends(vendor) {
+  if (vendor === 'nvidia') return ['rocm'];
+  if (vendor === 'amd') return ['cuda'];
+  if (vendor === 'intel') return ['cuda', 'rocm'];
+  return [];
+}
+
+/**
+ * 给 llama.cpp variants 标注 recommended（第一个 = 最优）与 incompatible（与当前 GPU 不兼容）
  */
 function annotateLlamacppRecommendations(engine, gpus) {
   if (!engine?.variants) return engine;
   const primaryGpu = (Array.isArray(gpus) ? gpus : [])
     .find(g => g?.vendor && g.vendor !== 'unknown') || null;
   const backend = primaryGpu ? recommendGpuBackend(primaryGpu, 'llamacpp') : null;
+  const incompatibleSet = primaryGpu
+    ? new Set(getIncompatibleBackends(primaryGpu.vendor))
+    : new Set();
 
   const variants = engine.variants.map((v, i) => ({
     ...v,
     recommended: i === 0 || (backend && v.id === backend),
+    incompatible: incompatibleSet.has(v.gpu_backend),
   }));
-  return { ...engine, variants };
+
+  return {
+    ...engine,
+    variants,
+    // llama.cpp 的 GPU 后端互斥：前端 banner 只提示已安装或推荐的后端
+    variant_mode: 'single',
+  };
 }
 
 /**
@@ -259,10 +283,12 @@ router.get('/engines/:id/check', async (req, res) => {
 
     const installed = engineManager.isInstalled(id);
     const defaultVersion = engineManager.getDefaultVersion(id);
+    // 应用 GPU 排序/推荐标注，让下载弹窗默认选择正确的 variant（如 NVIDIA→cuda、AMD→rocm）
+    const orderedEngine = await getOrderedEngine(id, engine);
 
     res.json({
       installed,
-      engineInfo: engine,
+      engineInfo: orderedEngine,
       default_version: defaultVersion
     });
   } catch (error) {

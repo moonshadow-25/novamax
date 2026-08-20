@@ -322,6 +322,10 @@ function Home() {
     const loadEngines = () => engineService.getAll().then(engines => setAllEngines(engines)).catch(() => {});
     loadEngines();
 
+    // 定时刷新引擎列表，确保 banner 能感知远程发布的新版本
+    // （仅刷新引擎元数据，开销小；SSE 事件也会触发即时刷新）
+    const enginesTimer = setInterval(loadEngines, 30000);
+
     // SSE 监听引擎下载状态变化，实时更新 banner（500ms 去抖，避免事件风暴）
     let engineDebounce;
     const es = new EventSource('/api/events');
@@ -329,7 +333,12 @@ function Home() {
       clearTimeout(engineDebounce);
       engineDebounce = setTimeout(loadEngines, 500);
     });
-    return () => { clearTimeout(engineDebounce); es.close(); };
+    // 后台定时同步发现远端引擎定义变化时，立即刷新引擎列表
+    es.addEventListener('engines-updated', () => {
+      clearTimeout(engineDebounce);
+      engineDebounce = setTimeout(loadEngines, 500);
+    });
+    return () => { clearTimeout(engineDebounce); clearInterval(enginesTimer); es.close(); };
   }, []);
 
   // 加载 ComfyUI 实例列表

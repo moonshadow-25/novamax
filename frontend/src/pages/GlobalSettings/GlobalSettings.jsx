@@ -985,6 +985,7 @@ const GlobalSettings = () => {
       !engine.installed_versions?.some(v => v.version === latestVersion.version);
 
     const engineApiId = engine.engine_api_id || engine.id;
+    const incompatible = !!engine.variants?.[0]?.incompatible;
 
     return (
       <List.Item
@@ -1009,14 +1010,23 @@ const GlobalSettings = () => {
                   </Space>
                 )
               ) : (
-                <Button type="primary" icon={<DownloadOutlined />} onClick={() => handleDownloadEngine(engineApiId, latestVersion?.version)}>{t('engines.download')}</Button>
+                <Tooltip title={incompatible ? t('engines.incompatibleWithGpu') : undefined}>
+                  <Button
+                    type="primary"
+                    icon={<DownloadOutlined />}
+                    disabled={incompatible}
+                    onClick={() => handleDownloadEngine(engineApiId, latestVersion?.version)}
+                  >
+                    {t('engines.download')}
+                  </Button>
+                </Tooltip>
               )}
             </Space>
           )
         ]}
       >
         <List.Item.Meta
-          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.variants?.[0]?.recommended && <Tag color="green" style={{ fontSize: 10 }}>推荐</Tag>}{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>{engine.default_version}</Tag>}</Space>}
+          title={<Space><span style={{ fontSize: 12 }}>{engine.name}</span>{engine.variants?.[0]?.recommended && <Tag color="green" style={{ fontSize: 10 }}>推荐</Tag>}{incompatible && <Tag color="default" style={{ fontSize: 10 }}>{t('engines.incompatible')}</Tag>}{engine.default_version && <Tag color="blue" style={{ fontSize: 11 }}>{engine.default_version}</Tag>}</Space>}
           description={
             <div>
               {latestVersion && (
@@ -1887,6 +1897,7 @@ const GlobalSettings = () => {
     const availableVariantGroups = getVersionVariantGroups(selectedEngine, availableVersions);
     const latestInstalledVersion = getLatestInstalledVersion(selectedEngine);
     const allDownloadStates = selectedEngine?.download_states || (selectedEngine?.download_state ? [selectedEngine.download_state] : []);
+    const incompatible = !!selectedEngine?.variants?.[0]?.incompatible;
 
     const renderInstalledVersionItem = (version) => (
       <List.Item
@@ -1964,16 +1975,19 @@ const GlobalSettings = () => {
             ) : isInstalled ? (
               <Tag color="success">{t('engines.installed')}</Tag>
             ) : (
-              <Button
-                type="primary"
-                size="small"
-                icon={<DownloadOutlined />}
-                onClick={() => {
-                  handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
-                }}
-              >
-                {t('engines.download')}
-              </Button>
+              <Tooltip title={incompatible ? t('engines.incompatibleWithGpu') : undefined}>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  disabled={incompatible}
+                  onClick={() => {
+                    handleDownloadEngine(selectedEngine.engine_api_id || selectedEngine.id, version.version);
+                  }}
+                >
+                  {t('engines.download')}
+                </Button>
+              </Tooltip>
             )
           ]}
         >

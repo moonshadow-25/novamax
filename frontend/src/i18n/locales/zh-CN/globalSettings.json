@@ -165,7 +165,9 @@
     "uninstallConfirmDesc": "确定要卸载版本 {{version}} 吗？",
     "installedAt": "安装时间: {{time}}",
     "path": "路径: {{path}}",
-    "size": "大小: {{size}}"
+    "size": "大小: {{size}}",
+    "incompatible": "不兼容",
+    "incompatibleWithGpu": "与当前 GPU 不兼容"
   },
   "export": {
     "copied": "已复制到剪贴板",

@@ -166,6 +166,9 @@ async function init() {
       console.warn('[update] 自动更新失败:', err.message);
     }
   }).catch(err => console.warn('[remoteConfig] 启动同步失败:', err.message));
+
+  // 启动定时同步：周期性拉取远端 models.json / engines.json，引擎变化时广播 SSE 事件
+  remoteConfigService.startPeriodicSync();
 }
 
 app.use('/api', modelsRouter);

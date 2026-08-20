@@ -129,7 +129,7 @@ router.put('/config/update-settings', async (req, res) => {
 // 远程配置同步
 router.post('/remote-config/sync', async (req, res) => {
   try {
-    const result = await remoteConfigService.syncModels();
+    const result = await remoteConfigService.syncAll();
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(500).json({ error: error.message });
