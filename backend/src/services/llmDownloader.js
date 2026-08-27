@@ -11,7 +11,7 @@ import presetService from './presetService.js';
 import downloadStateManager from './downloadStateManager.js';
 import { getModelPath } from '../utils/pathHelper.js';
 import { isQuantizationIncomplete, checkActiveFileIntegrity } from '../utils/fileIntegrity.js';
-import { isAuxiliaryLlmFile } from '../utils/llmFileHelper.js';
+import { isAuxiliaryLlmFile, pickAuxiliaryFile } from '../utils/llmFileHelper.js';
 
 class LlmDownloader extends EventEmitter {
   constructor() {
@@ -386,7 +386,7 @@ class LlmDownloader extends EventEmitter {
     };
 
     const addDflash = () => {
-      const chosen = model.dflash_options?.[0] || model.files?.dflash || null;
+      const chosen = pickAuxiliaryFile(model.dflash_options, model.selected_dflash) || model.files?.dflash || null;
       if (chosen?.download_url) {
         files.push({ name: chosen.name, url: chosen.download_url, size: chosen.size || 0, sha256: chosen.sha256 || null });
         console.log(`添加 DFlash 文件: ${chosen.name}`);
@@ -394,7 +394,7 @@ class LlmDownloader extends EventEmitter {
     };
 
     const addDspark = () => {
-      const chosen = model.dspark_options?.[0] || model.files?.dspark || null;
+      const chosen = pickAuxiliaryFile(model.dspark_options, model.selected_dspark) || model.files?.dspark || null;
       if (chosen?.download_url) {
         files.push({ name: chosen.name, url: chosen.download_url, size: chosen.size || 0, sha256: chosen.sha256 || null });
         console.log(`添加 DSpark 文件: ${chosen.name}`);

@@ -198,13 +198,13 @@ class EngineDownloader {
    * 执行下载链（依赖 -> 主引擎）
    */
   async _runDownloadChain(tasks, runtimeId = null, runtimeTask = null) {
-    for (const taskInfo of tasks) {
-      await this._runSingleDownload(taskInfo, null, taskInfo.skipRuntimeDownload);
-    }
-
-    if (!runtimeTask) return;
-
     try {
+      for (const taskInfo of tasks) {
+        await this._runSingleDownload(taskInfo, null, taskInfo.skipRuntimeDownload);
+      }
+
+      if (!runtimeTask) return;
+
       await this._runSingleDownload(runtimeTask, null, false);
       const parent = runtimeTask.parentTask;
       await this._commitPreparedInstall(parent);
@@ -215,11 +215,17 @@ class EngineDownloader {
       eventBus.broadcast('download-progress', { engineId: parent.engineId, status: 'completed' });
     } catch (err) {
       const error = err?.message || '运行环境下载或安装失败';
-      const parent = runtimeTask.parentTask;
+      console.error(`[engineDownloader] 下载链失败: ${error}`);
+      const parent = runtimeTask?.parentTask || null;
+      // 清理未提交的 staging，避免残留半成品并防止后续误提交
       if (parent?._preparedInstall?.stagingPath) {
         await fsp.rm(parent._preparedInstall.stagingPath, { recursive: true, force: true }).catch(() => {});
+        delete parent._preparedInstall;
       }
-      downloadStateManager.setState(runtimeTask.taskId, 'failed', error, null);
+      if (runtimeTask) {
+        downloadStateManager.setState(runtimeTask.taskId, 'failed', error, null);
+        eventBus.broadcast('download-progress', { engineId: runtimeTask.taskId, status: 'failed', error });
+      }
       if (parent) {
         downloadStateManager.setState(parent.engineId, 'failed', error, parent.version);
         eventBus.broadcast('download-progress', { engineId: parent.engineId, status: 'failed', error });
@@ -241,7 +247,7 @@ class EngineDownloader {
           const sver = taskInfo.isRuntime ? null : taskInfo.version;
           downloadStateManager.setState(sid, 'failed', '依赖下载失败', sver);
           eventBus.broadcast('download-progress', { engineId: sid, status: 'failed', error: '依赖下载失败' });
-          return;
+          throw new Error('依赖下载失败');
         }
       }
 
@@ -281,7 +287,7 @@ class EngineDownloader {
           });
         }
         rejectLock(error);
-        return; // 依赖下载失败，中止整条链
+        throw error; // 抛出错误，让上层下载链感知失败并中止
       } finally {
         this._activeEngineDownloads.delete(lockKey);
       }
@@ -694,18 +700,43 @@ class EngineDownloader {
     await fsp.mkdir(targetPath, { recursive: true });
     const lower = filePath.toLowerCase();
 
-    if (!(lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar') || lower.endsWith('.zip'))) {
+    const isZip = lower.endsWith('.zip');
+    const isTar = lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar');
+    if (!isZip && !isTar) {
       throw new Error(`不支持的压缩格式: ${path.basename(filePath)}`);
     }
 
     const startTime = Date.now();
     console.log(`Extracting: ${path.basename(filePath)} -> ${targetPath}`);
-    await new Promise((resolve, reject) => {
-      const proc = spawn('tar', ['-xf', filePath, '-C', targetPath], { windowsHide: true });
-      proc.stderr.on('data', d => console.log(`  ${d.toString().trim()}`));
-      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`)));
-      proc.on('error', reject);
-    });
+    if (isZip) {
+      // 优先用 Windows 自带 bsdtar（System32\tar.exe，支持 zip 且快）；
+      // 老系统无 bsdtar 时回退 PowerShell Expand-Archive
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+      const bsdtar = path.join(systemRoot, 'System32', 'tar.exe');
+      if (fs.existsSync(bsdtar)) {
+        await new Promise((resolve, reject) => {
+          const proc = spawn(bsdtar, ['-xf', filePath, '-C', targetPath], { windowsHide: true });
+          proc.stderr.on('data', d => console.log(`  ${d.toString().trim()}`));
+          proc.on('close', code => code === 0 ? resolve() : reject(new Error(`bsdtar 解压退出码 ${code}`)));
+          proc.on('error', reject);
+        });
+      } else {
+        const psScript = `Expand-Archive -LiteralPath '${filePath.replace(/'/g, "''")}' -DestinationPath '${targetPath.replace(/'/g, "''")}' -Force`;
+        await new Promise((resolve, reject) => {
+          const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript], { windowsHide: true });
+          proc.stderr.on('data', d => console.log(`  ${d.toString().trim()}`));
+          proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Expand-Archive 退出码 ${code}`)));
+          proc.on('error', reject);
+        });
+      }
+    } else {
+      await new Promise((resolve, reject) => {
+        const proc = spawn('tar', ['-xf', filePath, '-C', targetPath], { windowsHide: true });
+        proc.stderr.on('data', d => console.log(`  ${d.toString().trim()}`));
+        proc.on('close', code => code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`)));
+        proc.on('error', reject);
+      });
+    }
     console.log(`Extraction complete (${((Date.now() - startTime) / 1000).toFixed(1)}s)`);
   }
 
