@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Layout, Typography, Button, Space, Row, Col, Card, Form,
   Input, InputNumber, Upload, message, Spin, Progress, Empty,
-  Tag, Tooltip, Select, Image, Alert, Collapse
+  Tag, Tooltip, Select, Image, Alert, Collapse, Switch
 } from 'antd';
 import {
   ArrowLeftOutlined, PlayCircleOutlined,
@@ -554,9 +554,24 @@ function ComfyUI() {
           placeholder={key === 'negative_prompt' ? t('comfyuiPage.negativePromptOptional') : t('comfyuiPage.inputPrompt')} />
       </Form.Item>
     );
+    if (type === 'boolean') return (
+      <Form.Item key={key} label={description || key} name={key} valuePropName="checked">
+        <Switch />
+      </Form.Item>
+    );
+    if (type === 'select') return (
+      <Form.Item key={key} label={description || key} name={key}>
+        <Select options={paramDef.options || []} />
+      </Form.Item>
+    );
     if (type === 'number') return (
       <Form.Item key={key} label={description || key} name={key}>
-        <InputNumber style={{ width: '100%' }} />
+        <InputNumber
+          style={{ width: '100%' }}
+          min={paramDef.min}
+          max={paramDef.max}
+          step={paramDef.step}
+        />
       </Form.Item>
     );
     return (
@@ -567,7 +582,7 @@ function ComfyUI() {
   };
 
   // 主要参数（表面展示）
-  const PRIMARY_KEYS = ['prompt', 'negative_prompt', 'width', 'steps'];
+  const PRIMARY_KEYS = ['prompt', 'negative_prompt', 'width', 'aspect_ratio', 'megapixels', 'duration', 'steps', 'turbo_mode', 'turbo_steps'];
   const isPrimary = key => PRIMARY_KEYS.includes(key) || inputs[key]?.type === 'image' || inputs[key]?.type === 'audio';
   const isAdvanced = key => !isPrimary(key) && key !== 'height';
 
@@ -631,7 +646,8 @@ function ComfyUI() {
     'prompt', 'negative_prompt',
     ...imageKeys,
     ...audioKeys,
-    'width', 'height', 'steps', 'cfg_scale', 'seed', 'sampler', 'scheduler', 'batch_size', 'length'
+    'width', 'height', 'aspect_ratio', 'megapixels', 'multiple', 'duration', 'steps', 'cfg_scale', 'seed', 'sampler', 'scheduler', 'batch_size', 'length',
+    'turbo_mode', 'turbo_model_strength', 'turbo_steps'
   ];
   const allKeys = [
     ...paramOrder.filter(k => inputs[k]),

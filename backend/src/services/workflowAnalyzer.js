@@ -448,6 +448,129 @@ class WorkflowAnalyzer {
       }
     }
 
+    // ── MiniMax H3 / 视频生成节点（MiniMaxH3ImageToVideo / MiniMaxH3TextToVideo 等）──
+    // 分辨率由 ResolutionSelector（宽高比 + 百万像素）驱动，prompt / length 为直接输入，
+    // 同时附带 Turbo（Lightning LoRA）相关参数：turbo_mode / turbo_model_strength / turbo_steps
+    const videoGenNode = nodes.find(n => /ToVideo$/.test(n.class_type));
+
+    // ResolutionSelector 节点的宽高比选项（comfy-core 内置 8 档）
+    const ASPECT_RATIO_OPTIONS = [
+      { value: '1:1 (Square)', label: '1:1 (方形)' },
+      { value: '2:3 (Portrait Photo)', label: '2:3 (竖版)' },
+      { value: '3:2 (Photo)', label: '3:2 (横版)' },
+      { value: '3:4 (Portrait Standard)', label: '3:4 (竖版)' },
+      { value: '4:3 (Standard)', label: '4:3 (标准)' },
+      { value: '9:16 (Portrait Widescreen)', label: '9:16 (竖版宽屏)' },
+      { value: '16:9 (Widescreen)', label: '16:9 (宽屏)' },
+      { value: '21:9 (Ultrawide)', label: '21:9 (超宽屏)' }
+    ];
+
+    // 分辨率选择器：宽高比 + 百万像素（ComfyUI 据此计算 width/height 输出）
+    const resolutionSelector = nodes.find(n => n.class_type === 'ResolutionSelector');
+    if (resolutionSelector) {
+      mapping.inputs.aspect_ratio = {
+        node_id: resolutionSelector.id, field: 'aspect_ratio', type: 'select', description: '画面比例',
+        default_value: scalarVal(resolutionSelector.inputs.aspect_ratio), options: ASPECT_RATIO_OPTIONS
+      };
+      mapping.inputs.megapixels = {
+        node_id: resolutionSelector.id, field: 'megapixels', type: 'number', description: '分辨率（百万像素）',
+        default_value: scalarVal(resolutionSelector.inputs.megapixels), min: 0.1, max: 16, step: 0.1
+      };
+      if (resolutionSelector.inputs.multiple !== undefined) {
+        mapping.inputs.multiple = {
+          node_id: resolutionSelector.id, field: 'multiple', type: 'number', description: '像素对齐倍数',
+          default_value: scalarVal(resolutionSelector.inputs.multiple)
+        };
+      }
+    }
+
+    // 解析宽/高引用（标量 / PrimitiveInt / PrimitiveFloat）—— 无 ResolutionSelector 时的兜底
+    const resolveDimension = (v) => {
+      if (v === undefined) return undefined;
+      if (!Array.isArray(v)) return v;
+      const refNode = workflowJson[v[0]];
+      if (!refNode) return undefined;
+      if (refNode.class_type === 'PrimitiveInt' || refNode.class_type === 'PrimitiveFloat') return refNode.inputs.value;
+      return undefined;
+    };
+
+    // 从 length 引用追踪到 duration（跨越 ComfyMathExpression → PrimitiveFloat）
+    const resolveDuration = (v) => {
+      if (v === undefined) return { value: undefined, node_id: null, field: null };
+      if (!Array.isArray(v)) return { value: v, node_id: null, field: null };
+      const refNode = workflowJson[v[0]];
+      if (!refNode) return { value: undefined, node_id: null, field: null };
+      if (refNode.class_type === 'ComfyMathExpression') {
+        const aRef = refNode.inputs['values.a'];
+        if (Array.isArray(aRef)) {
+          const prim = workflowJson[aRef[0]];
+          if (prim && (prim.class_type === 'PrimitiveFloat' || prim.class_type === 'PrimitiveInt')) {
+            return { value: prim.inputs.value, node_id: aRef[0], field: 'value' };
+          }
+        }
+        return { value: undefined, node_id: null, field: null };
+      }
+      if (refNode.class_type === 'PrimitiveFloat' || refNode.class_type === 'PrimitiveInt') {
+        return { value: refNode.inputs.value, node_id: v[0], field: 'value' };
+      }
+      return { value: undefined, node_id: null, field: null };
+    };
+
+    if (videoGenNode) {
+      // 提示词
+      if (typeof videoGenNode.inputs.prompt === 'string' && !mapping.inputs.prompt) {
+        mapping.inputs.prompt = { node_id: videoGenNode.id, field: 'prompt', type: 'string', description: '正面提示词',
+          default_value: videoGenNode.inputs.prompt };
+      }
+
+      // 宽高：仅在无 ResolutionSelector 时直接映射（否则由分辨率选择器驱动）
+      if (!resolutionSelector) {
+        const w = resolveDimension(videoGenNode.inputs.width);
+        const h = resolveDimension(videoGenNode.inputs.height);
+        if (w !== undefined) {
+          mapping.inputs.width = { node_id: videoGenNode.id, field: 'width', type: 'number', description: '视频宽度', default_value: w };
+        }
+        if (h !== undefined) {
+          mapping.inputs.height = { node_id: videoGenNode.id, field: 'height', type: 'number', description: '视频高度', default_value: h };
+        }
+      }
+
+      // 时长：优先映射到 PrimitiveFloat（duration，秒），让 ComfyUI 的 MathExpression 重新计算帧数
+      const dur = resolveDuration(videoGenNode.inputs.length);
+      if (dur.node_id) {
+        mapping.inputs.duration = { node_id: dur.node_id, field: dur.field, type: 'number', description: '视频时长（秒）',
+          default_value: dur.value };
+      } else if (dur.value !== undefined) {
+        mapping.inputs.length = { node_id: videoGenNode.id, field: 'length', type: 'number', description: '视频帧数', default_value: dur.value };
+      }
+
+      // turbo_mode：控制 Switch 切换的 PrimitiveBoolean
+      const booleanNode = nodes.find(n => n.class_type === 'PrimitiveBoolean');
+      if (booleanNode) {
+        mapping.inputs.turbo_mode = { node_id: booleanNode.id, field: 'value', type: 'boolean',
+          description: 'Turbo 模式（启用 Lightning LoRA）', default_value: scalarVal(booleanNode.inputs.value) ?? false };
+      }
+
+      // turbo_model_strength：LoraLoaderModelOnly 的模型强度
+      const loraModelOnly = nodes.find(n => n.class_type === 'LoraLoaderModelOnly');
+      if (loraModelOnly) {
+        mapping.inputs.turbo_model_strength = { node_id: loraModelOnly.id, field: 'strength_model', type: 'number',
+          description: 'Turbo 模型强度', default_value: scalarVal(loraModelOnly.inputs.strength_model) ?? 1 };
+      }
+
+      // turbo_steps：步骤 Switch 的 on_true 分支 PrimitiveInt
+      for (const sw of nodes.filter(n => n.class_type === 'ComfySwitchNode')) {
+        const onTrue = sw.inputs.on_true;
+        if (!Array.isArray(onTrue)) continue;
+        const stepsNode = nodes.find(n => n.id === onTrue[0] && n.class_type === 'PrimitiveInt');
+        if (stepsNode) {
+          mapping.inputs.turbo_steps = { node_id: stepsNode.id, field: 'value', type: 'number', description: 'Turbo 步数',
+            default_value: scalarVal(stepsNode.inputs.value) };
+          break;
+        }
+      }
+    }
+
     // 输出节点
     if (saveNode) {
       mapping.outputs.save_node_id = saveNode.id;
